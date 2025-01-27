@@ -1,2 +1,3 @@
 # enhancements
-Enhancements to our network cloud
+
+Enhancements to the Datum network cloud
