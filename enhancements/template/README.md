@@ -13,7 +13,7 @@ Recommended reading:
 -->
 
 <!--
-**Note:** When your RFC is complete, all of these comment blocks should be removed.
+**Note:** When your Enhancement is complete, all of these comment blocks should be removed.
 
 To get started with this template:
 
@@ -21,17 +21,17 @@ To get started with this template:
   Copy this template into the desired path and name it `short-descriptive-title`.
 - [ ] **Fill out this file as best you can.**
   At minimum, you should fill in the "Summary" and "Motivation" sections.
-  These should be easy if you've preflighted the idea of the RFC with the
+  These should be easy if you've preflighted the idea of the Enhancement with the
   appropriate stakeholders.
-- [ ] **Create a PR for this RFC.**
+- [ ] **Create a PR for this Enhancement.**
   Assign it to stakeholders who are sponsoring this process.
 - [ ] **Merge early and iterate.**
   Avoid getting hung up on specific details and instead aim to get the goals of
-  the RFC clarified and merged quickly. The best way to do this is to just
+  the Enhancement clarified and merged quickly. The best way to do this is to just
   start with the high-level sections and fill out details incrementally in
   subsequent PRs.
 
-Just because a RFC is merged does not mean it is complete or approved. Any RFC
+Just because a Enhancement is merged does not mean it is complete or approved. Any Enhancement
 marked as `provisional` is a working document and subject to change. You can
 denote sections that are under active debate as follows:
 
@@ -45,16 +45,16 @@ When editing RFCs, aim for tightly-scoped, single-topic PRs to keep discussions
 focused. If you disagree with what is already in a document, open a new PR
 with suggested changes.
 
-One RFC corresponds to one "feature" or "enhancement" for its whole lifecycle.
-You do not need a new RFC to move from beta to GA, for example. If
-new details emerge that belong in the RFC, edit the RFC. Once a feature has
+One Enhancement corresponds to one "feature" or "enhancement" for its whole lifecycle.
+You do not need a new Enhancement to move from beta to GA, for example. If
+new details emerge that belong in the Enhancement, edit the Enhancement. Once a feature has
 become "implemented", major changes should get new RFCs.
 
 The canonical place for the latest set of instructions (and the likely source
 of this file) is [here](/docs/rfcs/template/README.md).
 
-**Note:** Any PRs to move a RFC to `implementable`, or significant changes once
-it is marked `implementable`, must be approved by each of the RFC approvers.
+**Note:** Any PRs to move a Enhancement to `implementable`, or significant changes once
+it is marked `implementable`, must be approved by each of the Enhancement approvers.
 If none of those approvers are still appropriate, then changes to that list
 should be approved by the remaining approvers and/or the owning SIG (or
 SIG Architecture for cross-cutting RFCs).
@@ -63,14 +63,14 @@ SIG Architecture for cross-cutting RFCs).
 # Short, descriptive title
 
 <!--
-This is the title of your RFC. Keep it short, simple, and descriptive. A good
-title can help communicate what the RFC is and should be considered as part of
+This is the title of your Enhancement. Keep it short, simple, and descriptive. A good
+title can help communicate what the Enhancement is and should be considered as part of
 any review.
 -->
 
 <!--
-A table of contents is helpful for quickly jumping to sections of a RFC and for
-highlighting any additional information provided beyond the standard RFC
+A table of contents is helpful for quickly jumping to sections of a Enhancement and for
+highlighting any additional information provided beyond the standard Enhancement
 template.
 -->
 
@@ -102,7 +102,7 @@ This section is incredibly important for producing high-quality, user-focused
 documentation such as release notes or a development roadmap. It should be
 possible to collect this information before implementation begins, in order to
 avoid requiring implementors to split their attention between writing release
-notes and implementing the feature itself. RFC editors should help to ensure
+notes and implementing the feature itself. Enhancement editors should help to ensure
 that the tone and content of the `Summary` section is useful for a wide audience.
 
 A good summary is probably at least a paragraph in length.
@@ -119,20 +119,20 @@ updates.
 
 <!--
 This section is for explicitly listing the motivation, goals, and non-goals of
-this RFC.  Describe why the change is important and the benefits to users.
+this Enhancement.  Describe why the change is important and the benefits to users.
 -->
 
 ### Goals
 
 <!--
-List the specific goals of the RFC. What is it trying to achieve? How will we
+List the specific goals of the Enhancement. What is it trying to achieve? How will we
 know that this has succeeded?
 -->
 
 ### Non-Goals
 
 <!--
-What is out of scope for this RFC? Listing non-goals helps to focus discussion
+What is out of scope for this Enhancement? Listing non-goals helps to focus discussion
 and make progress.
 -->
 
@@ -150,7 +150,7 @@ nitty-gritty.
 ### User Stories (Optional)
 
 <!--
-Detail the things that people will be able to do if this RFC is implemented.
+Detail the things that people will be able to do if this Enhancement is implemented.
 Include as much detail as possible so that people can understand the "how" of
 the system. The goal here is to make this feel real for users without getting
 bogged down.
@@ -201,10 +201,10 @@ scalable and supportable; can be safely operated in production environments, and
 can be disabled or rolled back in the event they cause increased failures in
 production.
 
-See more in the PRR RFC at https://git.k8s.io/enhancements/keps/sig-architecture/1194-prod-readiness.
+See more in the PRR Enhancement at https://git.k8s.io/enhancements/keps/sig-architecture/1194-prod-readiness.
 
 The production readiness review questionnaire must be completed and approved
-for the RFC to move to `implementable` status and be included in the release.
+for the Enhancement to move to `implementable` status and be included in the release.
 -->
 
 ### Feature Enablement and Rollback
@@ -225,8 +225,7 @@ Pick one of these and delete the rest.
 - [ ] Other
   - Describe the mechanism:
   - Will enabling / disabling the feature require downtime of the control plane?
-  - Will enabling / disabling the feature require downtime or reprovisioning of
-    a node?
+  - Will enabling / disabling the feature require downtime or reprovisioning of a node?
 
 #### Does enabling the feature change any default behavior?
 
@@ -505,20 +504,20 @@ For each of them, fill in the following information by copying the below templat
 ## Implementation History
 
 <!--
-Major milestones in the lifecycle of a RFC should be tracked in this section.
+Major milestones in the lifecycle of a Enhancement should be tracked in this section.
 Major milestones might include:
 - the `Summary` and `Motivation` sections being merged, signaling acceptance
 - the `Proposal` section being merged, signaling agreement on a proposed design
 - the date implementation started
-- the first release where an initial version of the RFC was available
-- the version where the RFC graduated to general availability
-- when the RFC was retired or superseded
+- the first release where an initial version of the Enhancement was available
+- the version where the Enhancement graduated to general availability
+- when the Enhancement was retired or superseded
 -->
 
 ## Drawbacks
 
 <!--
-Why should this RFC _not_ be implemented?
+Why should this Enhancement _not_ be implemented?
 -->
 
 ## Alternatives
