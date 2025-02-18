@@ -30,7 +30,9 @@ slack](https://slack.datum.net/)!
 3. **Discuss & Refine**
    - Collaborate with maintainers and community members to refine details of the
      enhancement
-   - Formalize an enhancement document in the relevant section of the repo.
+   - Formalize an [enhancement document](./enhancements/template) in the
+     relevant section of the repo. The location of the document can be decided
+     in the issue tracking the enhancement.
 
 ## Tracking Progress
 
