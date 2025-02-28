@@ -1,0 +1,35 @@
+name: Research & Design
+description: Track research efforts for an enhancement.
+labels:
+- research
+- discovery
+type: Research
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Research & Design
+        This issue is for tracking research and discovery efforts related to
+        enhancements that are being proposed to Datum Cloud.
+
+  - type: textarea
+    attributes:
+      label: "Research Goals"
+      description: "What are we trying to learn or validate?"
+      placeholder: "(e.g. Investigate best practices for zero-trust authentication)"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Deliverables"
+      description: "What outputs are expected from this research?"
+      placeholder: "- Summary report\n- Technical evaluation\n- List of recommended changes"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Additional Context"
+      description: "Add any links, references, or context you think is relevant to this research."
+      placeholder: "Provide URLs, doc references, or any other useful details."
+    validations:
+      required: false
