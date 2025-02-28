@@ -2,7 +2,7 @@ name: Enhancement Tracking Issue
 description: Provide supporting details for an enhancement to the Datum Cloud Platform.
 labels:
 - enhancement
-type: Feature
+type: Enhancement
 body:
   - type: textarea
     attributes:
