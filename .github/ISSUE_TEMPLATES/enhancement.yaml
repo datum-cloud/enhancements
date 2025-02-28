@@ -1,0 +1,27 @@
+name: Enhancement Tracking Issue
+description: Provide supporting details for an enhancement to the Datum Cloud Platform.
+labels:
+- enhancement
+type: Feature
+body:
+  - type: textarea
+    attributes:
+      label: "Overview"
+      description: "Briefly describe the problem or opportunity. Why is this important?"
+      placeholder: "Include a short explanation of the gap or need."
+    validation:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Expected Impact"
+      description: "Who benefits from this enhancement and in what ways?"
+      placeholder: "Describe which users or use cases will benefit."
+    validation:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Additional Context"
+      description: "Add any links, references, or context you think is relevant."
+      placeholder: "Provide URLs, doc references, or any other useful details."
+    validation:
+      required: false
