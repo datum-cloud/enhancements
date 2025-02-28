@@ -9,8 +9,7 @@ body:
     attributes:
       value: |
         ### Research & Design
-        This issue is for tracking research and discovery efforts related to
-        enhancements that are being proposed to Datum Cloud.
+        This issue is for tracking research and discovery efforts related to enhancements that are being proposed to Datum Cloud.
 
   - type: textarea
     attributes:
