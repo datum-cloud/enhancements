@@ -61,7 +61,7 @@ SIG Architecture for cross-cutting RFCs).
 -->
 
 <!-- omit from toc -->
-# Authentication Platform
+# IAM Authentication
 
 <!--
 This is the title of your Enhancement. Keep it short, simple, and descriptive. A good
@@ -116,12 +116,13 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
-This enhancement proposes the adoption of a new authentication provider to
-replace the current in-house authentication system. The new provider will
-support multiple identity providers (IdPs), machine user authentication through
-service accounts and workload identity federation, and user provisioning via
-SCIM. The goal is to improve security, flexibility, and scalability while
-reducing maintenance overhead.
+This enhancement proposes the design of the authentication functionality built
+into the Datum Cloud IAM system that will replace the current in-house
+authentication provider. The new authentication provider will support multiple
+identity providers (IdPs), machine user authentication through service accounts
+and workload identity federation, and user provisioning via SCIM. The goal is to
+improve security, flexibility, and scalability while reducing maintenance
+overhead.
 
 ## Motivation
 
@@ -182,8 +183,8 @@ The "Design Details" section below is for the real
 nitty-gritty.
 -->
 
-The Datum Cloud Authentication platform will support authenticating users and
-machines through the following methods:
+The Datum Cloud IAM system will support authenticating users and machines
+through the following methods:
 
 - **Identity Providers for Users**: Integrate commonly used identity providers
   (e.g., OpenID Connect, SAML, etc.) for single sign-on experiences.
@@ -194,12 +195,12 @@ machines through the following methods:
   authenticate without storing long-lived secrets, leveraging short-lived
   tokens.
 
-The Authentication system will be integrated with the Datum Cloud authentication
-platform to manage fine-grained access to all resources across Datum Cloud.
+The authentication feature will be integrated with the rest of the Datum Cloud
+IAM system to manage fine-grained access to all resources across Datum Cloud.
 
 ### System Architecture
 
-The Datum Cloud Authentication platform will be responsible for verifying the
+The Datum Cloud authentication feature will be responsible for verifying the
 identity of all users and machines that attempts to access the platform. The IAM
 system's policy engine will use the validated identity to determine whether the
 authenticated client has access to the resource they're trying to access.
@@ -225,7 +226,7 @@ flowchart LR
   User-->|Interacts with|Service
 ```
 
-The Datum Cloud authentication platform will support any identity providers that
+The Datum Cloud authentication feature will support any identity providers that
 support the following protocols for managing user authentication.
 
 - **[OpenID Connect (OIDC)][OIDC]**: A modern authentication protocol built on
@@ -239,7 +240,7 @@ support the following protocols for managing user authentication.
   providers.
 
 Identity Administrators for a Datum Cloud Organization will be able to configure
-Datum Cloud's authentication platform to use their identity provider to manage
+Datum Cloud's authentication feature to use their identity provider to manage
 authentication to their organization.
 
 [OIDC]: https://auth0.com/docs/authenticate/protocols/openid-connect-protocol
@@ -249,7 +250,7 @@ authentication to their organization.
 
 ### Authentication Flows
 
-The Datum Cloud authentication platform is expected to support the following
+The Datum Cloud authentication feature is expected to support the following
 authentication flows to identify users and machines. Users and organizations are
 expected to register with the system with their first login.
 
@@ -368,7 +369,7 @@ Consider including folks who also work outside of your immediate team.
 #### Existing User Migration
 
 Existing user identities in the existing implementation of the Datum Cloud
-Authentication platform will need to be migrated to the new provider.
+authentication system will need to be migrated to the new provider.
 
 #### Update Existing Services
 
@@ -396,7 +397,7 @@ proposal will be implemented, this is the place to discuss them.
 All services running on the Datum Cloud platform are expected to use OIDC to
 discover the trusted JWKS that are use to validate that JWT authentication
 tokens provided by clients are considered valid. All services should be updated
-to trust JWT tokens signed by the new authentication platform.
+to trust JWT tokens signed by the new authentication system.
 
 ### Service Authentication
 
