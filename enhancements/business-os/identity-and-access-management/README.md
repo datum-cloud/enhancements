@@ -66,3 +66,18 @@ enhancement](../service-provider-platform/) for more information.
 > Zanzibar type policy engines in the future.
 
 [OpenFGA]: https://openfga.dev
+
+## Components
+
+### IAM APIServer
+
+The IAM APIServer provides users with API endpoints that manage IAM
+functionality on the Datum platform that aligns with our platform. Below is a
+non-exhaustive list of capabilities that will be added to the IAM API Server
+over time.
+
+- User management in an organization
+- Service account management in a project
+- IAM policy management for all resources
+- IAM role / permission management for services
+- IAM access check functionality
