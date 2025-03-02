@@ -1,4 +1,18 @@
+<!-- omit from toc -->
 # Identity and Access Management
+
+- [Overview](#overview)
+- [System Architecture](#system-architecture)
+  - [Authentication](#authentication)
+  - [Authorization](#authorization)
+- [Components](#components)
+  - [IAM APIServer](#iam-apiserver)
+- [Concepts](#concepts)
+  - [Services](#services)
+  - [Roles](#roles)
+  - [Policies](#policies)
+
+## Overview
 
 The Identity and Access Management (IAM) system is responsible for managing
 authentication, authorization, and identity governance across all resources
@@ -10,29 +24,9 @@ This document is intended to serve as a parent overview, with links to detailed
 documentation for individual components and enhancements made to the IAM system
 over time.
 
-## Architecture
+## System Architecture
 
-The following components make up the architecture of the IAM system.
-
-```mermaid
-flowchart LR
-  IDP["Identity Provider"]
-
-  Service
-
-  subgraph IAM Platform
-    AuthProvider[Authentication Provider]
-    APIServer[IAM APIServer]
-    PolicyEngine[IAM Policy Engine]
-  end
-
-  AuthProvider --> |Authenticates users in|IDP
-  Client --> |Authenticates with|APIServer
-  Service --> |Checks access with|APIServer
-  Client-->|Accesses resources in|Service
-  APIServer-->|Checks access in|PolicyEngine
-  APIServer-->|Authenticates users in|AuthProvider
-```
+![](./iam.png)
 
 ### Authentication
 
@@ -64,8 +58,11 @@ enhancement](../service-provider-platform/) for more information.
 > current policy engine built into the Datum Cloud IAM system. The IAM system is
 > currently using [OpenFGA], but it can easily be updated to support additional
 > Zanzibar type policy engines in the future.
+>
+> For now, refer to the [IAM documentation in Datum OS](iam-datum-os).
 
 [OpenFGA]: https://openfga.dev
+[iam-datum-os]: https://github.com/datum-cloud/datum-os/blob/main/docs/apiserver/iam/README.md
 
 ## Components
 
@@ -81,3 +78,120 @@ over time.
 - IAM policy management for all resources
 - IAM role / permission management for services
 - IAM access check functionality
+
+## Concepts
+
+The IAM system introduces the following concepts to support managing access to
+resources.
+
+- **Role**: Provides a set of permissions that can be bound to subjects through
+  an IAM Policy. Service producers can create roles that consumers can leverage
+  to assign their users appropriate access to resources. Consumers will
+  eventually be able to create their own custom roles.
+- **Policy**: Supports binding subjects to a role on a specific resource.
+  Permissions bound to the resource by the role are inherited by all child
+  resources.
+- **Service**: A service that leverage the IAM System to manage access to its
+  resources. Services are required to register their resources and the
+  permissions that are expected to be supported on each resource.
+- **Service Resource**: A resource provided by a service that can be managed by
+  a service consumer. Resources can have one or more permissions supported in
+  the IAM system to manage access to the resource.
+
+### Services
+
+Services are registered with the IAM service to configure how the service will
+use the IAM system to check access to resources. The service is expected to
+register resources with the permissions that it anticipates doing access checks
+against on the resource or parent resource in the hierarchy.
+
+Here's an example of an IAM service that registers organization and project
+resources for the resource manager service:
+
+```yaml
+serviceId: resourcemanager.datumapis.com
+name: services/resourcemanager.datumapis.com
+displayName: Datum Resource Manager
+spec:
+  resources:
+    - type: resourcemanager.datumapis.com/Organization
+      plural: organizations
+      singular: organization
+      permissions:
+        - list
+        - get
+        - create
+        - update
+        - delete
+      resourceNamePatterns:
+        - "organizations/{organization}"
+    - type: resourcemanager.datumapis.com/Project
+      plural: projects
+      singular: project
+      permissions:
+        - list
+        - get
+        - create
+        - update
+        - delete
+        - patch
+        - watch
+      resourceNamePatterns:
+        - "projects/{project}"
+      parentResources:
+        - resourcemanager.datumapis.com/Organization
+```
+
+### Roles
+
+A role can be used to group permissions that will be applied to a subject in the
+IAM system through [IAM policies](#policies). The permission reference should
+use the fully qualified reference to the permission which is in the format
+`{service}/{resource}.{permission}`.
+
+Here's an example of a role that would grant a user admin access to manage a
+project.
+
+```yaml
+name: services/resourcemanager.datumapis.com/roles/projectAdmin
+roleId: projectAdmin
+parent: services/resourcemanager.datumapis.com
+uid: ed338c32-adf8-4702-b856-1410ec47158a
+displayName: Project Admin
+createTime: "2024-12-13T23:42:32.814265447Z"
+spec:
+  includedPermissions:
+    - resourcemanager.datumapis.com/projects.list
+    - resourcemanager.datumapis.com/projects.get
+    - resourcemanager.datumapis.com/projects.create
+    - resourcemanager.datumapis.com/projects.update
+    - resourcemanager.datumapis.com/projects.patch
+    - resourcemanager.datumapis.com/projects.watch
+    - resourcemanager.datumapis.com/projects.delete
+```
+
+### Policies
+
+An IAM Policy can be created for a resource to bind one or more roles to a list
+of subjects. The name of the IAM policy must match the fully qualified resource
+URL of the resource the IAM policy applies to.
+
+```yaml
+name: resourcemanager.datumapis.com/projects/{project-name}
+spec:
+  bindings:
+    - role: services/iam.datumapis.com/roles/serviceAccountAdmin
+      members:
+        - serviceAccount:iam-operator@datum-cloud.iam.datumapis.com
+```
+
+The IAM system supports using the following subject formats to assign roles:
+
+- `user:<user-email>` grants a role to a specific user
+- `serviceAccount:<service-account-email>` grants a role to a specific service
+  account
+
+In the future we will also support the following formats to support additional
+use-cases.
+
+- `group:<group-email>` grants a group in the IAM system access to a role
