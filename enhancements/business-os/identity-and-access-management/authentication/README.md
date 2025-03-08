@@ -399,6 +399,134 @@ discover the trusted JWKS that are use to validate that JWT authentication
 tokens provided by clients are considered valid. All services should be updated
 to trust JWT tokens signed by the new authentication system.
 
+### Login Flow For A Registrated User
+
+This sequence flow illustrates the authentication process using the built-in Zitadel UI when a user logs in via an external identity provider (e.g. GitHub, Google). 
+
+> [!NOTE]
+>
+> This login flow assumes that the user account has already been created for the external identity provider in use.
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Client as Client
+  box rgba(93, 93, 93, 0.07) [IAM System]
+  participant IAM as IAM API Server
+  participant IdP as Identity Provider
+  end
+  participant EIdP as External Identity Provider
+
+  User->>Client: Login Request
+  Client->>IAM: Authenticate
+  IAM-->>IdP: Redirects client to
+  User->>IdP: Select External Identity Provider
+  IdP-->>EIdP: Redirects client to
+  User->>EIdP: Authenticates with
+  EIdP-->>IdP: Redirects client to
+  opt 2FA is Eneabled
+  User-->>IdP: Perform 2FA
+  end
+  IdP-->>IAM: Redirects Client To
+  IAM-->>Client: Auth Token
+```
+Diagram explanation:
+
+- The user requests authentication and is redirected to the identity provider.
+
+- The user authenticates with the chosen external identity provider.
+
+- If configured, they complete 2FA and receive the authentication token.
+
+### Login Flow For A Non Registrated User
+
+This sequence flow illustrates the authentication process using the built-in Zitadel UI when a user logs in via an external identity provider (e.g. GitHub, Google) and the user account was not previously registered.
+
+> [!NOTE]
+>
+> This login flow assumes that the user account has not been created yet for the external identity provider in use.
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Client as Client
+  box rgba(93, 93, 93, 0.07) [IAM System]
+  participant IAM as IAM API Server
+  participant IdP as Identity Provider
+  end
+  participant EIdP as External Identity Provider
+
+  User->>Client: Login Request
+  Client->>IAM: Authenticate
+  IAM-->>IdP: Redirects client to
+  User->>IdP: Select External Identity Provider
+  IdP-->>EIdP: Redirects client to
+  User->>EIdP: Authenticates with
+  EIdP-->>IdP: Redirects client to
+  Note over IdP: User Not Found Warning
+  User->>IdP: Enter registration information
+  opt If the registration email differs from the authentication email
+  User->>IdP: Verify Email with OTP
+  end
+  opt 2FA
+  User->>IdP: Setup 2FA
+  end
+  IdP-->>IAM: Redirects Client To
+  IAM-->>Client: Auth Token
+```
+Diagram explanation:
+
+- The user requests authentication and is redirected to the identity provider.
+
+- The user authenticates with the chosen external identity provider.
+
+- The user receives a `User Not Found` warning and continues with the registration flow.
+
+- Optionally, they set up 2FA and then receive the authentication token.
+
+### Registration Flow
+
+This sequence flow illustrates the registration process using the built-in Zitadel UI when a user logs in via an external identity provider (e.g. GitHub, Google).
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Client as Client
+  box rgba(93, 93, 93, 0.07) [IAM System]
+  participant IAM as IAM API Server
+  participant IdP as Identity Provider
+  end
+  participant EIdP as External Identity Provider
+
+  User->>Client: Registration Request
+  Client->>IAM: Registrate
+  IAM-->>IdP: Redirects client to
+  User->>IdP: Select External Identity Provider
+  IdP-->>EIdP: Redirects client to
+  User->>EIdP: Authenticates with
+  EIdP-->>IdP: Redirects client to
+  User->>IdP: Enter registration information
+  opt If the registration email differs from the authentication email
+  User->>IdP: Verify Email with OTP
+  end
+  opt 2FA
+  User->>IdP: Setup 2FA
+  end
+  IdP-->>IAM: Redirects Client To
+  IAM-->>Client: Auth Token
+```
+
+Diagram explanation:
+
+- The user requests registration and is redirected to the identity provider.
+
+- The user authenticates with the chosen external identity provider.
+
+- The user continues with the account registration.
+
+- Optionally, they set up 2FA and then receive the authentication token.
+
+
 ### Service Authentication
 
 All services are expected to use the IAM system to authenticate and authorize
