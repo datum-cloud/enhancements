@@ -401,7 +401,7 @@ to trust JWT tokens signed by the new authentication system.
 
 ### Login Flow For A Registrated User
 
-This sequence flow illustrates the authentication process using the built-in Zitadel UI when a user logs in via an external identity provider (e.g. GitHub, Google). 
+This sequence flow illustrates the authentication process when a user logs in via an external identity provider (e.g. GitHub, Google). 
 
 > [!NOTE]
 >
@@ -413,7 +413,7 @@ sequenceDiagram
   participant Client as Client
   box rgba(93, 93, 93, 0.07) [IAM System]
   participant IAM as IAM API Server
-  participant IdP as Identity Provider
+  participant IdP as Authentication Provider
   end
   participant EIdP as External Identity Provider
 
@@ -424,8 +424,8 @@ sequenceDiagram
   IdP-->>EIdP: Redirects client to
   User->>EIdP: Authenticates with
   EIdP-->>IdP: Redirects client to
-  opt 2FA is Eneabled
-  User-->>IdP: Perform 2FA
+  opt If additional authentication steps required
+  User-->>IdP: Complete authentication
   end
   IdP-->>IAM: Redirects Client To
   IAM-->>Client: Auth Token
@@ -440,7 +440,7 @@ Diagram explanation:
 
 ### Login Flow For A Non Registrated User
 
-This sequence flow illustrates the authentication process using the built-in Zitadel UI when a user logs in via an external identity provider (e.g. GitHub, Google) and the user account was not previously registered.
+This sequence flow illustrates the authentication process when a user logs in via an external identity provider (e.g. GitHub, Google) and the user account was not previously registered.
 
 > [!NOTE]
 >
@@ -452,7 +452,7 @@ sequenceDiagram
   participant Client as Client
   box rgba(93, 93, 93, 0.07) [IAM System]
   participant IAM as IAM API Server
-  participant IdP as Identity Provider
+  participant IdP as Authentication Provider
   end
   participant EIdP as External Identity Provider
 
@@ -468,8 +468,8 @@ sequenceDiagram
   opt If the registration email differs from the authentication email
   User->>IdP: Verify Email with OTP
   end
-  opt 2FA
-  User->>IdP: Setup 2FA
+  opt Additional authentification
+  User->>IdP: Setup additional authentication
   end
   IdP-->>IAM: Redirects Client To
   IAM-->>Client: Auth Token
@@ -486,7 +486,7 @@ Diagram explanation:
 
 ### Registration Flow
 
-This sequence flow illustrates the registration process using the built-in Zitadel UI when a user logs in via an external identity provider (e.g. GitHub, Google).
+This sequence flow illustrates the registration process when a user logs in via an external identity provider (e.g. GitHub, Google).
 
 ```mermaid
 sequenceDiagram
@@ -494,7 +494,7 @@ sequenceDiagram
   participant Client as Client
   box rgba(93, 93, 93, 0.07) [IAM System]
   participant IAM as IAM API Server
-  participant IdP as Identity Provider
+  participant IdP as Authentication Provider
   end
   participant EIdP as External Identity Provider
 
@@ -509,8 +509,8 @@ sequenceDiagram
   opt If the registration email differs from the authentication email
   User->>IdP: Verify Email with OTP
   end
-  opt 2FA
-  User->>IdP: Setup 2FA
+  opt Additional authentication
+  User->>IdP: Setup additional authentication
   end
   IdP-->>IAM: Redirects Client To
   IAM-->>Client: Auth Token
@@ -525,6 +525,42 @@ Diagram explanation:
 - The user continues with the account registration.
 
 - Optionally, they set up 2FA and then receive the authentication token.
+
+### User Management Flow
+
+This sequence flow illustrates the user management process. User management includes changes to the user information, password, additional authentication steps (MFA, passwordless), external identity providers, authorization, roles, and custom metadata (e.g., etc.).
+
+> [!NOTE]
+>
+> Fore ease and simplicity, this diagram asumes taht the user and IAM API Server are already authenticated against the Authentication Provider.
+
+> [!WARNING]
+>
+> Some user account changes, such as email address updates, will require more interaction with the user and the IAM System, as email validation and further actions might be needed to complete the process.
+
+```mermaid
+sequenceDiagram
+  participant User as Authenticated User
+  participant Client
+  box rgba(93, 93, 93, 0.07) [IAM System]
+  participant IAM as IAM API Server
+  participant IdP as Authentication Provider
+  end
+
+  User->>Client: Request account changes
+  Client-->>IAM: Call API endpoint w/ user auth token
+  IAM-->>IdP: Call API endpoint w/ machine auth token
+  IdP-->>IAM: Return response
+  IAM-->>Client: Return response
+```
+
+Diagram explanation:
+
+- The user requests changes to their account from the IAM System.
+
+- The IAM System receives the request and makes the changes to the authentication provider through the IAM API Server.
+
+- The IAM System returns the response to the client.
 
 
 ### Service Authentication
