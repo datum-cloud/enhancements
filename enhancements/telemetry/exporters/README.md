@@ -80,7 +80,10 @@ template.
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
+  - [Telemetry Data](#telemetry-data)
 - [Design Details](#design-details)
+  - [MVP Exporter Configuration](#mvp-exporter-configuration)
+  - [Target Exporter Configuration](#target-exporter-configuration)
 - [Implementation History](#implementation-history)
 
 ## Summary
@@ -186,6 +189,23 @@ to the user's third-party telemetry service.
 Users will be able to filter the telemetry data that's exported to third-parties
 so they don't have to pay for telemetry data they don't care about.
 
+### Telemetry Data
+
+- **Metrics** - Resources will publish metrics that can be used by consumers to
+  understand the health and performance of the resource. E.g. Our L7 Gateway
+  will publish HTTP traffic stats to provide visibility about traffic being
+  processed at all of our edge locations.
+- **Logs** - Resources will publish log and event data to provide users with
+  visibility on behavior and actions taken against the resource. E.g. Audit logs
+  will be produced for all resources to capture what change was made, who
+  changed it, and when it was changed.
+- **Traces** - In the future, users will be able to enable tracing functionality
+  to be able to visualize traffic flows through our network.
+
+The [Design Details](#design-details) section goes into more detail on how the
+user may be expected to configure an exporter to publish various types of
+telemetry and filter it to their needs.
+
 <!-- ### User Stories (Optional) -->
 
 <!--
@@ -230,6 +250,152 @@ change are understandable. This may include API specs (though not always
 required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
+
+Users will be able to manage one or more **Exporter** resources in Datum Cloud
+Project to configure how they would like telemetry from resources they create to
+be exported to a third-party telemetry platform.
+
+Users can configure multiple telemetry sources so they can include metrics,
+logs, and traces from multiple resources to export. Telemetry sources will
+support filtering by namespace, resource labels, and resource kinds so users
+only export telemetry they care about.
+
+An exporter will support multiple sink configurations allowing an exporter to be
+used to send the same telemetry to multiple third-party telemetry platforms. A
+sink will support exporting data to an OpenTelemetry protocol compatible
+endpoint and will support authentication. Additional sink configurations may be
+considered in the future.
+
+### MVP Exporter Configuration
+
+To start, our Exporter resource will only support exporting Metric data from
+resources created on Datum Cloud. Users will be able to leverage a [metricsql]
+query to filter which metrics they'd like to receive. An empty query means
+they'd like all metrics.
+
+[metricsql]: https://docs.victoriametrics.com/metricsql/
+
+```yaml
+apiVersion: telemetry.datumapis.com/v1alpha1
+kind: Exporter
+metadata:
+  name: gateway-exporter  # Unique name for the telemetry exporter
+spec:
+  # Defines the telemetry sources that should be exported. An exporter can
+  # define multiple telemetry sources. The exporter will **not** de-duplicate
+  # telemetry data that matches multiple sources.
+  sources:
+    - name: "gateway-metrics"  # Descriptive name for the source
+      # Source metrics from the Datum Cloud platform
+      metrics:
+        # The options in this section are expected to be mutually exclusive. Users
+        # can either leverage metricsql or resource selectors.
+        #
+        # This option allows user to supply a metricsql query if they're already
+        # familiar with using metricsql queries to select metric data from
+        # Victoria Metrics.
+        metricsql: |
+          {service_name=“networking.datumapis.com”, resource_kind="Gateway", __name__=~”network_bytes_.*”}
+
+  # Multiple sinks can be configured to export telemetry data to multiple
+  # third-party telemetry platforms.
+  sinks:
+    - name: "grafana-cloud-exporter"  # Unique name for the exporter
+      otlp_http:
+        endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
+        authentication:
+          type: "bearerToken"
+          secretRef:
+            name: "grafana-api-key"
+            key: "token"
+      batch:
+        enabled: true   # Enables batching for performance optimization
+        timeout: 5s     # Batch timeout before sending telemetry
+        maxSize: 500    # Maximum number of telemetry entries per batch
+      retry:
+        enabled: true   # Enables retry logic on failed requests
+        maxAttempts: 3  # Maximum retry attempts
+        backoff: 2s     # Delay between retry attempts
+```
+
+### Target Exporter Configuration
+
+The exporter configuration below is meant to highlight the configuration options
+we expect to offer in the future that provides filtering options for those less
+comfortable with [metricsql].
+
+> [!NOTE]
+>
+> This configuration only specifies how to source Metric data right now. We will
+> add Log and Trace configuration examples in the future.
+
+```yaml
+apiVersion: telemetry.datumapis.com/v1alpha1
+kind: Exporter
+metadata:
+  name: example-exporter  # Unique name for the telemetry exporter
+spec:
+  # Defines the telemetry sources that should be exported. An exporter can
+  # define multiple telemetry sources. The exporter will **not** de-duplicate
+  # telemetry data that matches multiple sources.
+  sources:
+    - name: "application-metrics"  # Descriptive name for the source
+      # Source metrics from the Datum Cloud platform
+      metrics:
+        # The options in this section are expected to be mutually exclusive. Users
+        # can either leverage metricsql or resource selectors.
+        #
+        # This option allows user to supply a metricsql query if they're already
+        # familiar with using metricsql queries to select metric data from
+        # Victoria Metrics.
+        metricsql: |
+          {service_name=“networking.datumapis.com”, resource_kind="Gateway", __name__=~”network_bytes_.*”}
+
+        # This gives the user a way of selecting resources using namespace
+        # selectors, group/kind info, and label selectors. This is a more k8s
+        # experience to selecting metric data.
+        resourceSelectors:
+          # By default, a resource selector will only select resources from the
+          # same namespace the exporter is created in. This can be overridden so
+          # users can create a project wide collector if they wish to.
+          - namespaceSelector:
+              # Only match resources in namespaces used for the production
+              # environment.
+              matchLabels:
+                environment: production
+            # Filter which metrics should be selected based on label values that
+            # may be on the resource the metrics were sourced from.
+            labelSelectors:
+              matchLabels:
+                app: "my-gateway"
+            kinds:
+              - apiGroups: ["gateway.networking.k8s.io"]
+                resources: ["gateways"]
+              - apiGroups: ["compute.datumapis.com"]
+                kind: ["workloads"]
+              - apiGroups: ["networking.datumapis.com"]
+                kind: ["*"]
+
+  # Multiple sinks can be configured to export telemetry data to multiple
+  # third-party telemetry platforms.
+  sinks:
+    - name: "grafana-cloud-exporter"  # Unique name for the exporter
+      otlp_http:
+        endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
+        authentication:
+          type: "bearerToken"
+          secretRef:
+            name: "grafana-api-key"
+            key: "token"
+      batch:
+        enabled: true   # Enables batching for performance optimization
+        timeout: 5s     # Batch timeout before sending telemetry
+        maxSize: 500    # Maximum number of telemetry entries per batch
+      retry:
+        enabled: true   # Enables retry logic on failed requests
+        maxAttempts: 3  # Maximum retry attempts
+        backoff: 2s     # Delay between retry attempts
+```
 
 <!-- ## Production Readiness Review Questionnaire -->
 
@@ -552,6 +718,8 @@ Major milestones might include:
 - the version where the Enhancement graduated to general availability
 - when the Enhancement was retired or superseded
 -->
+
+- 2025-03-11 - Define initial enhancement goals, system architecture, and API design
 
 <!-- ## Drawbacks -->
 
