@@ -327,11 +327,9 @@ spec:
               name: "grafana-api-key"
               key: "token"
       batch:
-        enabled: true   # Enables batching for performance optimization
         timeout: 5s     # Batch timeout before sending telemetry
         maxSize: 500    # Maximum number of telemetry entries per batch
       retry:
-        enabled: true   # Enables retry logic on failed requests
         maxAttempts: 3  # Maximum retry attempts
         backoff: 2s     # Delay between retry attempts
 ```
@@ -408,11 +406,9 @@ spec:
               name: "grafana-api-key"
               key: "token"
       batch:
-        enabled: true   # Enables batching for performance optimization
         timeout: 5s     # Batch timeout before sending telemetry
         maxSize: 500    # Maximum number of telemetry entries per batch
       retry:
-        enabled: true   # Enables retry logic on failed requests
         maxAttempts: 3  # Maximum retry attempts
         backoff: 2s     # Delay between retry attempts
 ```
