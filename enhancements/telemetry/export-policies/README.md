@@ -216,6 +216,12 @@ data that's received from resources. Users can configure retry and backoff
 policies to control how telemetry data is handled when configured sinks aren't
 accepting telemetry data.
 
+> [!IMPORTANT]
+>
+> We will have limits in place to control how long we will store telemetry data
+> that’s failing to export to configured sink endpoints. After those limits are
+> reached, we will no longer be able to guarantee at-least once delivery.
+
 <!-- ### User Stories (Optional) -->
 
 <!--
