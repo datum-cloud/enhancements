@@ -61,7 +61,7 @@ SIG Architecture for cross-cutting RFCs).
 -->
 
 <!-- omit from toc -->
-# Telemetry Exporters
+# Telemetry Export Policies
 
 <!--
 This is the title of your Enhancement. Keep it short, simple, and descriptive. A good
@@ -81,9 +81,10 @@ template.
   - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
   - [Telemetry Data](#telemetry-data)
+  - [Delivery Guarantees](#delivery-guarantees)
 - [Design Details](#design-details)
-  - [MVP Exporter Configuration](#mvp-exporter-configuration)
-  - [Target Exporter Configuration](#target-exporter-configuration)
+  - [MVP Export Policy Configuration](#mvp-export-policy-configuration)
+  - [Target Export Policy Configuration](#target-export-policy-configuration)
 - [Implementation History](#implementation-history)
 
 ## Summary
@@ -106,16 +107,15 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
-Users expect to be able to have full visibility into services they utilize on
-Datum Cloud, but they may already be using other telemetry systems like [Grafana
-Cloud], [Datadog], etc and don't want to introduce another telemetry stack into
-their organization's workflow.
+Users will be able to create Export Policies on Datum Cloud to configure how
+telemetry from resources they create in Datum Cloud (Gateways, Workloads,
+Networks, etc) are exported to third-party telemetry platforms allowing users to
+continue using their existing telemetry stack.
 
-Datum Cloud will allow consumers to configure telemetry exporters to export
-telemetry created by Datum Cloud services to the telemetry platform of their
-choosing. Users will be able to configure which types of telemetry they'd like
-to export (Metrics, Logs, Traces) and use resource selectors to filter which
-resources should have their telemetry data exported.
+Export policies can be used to send to any telemetry platform that supports
+receiving data using the [OpenTelemetry protocol][OTLP]. The telemetry system
+will provide at-least once delivery guarantees over all telemetry data that is
+received from Datum Cloud resources.
 
 [Grafana Cloud]: https://grafana.com/products/cloud/
 [Datadog]: https://www.datadoghq.com
@@ -130,12 +130,13 @@ this Enhancement.  Describe why the change is important and the benefits to user
 Datum Cloud users want visibility into the resources they create on Datum Cloud
 so they can understand the health of their infrastructure. For example, users
 that configure L7 Gateways in our networking services will want metrics around
-the HTTP traffic our gateways are processing.
+the HTTP traffic our gateways are processing. Users will also want CPU / Memory
+metrics for any instances that are created for the compute service.
 
 Some users may have an existing telemetry stack they want to use to explore and
 analyze the telemetry data available from Datum Cloud. By introducing
-configurable telemetry exporters, we empower consumers to control which
-telemetry data they want sent to third-party monitoring services.
+configurable export policies, we empower consumers to control how telemetry data
+is exported to their existing telemetry platform.
 
 ### Goals
 
@@ -144,12 +145,12 @@ List the specific goals of the Enhancement. What is it trying to achieve? How wi
 know that this has succeeded?
 -->
 
-- Provide a mechanism for consumers to configure telemetry exporters for their
-  resources.
+- Provide a mechanism for consumers to configure how telemetry for resources
+  they've created is exported to their existing telemetry system
 - Support OpenTelemetry-compatible endpoints such as [Grafana Cloud], [Datadog],
   and custom [OpenTelemetry protocol][OTLP] receivers.
 - Enable fine-grained control over what telemetry data is exported.
-- Provide a self-service experience via API or UI for easy configuration.
+- Provide a self-service experience via API and UI for easy configuration.
 
 [OTLP]: https://opentelemetry.io/docs/specs/otel/protocol/
 
@@ -174,20 +175,22 @@ The "Design Details" section below is for the real
 nitty-gritty.
 -->
 
-Users will be able to configure one or more telemetry exporters within their
-Datum Cloud projects to control how telemetry data from resources in their
-project are exported to third-party systems. The telemetry exporter will support
-exporting data to any [OpenTelemetry protocol (OTLP)][OTLP] compatible endpoint.
+Users will be able to configure one or more **ExportPolicy** within Datum Cloud
+projects to control how telemetry data published by resources in their projects
+are exported to third-party telemetry systems. An export policy will allow users
+to exporting data to any [OpenTelemetry protocol (OTLP)][OTLP] compatible
+endpoint.
+
+> [!NOTE]
+>
+> In the future, we will plan to support organization-level export policies to
+> make it easier to export telemetry across multiple projects.
 
 ![](./container-diagram.png)
 
-Datum Cloud will use exporter configurations created by users to configure how
-telemetry collected from services is exported to consumers. Multiple telemetry
-exporters may be configured to route telemetry data from Datum Cloud locations
-to the user's third-party telemetry service.
-
-Users will be able to filter the telemetry data that's exported to third-parties
-so they don't have to pay for telemetry data they don't care about.
+Export policies will also allow users to leverage telemetry filters to provide
+fine-grained control over which telemetry data is exported so they only export
+telemetry data they care about.
 
 ### Telemetry Data
 
@@ -203,8 +206,15 @@ so they don't have to pay for telemetry data they don't care about.
   to be able to visualize traffic flows through our network.
 
 The [Design Details](#design-details) section goes into more detail on how the
-user may be expected to configure an exporter to publish various types of
+user may be expected to configure an export policy to publish various types of
 telemetry and filter it to their needs.
+
+### Delivery Guarantees
+
+An export policy will provide at-least once delivery guarantee over telemetry
+data that's received from resources. Users can configure retry and backoff
+policies to control how telemetry data is handled when configured sinks aren't
+accepting telemetry data.
 
 <!-- ### User Stories (Optional) -->
 
@@ -251,39 +261,40 @@ required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
 
-Users will be able to manage one or more **Exporter** resources in Datum Cloud
-Project to configure how they would like telemetry from resources they create to
-be exported to a third-party telemetry platform.
+Users will be able to manage one or more **ExportPolicy** resources in Datum
+Cloud Projects to configure how they would like telemetry from resources they
+create to be exported to a third-party telemetry platform.
 
 Users can configure multiple telemetry sources so they can include metrics,
 logs, and traces from multiple resources to export. Telemetry sources will
 support filtering by namespace, resource labels, and resource kinds so users
 only export telemetry they care about.
 
-An exporter will support multiple sink configurations allowing an exporter to be
-used to send the same telemetry to multiple third-party telemetry platforms. A
-sink will support exporting data to an OpenTelemetry protocol compatible
-endpoint and will support authentication. Additional sink configurations may be
-considered in the future.
+An export policy will support multiple sink configurations allowing telemetry
+data to be exported to multiple third-party telemetry platforms. A sink will
+support exporting data to an OpenTelemetry protocol compatible endpoint and will
+support authentication. Additional sink configurations may be considered in the
+future.
 
-### MVP Exporter Configuration
 
-To start, our Exporter resource will only support exporting Metric data from
+### MVP Export Policy Configuration
+
+To start, export policies will only support exporting **Metric** data from
 resources created on Datum Cloud. Users will be able to leverage a [metricsql]
-query to filter which metrics they'd like to receive. An empty query means
-they'd like all metrics.
+query to filter which metrics they'd like to receive. An empty query means all
+metrics will be exported.
 
 [metricsql]: https://docs.victoriametrics.com/metricsql/
 
 ```yaml
 apiVersion: telemetry.datumapis.com/v1alpha1
-kind: Exporter
+kind: ExportPolicy
 metadata:
-  name: gateway-exporter  # Unique name for the telemetry exporter
+  name: gateway-export-policy  # Unique name for the export policy
 spec:
-  # Defines the telemetry sources that should be exported. An exporter can
-  # define multiple telemetry sources. The exporter will **not** de-duplicate
-  # telemetry data that matches multiple sources.
+  # Defines the telemetry sources that should be exported. An export policy can
+  # define multiple telemetry sources. Telemetry data will **not** be de-duped
+  # if its selected from multiple sources.
   sources:
     - name: "gateway-metrics"  # Descriptive name for the source
       # Source metrics from the Datum Cloud platform
@@ -300,14 +311,15 @@ spec:
   # Multiple sinks can be configured to export telemetry data to multiple
   # third-party telemetry platforms.
   sinks:
-    - name: "grafana-cloud-exporter"  # Unique name for the exporter
-      otlp_http:
-        endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
+    - name: "grafana-cloud"  # Unique name for the sink
+      openTelemetry:
+        http:
+          endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
         authentication:
-          type: "bearerToken"
-          secretRef:
-            name: "grafana-api-key"
-            key: "token"
+          bearerToken:
+            secretRef:
+              name: "grafana-api-key"
+              key: "token"
       batch:
         enabled: true   # Enables batching for performance optimization
         timeout: 5s     # Batch timeout before sending telemetry
@@ -318,26 +330,26 @@ spec:
         backoff: 2s     # Delay between retry attempts
 ```
 
-### Target Exporter Configuration
+### Target Export Policy Configuration
 
-The exporter configuration below is meant to highlight the configuration options
-we expect to offer in the future that provides filtering options for those less
+The export policy below is meant to highlight the configuration options we
+expect to offer in the future, that provides filtering options for those less
 comfortable with [metricsql].
 
 > [!NOTE]
 >
 > This configuration only specifies how to source Metric data right now. We will
-> add Log and Trace configuration examples in the future.
+> also expand this to add Log and Trace configuration examples in the future.
 
 ```yaml
 apiVersion: telemetry.datumapis.com/v1alpha1
-kind: Exporter
+kind: ExportPolicy
 metadata:
-  name: example-exporter  # Unique name for the telemetry exporter
+  name: example-export-policy  # Unique name for the export policy
 spec:
-  # Defines the telemetry sources that should be exported. An exporter can
-  # define multiple telemetry sources. The exporter will **not** de-duplicate
-  # telemetry data that matches multiple sources.
+  # Defines the telemetry sources that should be exported. An export policy can
+  # define multiple telemetry sources. Telemetry data will **not** be de-duped
+  # if its selected from multiple sources.
   sources:
     - name: "application-metrics"  # Descriptive name for the source
       # Source metrics from the Datum Cloud platform
@@ -356,8 +368,9 @@ spec:
         # experience to selecting metric data.
         resourceSelectors:
           # By default, a resource selector will only select resources from the
-          # same namespace the exporter is created in. This can be overridden so
-          # users can create a project wide collector if they wish to.
+          # same namespace the export policy is created in. This can be
+          # overridden so users can create a project wide collector if they wish
+          # to.
           - namespaceSelector:
               # Only match resources in namespaces used for the production
               # environment.
@@ -379,14 +392,15 @@ spec:
   # Multiple sinks can be configured to export telemetry data to multiple
   # third-party telemetry platforms.
   sinks:
-    - name: "grafana-cloud-exporter"  # Unique name for the exporter
-      otlp_http:
-        endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
+    - name: "grafana-cloud"  # Unique name for the sink
+      openTelemetry:
+        http:
+          endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
         authentication:
-          type: "bearerToken"
-          secretRef:
-            name: "grafana-api-key"
-            key: "token"
+          bearerToken:
+            secretRef:
+              name: "grafana-api-key"
+              key: "token"
       batch:
         enabled: true   # Enables batching for performance optimization
         timeout: 5s     # Batch timeout before sending telemetry
@@ -719,7 +733,8 @@ Major milestones might include:
 - when the Enhancement was retired or superseded
 -->
 
-- 2025-03-11 - Define initial enhancement goals, system architecture, and API design
+- 2025-03-11 - Define initial enhancement goals, system architecture, and API
+  design
 
 <!-- ## Drawbacks -->
 
