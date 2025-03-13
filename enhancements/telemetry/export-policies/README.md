@@ -312,26 +312,26 @@ spec:
         # familiar with using metricsql queries to select metric data from
         # Victoria Metrics.
         metricsql: |
-          {service_name=“networking.datumapis.com”, resource_kind="Gateway", __name__=~”network_bytes_.*”}
+          {service_name="networking.datumapis.com", resource_kind="Gateway", __name__=~"network_bytes_.*"}
 
-  # Multiple sinks can be configured to export telemetry data to multiple
-  # third-party telemetry platforms.
-  sinks:
-    - name: "grafana-cloud"  # Unique name for the sink
-      openTelemetry:
-        http:
-          endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
-        authentication:
-          bearerToken:
-            secretRef:
-              name: "grafana-api-key"
-              key: "token"
-      batch:
-        timeout: 5s     # Batch timeout before sending telemetry
-        maxSize: 500    # Maximum number of telemetry entries per batch
-      retry:
-        maxAttempts: 3  # Maximum retry attempts
-        backoff: 2s     # Delay between retry attempts
+  # Configure how telemetry data should be sent to the third-party telemetry
+  # service.
+  sink:
+    openTelemetry:
+      http:
+        endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
+      authentication:
+        bearerToken:
+          secretRef:
+            name: "grafana-api-key"
+            key: "token"
+    batch:
+      timeout: 5s           # Batch timeout before sending telemetry
+      maxSize: 500          # Maximum number of telemetry entries per batch
+    retry:
+      maxAttempts: 3        # Maximum retry attempts
+      backoffDuration: 2s   # Delay between retry attempts
+
 ```
 
 ### Target Export Policy Configuration
@@ -393,24 +393,23 @@ spec:
               - apiGroups: ["networking.datumapis.com"]
                 kind: ["*"]
 
-  # Multiple sinks can be configured to export telemetry data to multiple
-  # third-party telemetry platforms.
-  sinks:
-    - name: "grafana-cloud"  # Unique name for the sink
-      openTelemetry:
-        http:
-          endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
-        authentication:
-          bearerToken:
-            secretRef:
-              name: "grafana-api-key"
-              key: "token"
-      batch:
-        timeout: 5s     # Batch timeout before sending telemetry
-        maxSize: 500    # Maximum number of telemetry entries per batch
-      retry:
-        maxAttempts: 3  # Maximum retry attempts
-        backoff: 2s     # Delay between retry attempts
+  # Configure how telemetry data should be sent to the third-party telemetry
+  # service.
+  sink:
+    openTelemetry:
+      http:
+        endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
+      authentication:
+        bearerToken:
+          secretRef:
+            name: "grafana-api-key"
+            key: "token"
+    batch:
+      timeout: 5s           # Batch timeout before sending telemetry
+      maxSize: 500          # Maximum number of telemetry entries per batch
+    retry:
+      maxAttempts: 3        # Maximum retry attempts
+      backoffDuration: 2s   # Delay between retry attempts
 ```
 
 <!-- ## Production Readiness Review Questionnaire -->
