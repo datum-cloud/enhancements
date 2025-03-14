@@ -81,10 +81,15 @@ template.
   - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
   - [Telemetry Data](#telemetry-data)
+  - [Supported Sink Protocols](#supported-sink-protocols)
   - [Delivery Guarantees](#delivery-guarantees)
 - [Design Details](#design-details)
-  - [MVP Export Policy Configuration](#mvp-export-policy-configuration)
-  - [Target Export Policy Configuration](#target-export-policy-configuration)
+  - [Configuring Sources](#configuring-sources)
+    - [MVP Metric Source Configuration](#mvp-metric-source-configuration)
+    - [Target Metric Source Configuration](#target-metric-source-configuration)
+  - [Configuring Sinks](#configuring-sinks)
+    - [Prometheus Remote Write](#prometheus-remote-write)
+    - [OpenTelemetry](#opentelemetry)
 - [Implementation History](#implementation-history)
 
 ## Summary
@@ -113,9 +118,9 @@ Networks, etc) are exported to third-party telemetry platforms allowing users to
 continue using their existing telemetry stack.
 
 Export policies can be used to send to any telemetry platform that supports
-receiving data using the [OpenTelemetry protocol][OTLP]. The telemetry system
-will provide at-least once delivery guarantees over all telemetry data that is
-received from Datum Cloud resources.
+receiving data through through one of our supported sink protocols. The
+telemetry system will provide at-least once delivery guarantees over all
+telemetry data that is received from Datum Cloud resources.
 
 [Grafana Cloud]: https://grafana.com/products/cloud/
 [Datadog]: https://www.datadoghq.com
@@ -147,12 +152,15 @@ know that this has succeeded?
 
 - Provide a mechanism for consumers to configure how telemetry for resources
   they've created is exported to their existing telemetry system
-- Support OpenTelemetry-compatible endpoints such as [Grafana Cloud], [Datadog],
-  and custom [OpenTelemetry protocol][OTLP] receivers.
+- Support standard protocols for shipping telemetry data (e.g. [Prometheus
+  Remote Write][remote-write], [OpenTelemetry][OTLP]) that's in use across the
+  industry and supported by major telemetry platforms (e.g. [Grafana Cloud],
+  [Datadog]).
 - Enable fine-grained control over what telemetry data is exported.
 - Provide a self-service experience via API and UI for easy configuration.
 
 [OTLP]: https://opentelemetry.io/docs/specs/otel/protocol/
+[remote-write]: https://prometheus.io/docs/specs/prw/remote_write_spec/
 
 ### Non-Goals
 
@@ -177,9 +185,13 @@ nitty-gritty.
 
 Users will be able to configure one or more **ExportPolicy** within Datum Cloud
 projects to control how telemetry data published by resources in their projects
-are exported to third-party telemetry systems. An export policy will allow users
-to exporting data to any [OpenTelemetry protocol (OTLP)][OTLP] compatible
-endpoint.
+are exported to third-party telemetry systems. ExportPolicies will support
+configuring a single sink to configure how telemetry data is exported. Users
+will be able to choose from [multiple sink protocols](#supported-sink-protocols)
+to choose the one that works best for their platform or use-case.
+
+ An export policy will allow users to exporting data to any [OpenTelemetry
+protocol (OTLP)][OTLP] compatible endpoint.
 
 > [!NOTE]
 >
@@ -208,6 +220,16 @@ telemetry data they care about.
 The [Design Details](#design-details) section goes into more detail on how the
 user may be expected to configure an export policy to publish various types of
 telemetry and filter it to their needs.
+
+### Supported Sink Protocols
+
+Below are a list of the protocols we plan to support for exporting telemetry
+data through export policies. Additional sink protocols may be added in the
+future. If there's a sink protocol you would like to see supported, please open
+a new enhancement issue.
+
+- **[OpenTelemetry][OTLP]**
+- **[Prometheus Remote Write][remote-write]**
 
 ### Delivery Guarantees
 
@@ -271,19 +293,18 @@ Users will be able to manage one or more **ExportPolicy** resources in Datum
 Cloud Projects to configure how they would like telemetry from resources they
 create to be exported to a third-party telemetry platform.
 
+Export Policies are constructed of multiple sources to select telemetry data
+that should be exported and multiple sink configurations to control where
+telemetry data is sent.
+
+### Configuring Sources
+
 Users can configure multiple telemetry sources so they can include metrics,
 logs, and traces from multiple resources to export. Telemetry sources will
 support filtering by namespace, resource labels, and resource kinds so users
 only export telemetry they care about.
 
-An export policy will support multiple sink configurations allowing telemetry
-data to be exported to multiple third-party telemetry platforms. A sink will
-support exporting data to an OpenTelemetry protocol compatible endpoint and will
-support authentication. Additional sink configurations may be considered in the
-future.
-
-
-### MVP Export Policy Configuration
+#### MVP Metric Source Configuration
 
 To start, export policies will only support exporting **Metric** data from
 resources created on Datum Cloud. Users will be able to leverage a [metricsql]
@@ -313,28 +334,9 @@ spec:
         # Victoria Metrics.
         metricsql: |
           {service_name="networking.datumapis.com", resource_kind="Gateway", __name__=~"network_bytes_.*"}
-
-  # Configure how telemetry data should be sent to the third-party telemetry
-  # service.
-  sink:
-    openTelemetry:
-      http:
-        endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
-      authentication:
-        bearerToken:
-          secretRef:
-            name: "grafana-api-key"
-            key: "token"
-    batch:
-      timeout: 5s           # Batch timeout before sending telemetry
-      maxSize: 500          # Maximum number of telemetry entries per batch
-    retry:
-      maxAttempts: 3        # Maximum retry attempts
-      backoffDuration: 2s   # Delay between retry attempts
-
 ```
 
-### Target Export Policy Configuration
+#### Target Metric Source Configuration
 
 The export policy below is meant to highlight the configuration options we
 expect to offer in the future, that provides filtering options for those less
@@ -392,24 +394,93 @@ spec:
                 kind: ["workloads"]
               - apiGroups: ["networking.datumapis.com"]
                 kind: ["*"]
+```
 
-  # Configure how telemetry data should be sent to the third-party telemetry
-  # service.
-  sink:
-    openTelemetry:
-      http:
-        endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
-      authentication:
-        bearerToken:
-          secretRef:
-            name: "grafana-api-key"
-            key: "token"
-    batch:
-      timeout: 5s           # Batch timeout before sending telemetry
-      maxSize: 500          # Maximum number of telemetry entries per batch
-    retry:
-      maxAttempts: 3        # Maximum retry attempts
-      backoffDuration: 2s   # Delay between retry attempts
+### Configuring Sinks
+
+Users can configure multiple sinks to control how telemetry data is exported to
+their telemetry systems. Some sink protocols may only support one type of
+telemetry data so multiple sinks can be used to support exporting all telemetry
+data to the correct sink.
+
+#### Prometheus Remote Write
+
+Users can also configure a sink to use the [Prometheus Remote Write
+protocol][remote-write] to export metric data to their telemetry platform. This
+sink supports using Basic and Bearer token authentication.
+
+```yaml
+apiVersion: telemetry.datumapis.com/v1alpha1
+kind: ExportPolicy
+metadata:
+  name: example-export-policy
+spec:
+  sources:
+    - name: metrics
+      ...
+
+  sinks:
+    - name: grafana-cloud
+      # Configure which sources should be sent to this sink.
+      sources:
+      - metrics
+      prometheusRemoteWrite:
+        endpoint: https://prometheus-prod-56-prod-us-east-2.grafana.net/api/prom/push
+        authentication:
+          basic:
+            # A reference to a `kubernetes.io/basic-auth` secret type. Must
+            # contain `username` and `password` keys.
+            secretRef:
+              name: "grafana-cloud-credentials"
+          bearerToken:
+            secretRef:
+              name: "grafana-api-key"
+              key: "token"
+      batch:
+        timeout: 5s           # Batch timeout before sending telemetry
+        maxSize: 500          # Maximum number of telemetry entries per batch
+      retry:
+        maxAttempts: 3        # Maximum retry attempts
+        backoffDuration: 2s   # Delay between retry attempts
+```
+
+#### OpenTelemetry
+
+This example demonstrates how to configure an export policy to send telemetry
+data to an OpenTelemetry compatible endpoint. This sink supports using Basic and
+Bearer token authentication.
+
+```yaml
+apiVersion: telemetry.datumapis.com/v1alpha1
+kind: ExportPolicy
+metadata:
+  name: example-export-policy
+spec:
+  sources:
+    ...
+
+  sinks:
+    - name: grafana-cloud-otel
+      openTelemetry:
+        http:
+          endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
+        authentication:
+          basic:
+            # A reference to a `kubernetes.io/basic-auth` secret type. Must
+            # contain `username` and `password` keys.
+            secretRef:
+              name: "grafana-cloud-credentials"
+          bearerToken:
+            secretRef:
+              name: "grafana-api-key"
+              key: "token"
+
+      batch:
+        timeout: 5s           # Batch timeout before sending telemetry
+        maxSize: 500          # Maximum number of telemetry entries per batch
+      retry:
+        maxAttempts: 3        # Maximum retry attempts
+        backoffDuration: 2s   # Delay between retry attempts
 ```
 
 <!-- ## Production Readiness Review Questionnaire -->
