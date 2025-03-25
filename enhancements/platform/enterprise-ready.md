@@ -144,6 +144,12 @@ and make progress.
 -->
 
 - This enhancement should not be defining the core offering of Datum Cloud in any way.
+- This enhancement purposefully deems the following areas of Enterprise Ready out of scope: 
+-- Product Assortment: Handled by the plethora of capability offered in Datum Cloud.
+-- Change Management: Handled by the website / docs 2.0 project
+-- Deployment Options: An intrinsic promise of Datum Cloud that did not seem appropriate for this 2025 Q2 fast follow initiative
+-- Integrations: A wide topic that did not seem appropriate for this 2025 Q2 fast follow initiative
+-- GDPR: A wide topic that did not seem appropriate for this 2025 Q2 fast follow initiative 
 
 ## Proposal
 
