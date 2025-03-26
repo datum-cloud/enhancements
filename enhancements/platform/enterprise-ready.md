@@ -218,7 +218,8 @@ The minimal set of functionality to have an Enterprise authorization model:
 - Define a permission for each distinct operation in your system (the cartesian product of verbs and nouns). This gives your authorization model room to evolve without any additional re-architecture.
 - Define some common roles that are “roll-ups” of these permissions (RBAC), and allow customers to assign these roles to their users.
 - Create at least one tier of “resource groups” (organizations, teams, projects) and allow admins to restrict roles/permissions to specific resource groups.
-= Allow your customers to create custom roles, which are their own “roll-ups” of your permissions, fitting their business purposes.
+- Allow your customers to create custom roles, which are their own “roll-ups” of
+  your permissions, fitting their business purposes.
 - Offer your customers an audit trail of every authorization decision that your system makes around their user access.
 
 Detailed specification for RBAC can be located in an existing enhancement: https://github.com/datum-cloud/enhancements/tree/main/enhancements/business-os/identity-and-access-management
