@@ -134,7 +134,9 @@ know that this has succeeded?
 -->
 
 - Define key product features for Datum Cloud that will make our offering compelling to an Enterprise or Service Provider.
-- This items listed in this enhancement are designed to reduce the effort associated with product adoption, product on-boarding and integration, and compliance/risk management. 
+- The items listed in this enhancement are designed to reduce the effort
+  associated with product adoption, product on-boarding and integration, and
+  compliance/risk management. 
 
 ### Non-Goals
 
