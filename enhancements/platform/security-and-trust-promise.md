@@ -182,7 +182,7 @@ nitty-gritty.
 - Theory of Least Privilege
 - Data Deletion: DISCUSS: Datum will allow customers and users leaving our platform to request full deletion of their data from the system.
 - Auditing
-- No "Home Grown" Encryption: Datum will not create nor deploy home grown encryption implementations. Only publically avaiable and verified encryption algorithsm will be used on the Datum Cloud.
+- No "Home Grown" Encryption: Datum will not create nor deploy home grown encryption implementations. Only publicly available and verified encryption algorithms will be used on the Datum Cloud.
 
 #### Risk Management
 - Vulnerability Scanning and Management: Datum will employ external vulnerability scanning programs for its external facing platform. 
