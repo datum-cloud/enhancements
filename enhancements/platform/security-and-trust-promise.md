@@ -115,7 +115,10 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
-The purpose of this enhancement is to define, document, and state our Security and Trust Promises to the Datum Community. This enhancement will document our principles for the security of the Datum Cloud, and the means and methods by which we will engender trust from the Datum Community.
+The purpose of this enhancement is to define, document, and state our Security
+and Trust Promises to the Datum Community. This enhancement will document our
+principles for the security of the Datum Cloud, and the means and methods by
+which we will engender trust from the Datum Community.
 
 
 ## Motivation
@@ -125,7 +128,9 @@ This section is for explicitly listing the motivation, goals, and non-goals of
 this Enhancement.  Describe why the change is important and the benefits to users.
 -->
 
-On our pathway to Enterprise Ready, and in the spirit of our openess and transparency to the Datum Community, we MUST document and publish our principles for Security and Trust.
+On our pathway to Enterprise Ready, and in the spirit of our openess and
+transparency to the Datum Community, we MUST document and publish our principles
+for Security and Trust.
 
 ### Goals
 
@@ -157,44 +162,97 @@ nitty-gritty.
 #### IMPORTANT NOTE: As of March 25, 2025, these statements are aspirational.
 
 #### Software Development Lifecycle: 
-- Secure Development Practices: Datum follows a secure development framework using automation, peer reviews, and a known pipeline to reach production. This provides a repeatable process so that errors or security vulnerabilities are caught prior to release.
-- Design and Architecture Reviews: Datum Cloud's design and architecture leverages a peer reviewed system, embodied itself through this enhancement process.
-- Code Reviews: We require that all code is reviewed by a separate person than the author. 
-- CI/CD Pipeline Security: We regularly monitor the health and security of our CI/CD systems to ensure a secure and available environment. Our CI/CD systems implement code scanning techniques to find vulnerabilites or secret leaks.
-- OWASP Top 10: Our developers are educated on the OWASP Top 10 Vulnerabilities and are trained to think about how someone could use each of the top ten vulnerabilities to gain access to our systems, databases or networks.
-- Environment Segregation: Datum builds distinct environments for development, staging, and production.
+- Secure Development Practices: Datum follows a secure development framework
+  using automation, peer reviews, and a known pipeline to reach production. This
+  provides a repeatable process so that errors or security vulnerabilities are
+  caught prior to release.
+- Design and Architecture Reviews: Datum Cloud's design and architecture
+  leverages a peer reviewed system, embodied itself through this enhancement
+  process.
+- Code Reviews: We require that all code is reviewed by a separate person than
+  the author. 
+- CI/CD Pipeline Security: We regularly monitor the health and security of our
+  CI/CD systems to ensure a secure and available environment. Our CI/CD systems
+  implement code scanning techniques to find vulnerabilites or secret leaks.
+- OWASP Top 10: Our developers are educated on the OWASP Top 10 Vulnerabilities
+  and are trained to think about how someone could use each of the top ten
+  vulnerabilities to gain access to our systems, databases or networks.
+- Environment Segregation: Datum builds distinct environments for development,
+  staging, and production.
 
 #### Platform Security
-- Authentication and Session Management: Datum requires strict authentication to access platform resources, including Portal, APIs, and AI interfaces. Datum requires the use of TLS for data in-flight from a platform user to our platform. 
-- System to System Communication: Datum employs the use of TLS for machine to machine communication.
-- Secure defaults: Datum believe that security isn't a feature a user has to enable or opt into. We deploy secure defaults out of the box.
-- Rate Limiting: Datum may employ rate limiting techniques at appropriate platform ingress interfaces to prevent abuse of its resources.
-- Secret Management: We do not store secrets in plain text. We use a vault to inventory, secure, and store secrets wherever posisble. 
+- Authentication and Session Management: Datum requires strict authentication to
+  access platform resources, including Portal, APIs, and AI interfaces. Datum
+  requires the use of TLS for data in-flight from a platform user to our
+  platform. 
+- System to System Communication: Datum employs the use of TLS for machine to
+  machine communication.
+- Secure defaults: Datum believe that security isn't a feature a user has to
+  enable or opt into. We deploy secure defaults out of the box.
+- Rate Limiting: Datum may employ rate limiting techniques at appropriate
+  platform ingress interfaces to prevent abuse of its resources.
+- Secret Management: We do not store secrets in plain text. We use a vault to
+  inventory, secure, and store secrets wherever posisble. 
 
 #### Infrastrucuture Security
-- Network and System Hardening: Datum will apply the principle of least privilege to the openness of our network and systems. Network and systems are hardened by changing vendor passwords, removing unnecessary packages and software, locking down network addresses and ports, and utilizing security brokers (Reverse Proxy, Zero Trust Network Access, etc.) where appropriate.
-- Segementation: Datum will employ network segmentation for containing the compromise domains of sensisitive internal systems, thereby limiting a bad actor's potential lateral movement capabilities in our systems. Datum will provide strong segmentation amongst organizations and their projects. Datum will not permit remote attachment to its networks where broad scope access is granted (e.g. traditional VPN technologies).
-- DDoS Resilience: Datum will employ current practices to harden its infrastructure from Denial of Service (DoS) attacks by leveraging first party mitigration techniques (BGP RTBH, Flowspec, Overprovisioning, L4 and L7 Filtering) plus 3rd party mitigations as required.
-- Event Logging: Datum will employ event logging to monitor critical system infrastructure and its associated behaviors.
+- Network and System Hardening: Datum will apply the principle of least
+  privilege to the openness of our network and systems. Network and systems are
+  hardened by changing vendor passwords, removing unnecessary packages and
+  software, locking down network addresses and ports, and utilizing security
+  brokers (Reverse Proxy, Zero Trust Network Access, etc.) where appropriate.
+- Segementation: Datum will employ network segmentation for containing the
+  compromise domains of sensisitive internal systems, thereby limiting a bad
+  actor's potential lateral movement capabilities in our systems. Datum will
+  provide strong segmentation amongst organizations and their projects. Datum
+  will not permit remote attachment to its networks where broad scope access is
+  granted (e.g. traditional VPN technologies).
+- DDoS Resilience: Datum will employ current practices to harden its
+  infrastructure from Denial of Service (DoS) attacks by leveraging first party
+  mitigration techniques (BGP RTBH, Flowspec, Overprovisioning, L4 and L7
+  Filtering) plus 3rd party mitigations as required.
+- Event Logging: Datum will employ event logging to monitor critical system
+  infrastructure and its associated behaviors.
 
 #### Data Security
-- Encryption at rest: Datum will encrypt sensitive information, including secrets, when stored at rest using strong crytographic imlementations. 
+- Encryption at rest: Datum will encrypt sensitive information, including
+  secrets, when stored at rest using strong crytographic imlementations. 
 - Theory of Least Privilege
-- Data Deletion: DISCUSS: Datum will allow customers and users leaving our platform to request full deletion of their data from the system.
+- Data Deletion: DISCUSS: Datum will allow customers and users leaving our
+  platform to request full deletion of their data from the system.
 - Auditing
-- No "Home Grown" Encryption: Datum will not create nor deploy home grown encryption implementations. Only publicly available and verified encryption algorithms will be used on the Datum Cloud.
+- No "Home Grown" Encryption: Datum will not create nor deploy home grown
+  encryption implementations. Only publicly available and verified encryption
+  algorithms will be used on the Datum Cloud.
 
 #### Risk Management
-- Vulnerability Scanning and Management: Datum will employ external vulnerability scanning programs for its external facing platform. 
-- Threat Modeling and Simulation: We document our trust boundaries and threat models in our system early. We continue to update these docs as our system evolves. Knowing where the trust boundaries are and where the biggest threat could come from will help us prioritize solutions.
-- Operational Awareness: Datum subscribes to various security resources, including the CVE repository, to have operational awareness to security risks that may impact its systems.
+- Vulnerability Scanning and Management: Datum will employ external
+  vulnerability scanning programs for its external facing platform. 
+- Threat Modeling and Simulation: We document our trust boundaries and threat
+  models in our system early. We continue to update these docs as our system
+  evolves. Knowing where the trust boundaries are and where the biggest threat
+  could come from will help us prioritize solutions.
+- Operational Awareness: Datum subscribes to various security resources,
+  including the CVE repository, to have operational awareness to security risks
+  that may impact its systems.
 
 #### Datum Staff and Corporate IT
-- Identity and Access Management: Datum requires the use of a centralized identity provider for its staff and contractors. Quarterly access reviewed are performed so we know who has access to what. Staff and contractors who have been terminated must have privileges revoked within 48 hours.
-- Desktops, Laptops, and Mobile Devices: Datum requires that all desktops, laptops, and mobile devices leverage encrypted storage, strong log on passwords, screen savers with passwords and automatic timeouts, a firewall, and a anti-virus/anti-malware endpoint security product.
-- Role Based Access Control and Multi-Factor Authentication: Datum requires that its downstream operational platforms, IaaS, and SaaS providers support Role Based Access Control (RBAC) to support our goals for seperation of roles. Datum deploys Multi-Factor Authentication (MFA) for employees and contractors designed to mitigate phishing and social engineering attacks.
-- Seperation of Roles: Datum is a small but mighty team, and that means we will thoughtfully seperate roles and duties across our systems.
-- Education: Datum educates our staff and contractors against common security threats and trends.
+- Identity and Access Management: Datum requires the use of a centralized
+  identity provider for its staff and contractors. Quarterly access reviewed are
+  performed so we know who has access to what. Staff and contractors who have
+  been terminated must have privileges revoked within 48 hours.
+- Desktops, Laptops, and Mobile Devices: Datum requires that all desktops,
+  laptops, and mobile devices leverage encrypted storage, strong log on
+  passwords, screen savers with passwords and automatic timeouts, a firewall,
+  and a anti-virus/anti-malware endpoint security product.
+- Role Based Access Control and Multi-Factor Authentication: Datum requires that
+  its downstream operational platforms, IaaS, and SaaS providers support Role
+  Based Access Control (RBAC) to support our goals for seperation of roles.
+  Datum deploys Multi-Factor Authentication (MFA) for employees and contractors
+  designed to mitigate phishing and social engineering attacks.
+- Seperation of Roles: Datum is a small but mighty team, and that means we will
+  thoughtfully seperate roles and duties across our systems.
+- Education: Datum educates our staff and contractors against common security
+  threats and trends.
 
 ### User Stories (Optional)
 
