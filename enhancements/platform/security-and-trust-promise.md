@@ -172,7 +172,7 @@ nitty-gritty.
 - Secret Management: We do not store secrets in plain text. We use a vault to inventory, secure, and store secrets wherever posisble. 
 
 #### Infrastrucuture Security
-- Network and System Hardening: Datum will apply the principle of least privilege to the openness of our network and systems. Netowrk and systems are hardened by changing vendor passwords, removing unneccesary packages and software, locking down network addresses and ports, and utilizing security brokers (Reverse Proxy, Zero Trust Network Access, etc.) where appropriate.
+- Network and System Hardening: Datum will apply the principle of least privilege to the openness of our network and systems. Network and systems are hardened by changing vendor passwords, removing unnecessary packages and software, locking down network addresses and ports, and utilizing security brokers (Reverse Proxy, Zero Trust Network Access, etc.) where appropriate.
 - Segementation: Datum will employ network segmentation for containing the compromise domains of sensisitive internal systems, thereby limiting a bad actor's potential lateral movement capabilities in our systems. Datum will provide strong segmentation amongst organizations and their projects. Datum will not permit remote attachment to its networks where broad scope access is granted (e.g. traditional VPN technologies).
 - DDoS Resilience: Datum will employ current practices to harden its infrastructure from Denial of Service (DoS) attacks by leveraging first party mitigration techniques (BGP RTBH, Flowspec, Overprovisioning, L4 and L7 Filtering) plus 3rd party mitigations as required.
 - Event Logging: Datum will employ event logging to monitor critical system infrastructure and its associated behaviors.
