@@ -169,41 +169,39 @@ Below is an example workload definition in YAML form:
 > The structure below has not yet been finalized and is subject to change.
 
 ```yaml
-name: projects/my-project/workloads/my-workload
-# The workloadId will influence the name of each instance in the workload. This
-# must be a valid DNS name.
-workloadId: my-workload
-uid: 6e3d1b5f-5d58-40ac-9c4a-b93433c672f9
-displayName: My Workload
-# Arbitrary string key/value entries that can be used to influence Datum Cloud
-# platform behaviors at a workload level, or the behavior of external systems
-# that may read these annotations.
-annotations:
-  compute.datumapis.com/enable-anycast: "true"
-# Arbitrary string key/value entries that can be used in network policies,
-# services, discovery services (DNS discovery, Metadata API).
-# WILL NOT propagate to instances managed by the workload, allowing updates to
-# these labels without impacting the lifecycle of an instance.
-labels:
-  tier: app
-createTime: 1970-01-01T00:00:00Z
-# Indicates whether any changes to a workload's specification are being applied.
-# This will be `true` at creation or after an update that changes the etag
-#
-# This will be `false` when all deployments have an etag aligned with the
-# workload's etag, and all `Progressing` conditions are "False".
-reconciling: false
-etag: xyzzy
+apiVersion: compute.datumapis.com/v1alpha
+kind: Workload
+# Common ObjectMeta structure
+# See: https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/object-meta/
+metadata:
+  creationTimestamp: 1970-01-01T00:00:00Z
+  generation: 1
+  # The workloadId will influence the name of each instance in the workload. This
+  # must be a valid DNS name.
+  name: my-workload
+  # Arbitrary string key/value entries that can be used to influence Datum Cloud
+  # platform behaviors at a workload level, or the behavior of external systems
+  # that may read these annotations.
+  annotations:
+    kubernetes.io/description: My Workload
+    compute.datumapis.com/enable-anycast: "true"
+  # Arbitrary string key/value entries that can be used in network policies,
+  # services, discovery services (DNS discovery, Metadata API).
+  # WILL NOT propagate to instances managed by the workload, allowing updates to
+  # these labels without impacting the lifecycle of an instance.
+  labels:
+    tier: app
 # Defines the expectations of the workload
 spec:
   # The template defines settings for each instance
   template:
-    # Arbitrary string key/value entries that can be used in network policies,
-    # services, discovery services (DNS discovery, Metadata API).
-    #
-    # Any changes to these labels may result in a lifecycle event of instances.
-    labels:
-      tier: app
+    metadata:
+      # Arbitrary string key/value entries that can be used in network policies,
+      # services, discovery services (DNS discovery, Metadata API).
+      #
+      # Any changes to these labels may result in a lifecycle event of instances.
+      labels:
+        tier: app
     spec:
       # The runtime type of the instance, such as a set of containers or a VM.
       runtime:
@@ -353,20 +351,22 @@ spec:
         # creation.
         - name: boot
           disk:
-            spec:
-              populator:
-                # Using a source image will default storage resource requests to
-                # the size of the source image.
-                image: datumcloud/ubuntu-2204-lts
+            template:
+              spec:
+                populator:
+                  # Using a source image will default storage resource requests to
+                  # the size of the source image.
+                  image: datumcloud/ubuntu-2204-lts
         - name: logs
           disk:
-            spec:
-              populator:
-                filesystem:
-                  type: ext4
-              resources:
-                requests:
-                  storage: 10Gi
+            template:
+              spec:
+                populator:
+                  filesystem:
+                    type: ext4
+                resources:
+                  requests:
+                    storage: 10Gi
 
   # Defines where instances should be deployed, and at what scope a deployment
   # will live in (such as in a city, or region).
@@ -455,31 +455,14 @@ status:
   # Status of each placement
   placements:
     - name: us
-      # Status of each deployment in the placement
-      deployments:
-        - name: DFW
-          currentReplicas: 5
-          desiredReplicas: 5
-          # The etag of the workload manifest which has been applied to this
-          # deployment.
-          etag: xyzzy
-          conditions:
-            - type: Available
-              status: "True"
-            - type: Progressing
-              status: "False"
-        - name: SEA
-          currentReplicas: 2
-          desiredReplicas: 5
-          etag: xyzzy
-          conditions:
-            - type: Available
-              status: "True"
-            - type: Progressing
-              status: "False"
-              reason: QuotaExhausted
-              message: CPU quota has been exhausted in, please contact support.
-    # ...
+      replicas: 2
+      currentReplicas: 2
+      desiredReplicas: 5
+      conditions:
+        - type: Available
+          status: "True"
+        - type: Progressing
+          status: "True"
 ```
 
 #### Minimum specifications
@@ -490,7 +473,9 @@ based workload.
 ##### Container based instance
 
 ```yaml
-name: projects/my-project/workloads/my-container-workload
+apiVersion: compute.datumapis.com/v1alpha
+kind: Workload
+name: my-container-workload
 spec:
   template:
     spec:
@@ -513,7 +498,9 @@ spec:
 ##### VM based instance
 
 ```yaml
-name: projects/my-project/workloads/my-vm-workload
+apiVersion: compute.datumapis.com/v1alpha
+kind: Workload
+name: my-vm-workload
 spec:
   template:
     spec:
@@ -528,9 +515,10 @@ spec:
       volumes:
         - name: boot
           disk:
-            spec:
-              populator:
-                image: datumcloud/ubuntu-2204-lts
+            template:
+              spec:
+                populator:
+                  image: datumcloud/ubuntu-2204-lts
   placements:
     - name: us
       cityCodes: ['DFW', 'SEA']
