@@ -117,8 +117,6 @@ updates.
 
 A logical entry point to Datum's Services exists with a domain name and the domain name system. 
 
-
-
 ## Motivation
 
 <!--
