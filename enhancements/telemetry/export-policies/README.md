@@ -424,24 +424,21 @@ spec:
       # Configure which sources should be sent to this sink.
       sources:
       - metrics
-      prometheusRemoteWrite:
-        endpoint: https://prometheus-prod-56-prod-us-east-2.grafana.net/api/prom/push
-        authentication:
-          basic:
-            # A reference to a `kubernetes.io/basic-auth` secret type. Must
-            # contain `username` and `password` keys.
-            secretRef:
-              name: "grafana-cloud-credentials"
-          bearerToken:
-            secretRef:
-              name: "grafana-api-key"
-              key: "token"
-      batch:
-        timeout: 5s           # Batch timeout before sending telemetry
-        maxSize: 500          # Maximum number of telemetry entries per batch
-      retry:
-        maxAttempts: 3        # Maximum retry attempts
-        backoffDuration: 2s   # Delay between retry attempts
+      target:
+        prometheusRemoteWrite:
+          endpoint: https://prometheus-prod-56-prod-us-east-2.grafana.net/api/prom/push
+          authentication:
+            basic:
+              # A reference to a `kubernetes.io/basic-auth` secret type. Must
+              # contain `username` and `password` keys.
+              secretRef:
+                name: "grafana-cloud-credentials"
+          batch:
+            timeout: 5s           # Batch timeout before sending telemetry
+            maxSize: 500          # Maximum number of telemetry entries per batch
+          retry:
+            maxAttempts: 3        # Maximum retry attempts
+            backoffDuration: 2s   # Delay between retry attempts
 ```
 
 #### OpenTelemetry
@@ -449,6 +446,11 @@ spec:
 This example demonstrates how to configure an export policy to send telemetry
 data to an OpenTelemetry compatible endpoint. This sink supports using Basic and
 Bearer token authentication.
+
+> [!NOTE]
+>
+> This example demonstrates how we will support the OpenTelemetry protocol in
+> the future.
 
 ```yaml
 apiVersion: telemetry.datumapis.com/v1alpha1
@@ -461,26 +463,22 @@ spec:
 
   sinks:
     - name: grafana-cloud-otel
-      openTelemetry:
-        http:
-          endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
-        authentication:
-          basic:
-            # A reference to a `kubernetes.io/basic-auth` secret type. Must
-            # contain `username` and `password` keys.
-            secretRef:
-              name: "grafana-cloud-credentials"
-          bearerToken:
-            secretRef:
-              name: "grafana-api-key"
-              key: "token"
-
-      batch:
-        timeout: 5s           # Batch timeout before sending telemetry
-        maxSize: 500          # Maximum number of telemetry entries per batch
-      retry:
-        maxAttempts: 3        # Maximum retry attempts
-        backoffDuration: 2s   # Delay between retry attempts
+      target:
+        openTelemetry:
+          http:
+            endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
+          authentication:
+            basic:
+              # A reference to a `kubernetes.io/basic-auth` secret type. Must
+              # contain `username` and `password` keys.
+              secretRef:
+                name: "grafana-cloud-credentials"
+          batch:
+            timeout: 5s           # Batch timeout before sending telemetry
+            maxSize: 500          # Maximum number of telemetry entries per batch
+          retry:
+            maxAttempts: 3        # Maximum retry attempts
+            backoffDuration: 2s   # Delay between retry attempts
 ```
 
 <!-- ## Production Readiness Review Questionnaire -->
@@ -807,6 +805,9 @@ Major milestones might include:
 
 - 2025-03-11 - Define initial enhancement goals, system architecture, and API
   design
+- 2025-04-22 - Initial implementation of the Export Policy API ([v0.1.0])
+
+[v0.1.0]: https://github.com/datum-cloud/telemetry-services-operator/releases/tag/v0.1.0
 
 <!-- ## Drawbacks -->
 
