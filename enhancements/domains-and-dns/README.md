@@ -76,10 +76,11 @@ template.
 
 - [Summary](#summary)
 - [Motivation](#motivation)
+  - [Problem Space Exploration](#problem-space-exploration)
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
-  - [User Stories (Optional)](#user-stories-optional)
+  - [User Stories](#user-stories)
   - [Notes/Constraints/Caveats (Optional)](#notesconstraintscaveats-optional)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
@@ -134,6 +135,10 @@ In other words, the "stars must align perfectly" to get a new or existing domain
 
 Some of the common problems include:
 
+### Proof of Domain Ownership
+
+
+
 ### Improper DNS Configuration
 
 Improper DNS configuration can contribute to platform setup problems. Typical systems ask users to copy and paste DNS A, AAAA, CNAME, and TXT records from the new platform into an existing DNS service provider. These steps are error prone for users. Problems can include:
@@ -186,12 +191,20 @@ List the specific goals of the Enhancement. What is it trying to achieve? How wi
 know that this has succeeded?
 -->
 
+- Identify common DNS related configuration mistakes that could impact setup of services on Datum Cloud.
+- Identify 3rd party tools such as GoDaddy Domain Connect, CloudValid, and Entri to simplify domain setup on Datum Cloud. 
+
+
 ## Non-Goals
 
 <!--
 What is out of scope for this Enhancement? Listing non-goals helps to focus discussion
 and make progress.
 -->
+
+- Creation of mitigations that require Datum to become a full ICANN-accredited registrar.
+- Creation of a passive DNS monitoring service to identify each and every DNS change made.
+
 
 ## Proposal
 
@@ -204,7 +217,11 @@ The "Design Details" section below is for the real
 nitty-gritty.
 -->
 
-### User Stories (Optional)
+To mitigate common domain name and DNS configuration errors, Datum can provide a series of common tools that can be used to set expectations about the DNS configuration of a domain name. The proposal below attempts to create a series of tools that could be used to inform a user about making DNS changes.
+
+In the User Stories below, we describe a number of tools that should be able to be run from Datum Cloud, Datum OS, and the Datum Website for debugging purposes.
+
+### User Stories
 
 <!--
 Detail the things that people will be able to do if this Enhancement is implemented.
@@ -213,16 +230,38 @@ the system. The goal here is to make this feel real for users without getting
 bogged down.
 -->
 
-#### A New Domain Name
-
-A user who does not have an existing domain name is likely the easiest to get setup with Datum.
 
 
-#### An Existing Domain Name with an Existing DNS Host
+#### Domain Name Scanning Tool
 
-A user who HAS an existing domain name is likely to be more complex to properly on-board.
+As a user, I want a microservice that will scan and report information about my domain name. The tool will accept an existing domain name is the input.
 
+The output will include:
 
+- WHOIS Data including Registrar and Nameservers
+- Domain Name SOA data, including Negative Cache TTL. The negative cache TTL should have a prominent explanation about its role in new DNS record creation. If a record is queried in the DNS that does not exist, then that answer will be negatively cached up to the Negative Cache TTL. This may cause a user to believe that their data does not exist in the DNS after making DNS updates.
+
+#### FQDN Analyzer
+
+As a user, I want a microservice that will scan a given FQDN and tell me interesting things about that hostname. The tool will accept an FQDN as input.
+
+The output will include:
+
+- Results of a non-cached DNS request made from Datum POPs around the world, to test for DNS record "propagation" differences. Return the data to the user with a summary of what is identified.
+- If the record results in a CNAME or CNAME chain to be followed, collect and provide data about every step of the CNAME chain.
+- Provide detailed data about DNS TTLs, and how making a record change could be impacted by having a high DNS TTL. Advise the user that if changes are being made, that we recommend dropping TTLs, waiting a TTL cycle, making the change, and then raising the TTL after the change is confirmed working.
+
+#### DNS Cache vs. Authoritative Query Tool
+
+As a user, I want to know if my authoritative DNS data is properly available in various Recursive DNS platforms. Given an FQDN as input:
+
+- Locate and query the authoritative DNS service for the FQDN.
+- Globally query worldwide recursive DNS platforms, such as Cloudflare, Google DNS, Quad9, OpenDNS, etc.
+- Compare the resulting data and present to the client.
+
+#### Datum Service Analyzer
+
+As a user, I want to tell this tool about a specific Datum service (e.g. instance of the gateway API). The tool will then lookup data in the Datum system to determine the best practice DNS configuration (e.g. CNAMEs, etc), and query the live DNS system without caching (e.g. dig +trace) to determine if DNS records for that service are properly setup. If the service is not correctly setup, then the tool should use an LLM to attempt to make recommendations to fix the problem.
 
 ### Notes/Constraints/Caveats (Optional)
 
