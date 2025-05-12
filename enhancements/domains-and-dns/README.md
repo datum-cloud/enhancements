@@ -116,7 +116,12 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
-A logical entry point to Datum's Services exists with a domain name and the domain name system. 
+A logical entry point to Datum's Services exists with a domain name and the
+domain name system. However, domain name and DNS based workflow entry points
+have historically created significant on-boarding barriers to IaaS, PaaS, and
+SaaS applications due to the complexity of the DNS system, and its error prone
+workflows. We seek to provide a streamlined method of domain on-boarding at
+Datum.
 
 ## Motivation
 
@@ -125,64 +130,102 @@ This section is for explicitly listing the motivation, goals, and non-goals of
 this Enhancement.  Describe why the change is important and the benefits to users.
 -->
 
-The purpose of this enhancement is to explore how a Datum Customer could streamline their on-boarding to our platform with a domain name as the starting point.
+The purpose of this enhancement is to explore how a Datum Customer could
+streamline their on-boarding to our platform with a domain name as the starting
+point.
 
 ## Problem Space Exploration
 
-When using SaaS applications like Loveable, Cloudflare, or Mailchimp, improper DNS configuration becomes a blocking hurdle to progress. There are many reasons why these hurdles exist, and the goal of this section is to help enumerate those problems and where Datum can help solve them.
+When using SaaS applications like Loveable, Cloudflare, or Mailchimp, improper
+DNS configuration becomes a blocking hurdle to progress. There are many reasons
+why these hurdles exist, and the goal of this section is to help enumerate those
+problems and where Datum can help solve them.
 
-In other words, the "stars must align perfectly" to get a new or existing domain to flawlessly on-board to a new service platform.
+In other words, the "stars must align perfectly" to get a new or existing domain
+to flawlessly on-board to a new service platform.
 
 Some of the common problems include:
 
 ### Proof of Domain Ownership
 
+Proof of domain ownership is designed to ensure that only authorized personnel
+can configure a domain name on a platform such as Datum. Proof of domain
+ownership generally uses an out of band validation technique, such as asking the
+requesting party to place DNS TXT records in the domain in question, place a
+specific nonce at a well known web service in the domain, or others. 
 
+Allowing a domain to be hijacked by an unauthorized organization in the Datum
+platform will erode trust with your customer base. For example, if Prospect
+"Cyber Corp, Inc" is the rightful owner of the domain "cybercorp.com", and
+existing Customer "Hacker Corp, LLC" adds cybercorp.com to their Datum
+organization, the domain cybercorp.com will no longer be available for "Cyber
+Corp, Inc." to use in our system. This is an example of a domain hijacking
+attempt. 
 
 ### Improper DNS Configuration
 
-Improper DNS configuration can contribute to platform setup problems. Typical systems ask users to copy and paste DNS A, AAAA, CNAME, and TXT records from the new platform into an existing DNS service provider. These steps are error prone for users. Problems can include:
+Improper DNS configuration can contribute to platform setup problems. Typical
+systems ask users to copy and paste DNS A, AAAA, CNAME, and TXT records from the
+new platform into an existing DNS service provider. These steps are error prone
+for users. Problems can include:
 
 - Improperly copy/pasting values
 - Placing a CNAME at the root of a domain name
-- Creating new records with high TTLs, that are then cached (with incorrect data) upon DNS query
-
-Common mitigation approaches to this problem include:
-
-- [GoDaddy Domain Connect](https://www.domainconnect.org/)
-- [CloudValid](https://www.domainconnect.org/)
-- [Entri](https://www.entri.com/)
+- Creating new records with high TTLs, that are then cached (with incorrect
+  data) upon DNS query
 
 ### Effects of DNS TTLs and "negative caching" (a.k.a DNS "propagation")
 
-TTLs control the longevity of cached records in the DNS system. When an end client queries it's recursive DNS server, if the records in question are not available in the cache, the domain's authoritative server is queried for the data. One of two things tends to happen after that: 
+TTLs control the longevity of cached records in the DNS system. When an end
+client queries it's recursive DNS server, if the records in question are not
+available in the cache, the domain's authoritative server is queried for the
+data. One of two things tends to happen after that: 
 
-a) the records (hopefully with correct data) are fetched, and cached according to the record's TTL; 
-b) the record is not found, in which case an NXDOMAIN response is given, and the negative response is cached by the recursive server for the time period in the by the domain's negative cache TTL value (part of the domain's SOA record); 
-c) the same occurs, however, the negative cache TTL is set to value defined as part of the local configuration of the recursive DNS server, which may be longer than that of the domain's SOA record.
+a) the records (hopefully with correct data) are fetched, and cached according
+to the record's TTL; b) the record is not found, in which case an NXDOMAIN
+response is given, and the negative response is cached by the recursive server
+for the time period in the by the domain's negative cache TTL value (part of the
+domain's SOA record); c) the same occurs, however, the negative cache TTL is set
+to value defined as part of the local configuration of the recursive DNS server,
+which may be longer than that of the domain's SOA record.
 
 ### Improper TLS/SSL Configuration
 
-TLS certificates must be setup for all Subject Alternative Names (SANs) being used by a client. If a CNAME is set into an endpoint, that endpoint must be configured to accept traffic (using SNI / Host headers) and related TLS/SSL certificates must be updated to accept such traffic.
+TLS certificates must be setup for all Subject Alternative Names (SANs) being
+used by a client. If a CNAME is set into an endpoint, that endpoint must be
+configured to accept traffic (using SNI / Host headers) and related TLS/SSL
+certificates must be updated to accept such traffic.
 
 ### Reverse Proxy Backend is Not Ready for Traffic
 
-For traffic ingress, any reverse proxy involved must be ready to accept traffic, and hand that traffic to backends. Backends must be configured and also ready for traffic.
+For traffic ingress, any reverse proxy involved must be ready to accept traffic,
+and hand that traffic to backends. Backends must be configured and also ready
+for traffic.
 
 ### Configuration Validation
 
-(Most) SaaS applications do not perform continuous configuration validation to ensure that the desired data for the system is in place.
-
+(Most) SaaS applications do not perform continuous configuration validation to
+ensure that the desired data for the system is in place.
 
 ### Debugging Tools
 
-DNS debugging tools, such as [WhatsMyDNS](https://www.whatsmydns.net/), are useful for validating that authoritative DNS servers are vending proper zone data around the world, but they do not provide full visibility of an end client's state of the cache.
+DNS debugging tools, such as [WhatsMyDNS](https://www.whatsmydns.net/), are
+useful for validating that authoritative DNS servers are vending proper zone
+data around the world, but they do not provide full visibility of an end
+client's state of the cache.
 
-This creates opportunities where improper zone data or negative cached records, could be present in an end user's local recursive, but these debugging tools do not have awareness to the state of the user's cache. In other words, the configuration might be totally valid and correct according to the debugging tool, but the local state of cache causes the experience to be broken.
+This creates opportunities where improper zone data or negative cached records,
+could be present in an end user's local recursive, but these debugging tools do
+not have awareness to the state of the user's cache. In other words, the
+configuration might be totally valid and correct according to the debugging
+tool, but the local state of cache causes the experience to be broken.
 
 ### Legacy DNS Service Platforms
 
-As Datum offers a high performance Anycast edge, performance for a domain will be constrained by the weakest performing authoritative DNS service in the chain of delegation. Multiple legacy platforms do not use anycast DNS service, creating high latency conditions.
+As Datum offers a high performance Anycast edge, performance for a domain will
+be constrained by the weakest performing authoritative DNS service in the chain
+of delegation. Multiple legacy platforms do not use anycast DNS service,
+creating high latency conditions.
 
 ## Goals
 
@@ -191,8 +234,10 @@ List the specific goals of the Enhancement. What is it trying to achieve? How wi
 know that this has succeeded?
 -->
 
-- Identify common DNS related configuration mistakes that could impact setup of services on Datum Cloud.
-- Identify 3rd party tools such as GoDaddy Domain Connect, CloudValid, and Entri to simplify domain setup on Datum Cloud. 
+- Identify common DNS related configuration mistakes that could impact setup of
+  services on Datum Cloud.
+- Identify 3rd party tools such as GoDaddy Domain Connect, CloudValid, and Entri
+  to simplify domain setup on Datum Cloud. 
 
 
 ## Non-Goals
@@ -202,8 +247,10 @@ What is out of scope for this Enhancement? Listing non-goals helps to focus disc
 and make progress.
 -->
 
-- Creation of mitigations that require Datum to become a full ICANN-accredited registrar.
-- Creation of a passive DNS monitoring service to identify each and every DNS change made.
+- Creation of mitigations that require Datum to become a full ICANN-accredited
+  registrar.
+- Creation of a passive DNS monitoring service to identify each and every DNS
+  change made.
 
 
 ## Proposal
@@ -217,9 +264,29 @@ The "Design Details" section below is for the real
 nitty-gritty.
 -->
 
-To mitigate common domain name and DNS configuration errors, Datum can provide a series of common tools that can be used to set expectations about the DNS configuration of a domain name. The proposal below attempts to create a series of tools that could be used to inform a user about making DNS changes.
+To mitigate common domain name and DNS configuration errors, Datum can provide a
+series of common tools that can be used to set expectations about the DNS
+configuration of a domain name. The proposal below attempts to create a series
+of tools that could be used to inform a user about making DNS changes.
 
-In the User Stories below, we describe a number of tools that should be able to be run from Datum Cloud, Datum OS, and the Datum Website for debugging purposes.
+In the User Stories below, we describe a number of tools that should be able to
+be run from Datum Cloud, Datum OS, and the Datum Website for debugging purposes.
+
+Common commercial mitigation approaches to these problems include:
+
+- [GoDaddy Domain Connect](https://www.domainconnect.org/)
+- [CloudValid](https://www.domainconnect.org/)
+- [Entri](https://www.entri.com/)
+
+For reference, some best practice implementation examples include:
+
+- [Let's Encrypt Challenges](https://letsencrypt.org/docs/challenge-types/)
+- [February 2023 RFC Proposal to the DNSOp WG](https://datatracker.ietf.org/doc/draft-ietf-dnsop-domain-verification-techniques/)
+
+Interesting related open source DNS projects:
+- [DNSControl by StackExchange](https://dnscontrol.org/)
+- [OctoDNS by Github](https://github.com/octodns/octodns)
+- [DNSLexicon](https://github.com/dns-lexicon/dns-lexicon)
 
 ### User Stories
 
@@ -230,38 +297,68 @@ the system. The goal here is to make this feel real for users without getting
 bogged down.
 -->
 
+### Domain Name Ownership Verification Tool
 
+As a Datum administrator, I want to verify ownership of domain names before they
+are used in our platform. The tool will accept a domain name as input. The tool
+will provide a nonce in the form of a TXT record to be placed at the APEX of the
+domain. The tool will prompt the user to modify the domain so that the nonce
+will be served from the TXT record. Once the user confirms changes have been
+made, the tool will detect and query the authoritative DNS servers for the
+domain to validate that the nonce was deployed as a TXT record, thereby
+confirming domain ownership.
+
+#### Datum Configuration Generator / Analyzer
+
+As a user, I want to tell this tool about a specific Datum service (e.g.
+instance of the gateway API). The tool will then lookup data in the Datum system
+to determine the best practice DNS configuration (e.g. CNAMEs, etc), and query
+the live DNS system without caching (e.g. dig +trace) to determine if DNS
+records for that service are properly setup. If the service is not correctly
+setup, the system will tell me the specific DNS records I need to go create with
+recommended initial TTL values (along with consideration for expected time to
+expire cache for existing TTLs or negative caching).
 
 #### Domain Name Scanning Tool
 
-As a user, I want a microservice that will scan and report information about my domain name. The tool will accept an existing domain name is the input.
+As a user, I want a microservice that will scan and report information about my
+domain name. The tool will accept an existing domain name is the input.
 
 The output will include:
 
 - WHOIS Data including Registrar and Nameservers
-- Domain Name SOA data, including Negative Cache TTL. The negative cache TTL should have a prominent explanation about its role in new DNS record creation. If a record is queried in the DNS that does not exist, then that answer will be negatively cached up to the Negative Cache TTL. This may cause a user to believe that their data does not exist in the DNS after making DNS updates.
+- Domain Name SOA data, including Negative Cache TTL. The negative cache TTL
+  should have a prominent explanation about its role in new DNS record creation.
+  If a record is queried in the DNS that does not exist, then that answer will
+  be negatively cached up to the Negative Cache TTL. This may cause a user to
+  believe that their data does not exist in the DNS after making DNS updates.
 
 #### FQDN Analyzer
 
-As a user, I want a microservice that will scan a given FQDN and tell me interesting things about that hostname. The tool will accept an FQDN as input.
+As a user, I want a microservice that will scan a given FQDN and tell me
+interesting things about that hostname. The tool will accept an FQDN as input.
 
 The output will include:
 
-- Results of a non-cached DNS request made from Datum POPs around the world, to test for DNS record "propagation" differences. Return the data to the user with a summary of what is identified.
-- If the record results in a CNAME or CNAME chain to be followed, collect and provide data about every step of the CNAME chain.
-- Provide detailed data about DNS TTLs, and how making a record change could be impacted by having a high DNS TTL. Advise the user that if changes are being made, that we recommend dropping TTLs, waiting a TTL cycle, making the change, and then raising the TTL after the change is confirmed working.
+- Results of a non-cached DNS request made from Datum POPs around the world, to
+  test for DNS record "propagation" differences. Return the data to the user
+  with a summary of what is identified.
+- If the record results in a CNAME or CNAME chain to be followed, collect and
+  provide data about every step of the CNAME chain.
+- Provide detailed data about DNS TTLs, and how making a record change could be
+  impacted by having a high DNS TTL. Advise the user that if changes are being
+  made, that we recommend dropping TTLs, waiting a TTL cycle, making the change,
+  and then raising the TTL after the change is confirmed working.
 
 #### DNS Cache vs. Authoritative Query Tool
 
-As a user, I want to know if my authoritative DNS data is properly available in various Recursive DNS platforms. Given an FQDN as input:
+As a user, I want to know if my authoritative DNS data is properly available in
+various Recursive DNS platforms. Given an FQDN as input:
 
 - Locate and query the authoritative DNS service for the FQDN.
-- Globally query worldwide recursive DNS platforms, such as Cloudflare, Google DNS, Quad9, OpenDNS, etc.
+- Globally query worldwide recursive DNS platforms, such as Cloudflare, Google
+  DNS, Quad9, OpenDNS, etc.
 - Compare the resulting data and present to the client.
-
-#### Datum Service Analyzer
-
-As a user, I want to tell this tool about a specific Datum service (e.g. instance of the gateway API). The tool will then lookup data in the Datum system to determine the best practice DNS configuration (e.g. CNAMEs, etc), and query the live DNS system without caching (e.g. dig +trace) to determine if DNS records for that service are properly setup. If the service is not correctly setup, then the tool should use an LLM to attempt to make recommendations to fix the problem.
 
 ### Notes/Constraints/Caveats (Optional)
 
