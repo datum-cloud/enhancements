@@ -59,9 +59,10 @@ should be approved by the remaining approvers and/or the owning SIG (or
 SIG Architecture for cross-cutting KEPs).
 -->
 # KEP-NNNN: Your short, descriptive title
-NGFW - NextGenFireWall or a hybrid mesh firewall, a FW built with Zero-trust principles with provider security capabilities 
+NGFW - NextGenFireWall or a hybrid mesh firewall, a FW built with Zero-trust principles with  Provider's provider security capabilities 
 <!--
-This is the title of your KEP. Keep it short, simple, and descriptive. A good
+This is the title of your KEP. Keep it short, simple, and descriptive. A good:w
+
 title can help communicate what the KEP is and should be considered as part of
 any review.
 -->
