@@ -162,6 +162,46 @@ organization, the domain cybercorp.com will no longer be available for "Cyber
 Corp, Inc." to use in our system. This is an example of a domain hijacking
 attempt. 
 
+### Domain Name Health
+
+- As a service provider, I want to monitor the health of customer domains through WHOIS checks so that I can proactively identify and address potential issues
+- As a service provider, I want to track domain expiration dates so that I can prevent accidental domain loss
+- As a service provider, I want to monitor domain status flags (like clientTransferProhibited, clientDeleteProhibited) so that I can ensure proper domain security
+- As a service provider, I want to verify nameserver configurations so that I can maintain proper DNS resolution
+- As a service provider, I want to track domain modification dates so that I can detect unauthorized changes
+- As a service provider, I want to receive alerts about critical domain status changes so that I can take immediate action
+
+The WHOIS health check system will:
+1. **Expiration Monitoring**
+  - Track domain expiration dates
+  - Calculate days until expiration
+  - Alert on approaching expiration (30, 15, 7, 3, 1 days)
+  - Flag domains with auto-renewal status
+
+2. **Status Monitoring**
+  - Track domain status flags:
+    - clientTransferProhibited
+    - clientDeleteProhibited
+    - clientUpdateProhibited
+    - serverTransferProhibited
+    - serverDeleteProhibited
+    - serverUpdateProhibited
+    - pendingDelete
+    - pendingTransfer
+    - redemptionPeriod
+  - Alert on status changes
+  - Maintain status history
+
+3. **Nameserver Verification**
+  - Validate nameserver configurations
+  - Check for proper delegation
+  - Alert on misconfigurations
+
+4. **Modification Tracking**
+  - Monitor last modification date
+  - Track registrar changes
+  - Alert on modifications
+
 ### Improper DNS Configuration
 
 Improper DNS configuration can contribute to platform setup problems. Typical
