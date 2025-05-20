@@ -532,6 +532,11 @@ The domain inventory view will use a table showing all domain names available in
   - Search & Filter: Text search by domain name; filter by name, registrar, DNS provider, or expiration date
   - Row Highlighting for Changes: Use a subtle yellow background tint (e.g., bg-yellow-50) on any row with detected WHOIS changes in the last 7 days
 
+A ChatGPT inspired mockup:
+
+![ChatGPT Inspired Mock Up](ChatGPT-Domain-Inventory.png)
+
+
 ### Domain Detail View
 
 View additional details about a domain name by clicking the "Details" button in the Inventory View. A possible view is:
