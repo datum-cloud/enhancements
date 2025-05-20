@@ -348,17 +348,6 @@ made, the tool will detect and query the authoritative DNS servers for the
 domain to validate that the nonce was deployed as a TXT record, thereby
 confirming domain ownership.
 
-#### Datum Configuration Generator / Analyzer
-
-As a user, I want to tell this tool about a specific Datum service (e.g.
-instance of the gateway API). The tool will then lookup data in the Datum system
-to determine the best practice DNS configuration (e.g. CNAMEs, etc), and query
-the live DNS system without caching (e.g. dig +trace) to determine if DNS
-records for that service are properly setup. If the service is not correctly
-setup, the system will tell me the specific DNS records I need to go create with
-recommended initial TTL values (along with consideration for expected time to
-expire cache for existing TTLs or negative caching).
-
 #### Domain Name Scanning Tool
 
 As a user, I want a microservice that will scan and report information about my
@@ -372,6 +361,17 @@ The output will include:
   If a record is queried in the DNS that does not exist, then that answer will
   be negatively cached up to the Negative Cache TTL. This may cause a user to
   believe that their data does not exist in the DNS after making DNS updates.
+
+#### Datum Configuration Generator / Analyzer
+
+As a user, I want to tell this tool about a specific Datum service (e.g.
+instance of the gateway API). The tool will then lookup data in the Datum system
+to determine the best practice DNS configuration (e.g. CNAMEs, etc), and query
+the live DNS system without caching (e.g. dig +trace) to determine if DNS
+records for that service are properly setup. If the service is not correctly
+setup, the system will tell me the specific DNS records I need to go create with
+recommended initial TTL values (along with consideration for expected time to
+expire cache for existing TTLs or negative caching).
 
 #### FQDN Analyzer
 
@@ -431,6 +431,139 @@ change are understandable. This may include API specs (though not always
 required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
+
+Users will be able to add domain names to their inventory on Datum Cloud. Once a domain is added, its ownership will be verified using common domain ownership techniques (at the moment, we plan to use Entri). Once verified, in accordance with our User Stories above, Datum will be able to perform various health checks on those domains.
+
+### Adding a Domain and Verifying Ownership
+
+To start, a domain needs to be added to the system. The workflow to add a domain name is featured in the state diagram below:
+
+```mermaid
+sequenceDiagram
+  autonumber
+
+  participant User
+  participant Portal
+  participant Entri
+  
+  User ->> Portal: Add example.com
+  Portal ->> Entri: Verify example.com
+  Entri ->> User: Modal Dialog for example.com
+  User ->> Entri: Run Entri Domain Ownership Sequence
+  Entri ->> Portal: Domain Ownership Verified
+  Portal ->> User: Domain example.com added to Inventory
+
+```
+
+Once a domain name is added to Datum Cloud, it is stored as a **Domain** object in our Kubernetes API service. An initial representation for a Domain object may look like:
+
+```yaml
+apiVersion: datumapis.com/v1alpha
+kind: Domain
+metadata:
+  name: q7.io
+spec:
+  name: q7.io
+```
+
+### Gathering Initial Domain Name State
+
+Once a domain is added a verified, details about the domain name should be fetched from public available WHOIS data and inserted into the Domain resource object. Datum will need to crawl WHOIS data, or find a method to obtain WHOIS data, to populate information into the Domain resource. The purpose of collecting this data is to make it available for viewing via API or Portal, and to be used to detection of events against the domain name (which ultimately could lead to outages or misconfiguration events).
+
+For example, the domain q7.io would like the following after being crawled:
+
+```yaml
+apiVersion: datumapis.com/v1alpha
+kind: Domain
+metadata:
+  name: q7.io
+spec:
+  name: q7.io
+  registrarIANAID: 1068
+  registrarIANAname: NAMECHEAP INC
+  createdDate: 2012-07-06T13:58:57.00Z
+  modifiedDate: 2019-08-17T16:33:24.36Z
+  expirationDate: 2029-07-06T13:58:57.00Z
+  nameservers: ns1.digitalocean.com, ns2.digitalocean.com, ns3.digitalocean.com
+  DNSSEC: unsigned
+  statusFlags: clientDeleteProhibited, clientTransferProhibited, clientUpdateProhibited
+```
+
+### Performing Routine Domain Name Health Checks
+
+After gathering the initial domain state, we can now perform routine health checks for the domain as a convenience for Datum Cloud users. The sequence diagram below indicates this flow:
+
+```mermaid
+sequenceDiagram
+  autonumber
+
+  participant User
+  participant Portal
+  participant Cron
+  participant Registry
+  participant Event
+
+  loop Hourly
+    activate Cron
+    Cron ->> Registry: Get domain example.com
+    Registry ->> Cron: Details for example.com
+    Cron ->> Portal: Check domain name data against Domain resource object
+    Cron ->> Event: Create event if domain was modified
+    deactivate Cron
+  end
+  User ->> Portal: View example.com
+```
+
+If a change is detected (compare the registry results to the data in the Domain resource object), then an event can be triggered to flag the change to a User. The Domain object should get updated to reflect the change, and the prior data should be stored for a period of time so that the user is aware of the change. 
+
+Depending upon the capability of Datum's eventing systems, we may want to cause a real time notification to be triggered, but that should be out of scope at this time.
+
+### Domain Inventory View
+
+The domain inventory view will use a table showing all domain names available in the organization.
+
+| Domain Name | Expiration  | Registrar     | DNS Provider   | Status | Last Change Detected | Actions     |
+| ----------- | ----------- | ------------- | -------- | -------------- | ------------------- | ----------- |
+| q7.io       | Jul 6, 2029 | NAMECHEAP INC | Digital Ocean | Normal | Aug 17, 2019         | Details |
+
+
+- UX Details:
+  - Sortable Columns: Name, Expiration, Status, Last Change Detected
+  - Search & Filter: Text search by domain name; filter by name, registrar, DNS provider, or expiration date
+  - Row Highlighting for Changes: Use a subtle yellow background tint (e.g., bg-yellow-50) on any row with detected WHOIS changes in the last 7 days
+
+### Domain Detail View
+
+View additional details about a domain name by clicking the "Details" button in the Inventory View. A possible view is:
+
+```yaml
+------------------------------------------
+| q7.io                                  |
+| Registered with: NAMECHEAP INC         |
+| DNS Provider: DigitalOcean             |
+| Last Scan: Aug 17, 2019   🔁 Rescan    |
+------------------------------------------
+
+[Tabs]: [Overview] [History] [Event Log]
+
+Overview Tab:
+------------------------------------------
+| 🌐 Domain Info                         |
+| Created: July 6, 2012                 |
+| Modified: Aug 17, 2019               |
+| Expiration: July 6, 2029             |
+| Registrar IANA ID: 1068              |
+| Status Flags:                        |
+|  • clientDeleteProhibited            |
+|  • clientTransferProhibited          |
+|  • clientUpdateProhibited            |
+| 🔧 Nameservers:                      |
+|  • ns1.digitalocean.com              |
+|  • ns2.digitalocean.com              |
+|  • ns3.digitalocean.com              |
+|  🔐 DNSSEC: Unsigned                 |
+------------------------------------------
+```
 
 ## Production Readiness Review Questionnaire
 
