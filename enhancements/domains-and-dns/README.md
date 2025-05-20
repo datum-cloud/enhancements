@@ -120,7 +120,7 @@ A logical entry point to Datum's Services exists with a domain name and the
 domain name system. However, domain name and DNS based workflow entry points
 have historically created significant on-boarding barriers to IaaS, PaaS, and
 SaaS applications due to the complexity of the DNS system, and its error prone
-workflows. We seek to provide a streamlined method of domain on-boarding at
+workflows. We seek to provide a streamlined method of domain on-boarding and management at
 Datum.
 
 ## Motivation
