@@ -261,24 +261,31 @@ Two main CRDs will be created as a direct part of the Quota Management implement
 
 #### `ResourceQuotaClaim`
 
-The `ResourceQuotaClaim` CRD represents the *intent* of the request to create, update/scale, or delete resources. This CRD contains the resources being requested, along with their quantity. The below `yaml` snippet shows an claim created by an incoming request tied to one Instance, which requests the additional allocation of 8 CPU cores and 32GiB of memory, along with the instance count:
+The `ResourceQuotaClaim` CRD represents the *intent* of the request to create, update/scale, or delete resources. This CRD contains a reference to the owner of the resources being requested (e.g. Instance), as well as the specific resource requests, including name and metric units. The below `yaml` snippet shows an claim created by an incoming request tied to one Instance, which requests the additional allocation of 8 CPU cores and 32GiB of memory, along with the instance count:
 
 ```yaml
-apiVersion: quota.datumapis.com/v1alpha1
+apiGroup: 
 kind: ResourceQuotaClaim
 metadata:
   # Connect the claim’s lifetime to the workload that needs the quota
   name: instance-abc123-claim
   namespace: proj-abc 
-  ownerReferences: 
-  - apiVersion: compute.datumapis.com/v1
+  # Here for garbage collection convenience
+  ownerRef: 
+    apiGroup: compute.datumapis.com 
     kind: Instance
     name: instance-abc123
     uid: <uuid>
   finalizers:
   - quota.datumapis.com/usage-release
 spec:
-  # Resources being requested
+  # The reference to the resource that owns the resources being requested. Will be used to key off of within reconciliation.
+  resourceRef: 
+    apiGroup: compute.datumapis.com 
+    kind: Instance 
+    name: instance-abc123 
+    uid: <uuid>
+  # Resources being requested for
   resources:
   - name: compute.datumapis.com/instances/cpu
     quantity: "8”
@@ -391,12 +398,9 @@ spec:
 
 ```
 
+#### Quota Registration
 
-#### `BillingAccount`
 
-```yaml
-
-```
 
 ### Quota Operator Controller
 
@@ -424,6 +428,108 @@ The admission webhook is responsible for and executes the following steps:
 1. Synchronously intercepts incoming requests for resource creation/scaling/deletion that are sent to the `quota-operator` controller.
 2. Automatically creates a `ResourceClaimQuota` object based on the intent of the intercepted request.
 3. Attaches labels and annotations to the object to enable easy claim deletion via a finalizer when workloads are torn down.
+
+### Sequence Diagram
+
+Amberflo acts as the real-time usage authority and will be kept in sync with the quota system. The telemetry system pipeline streams metered events (via Vector) amberflo's ingestion API. When quota decisions are made within the `quota-operator`, the operator queries amberflo via API to check true usage before granting a ResourceQuotaClaim. This ensures quota enforcement is aligned with what is ultimately billed downstream.
+
+```mermaid
+%% Sequence – Instance provisioning + telemetry + Amberflo usage sync
+sequenceDiagram
+    autonumber
+    participant Dev as Developer / CI
+    participant APIServer as Kubernetes API Server
+    participant MutateWH as Mutating Webhook<br>(quota-claim injector)
+    participant ValidWH as Validating Webhook<br>(optional)
+    participant Claim as ResourceQuotaClaim (Pending)
+    participant Grant as ResourceQuotaGrant
+    participant QOp as quota-operator (controller)
+    participant Amberflo as Amberflo Usage API
+    participant Telemetry as Telemetry / Metering Pipeline
+    participant Vector as Vector Agent
+    participant Instance as Instance CR
+    participant InstCtrl as Instance Controller
+
+    %% --- Workload Provisioning Flow ---
+    Dev->>APIServer: kubectl apply Instance
+    APIServer->>MutateWH: AdmissionReview (Instance draft)
+    MutateWH-->>APIServer: +finalizer<br>+create Claim
+
+    par (Claim side-effect)
+        MutateWH->>APIServer: POST ResourceQuotaClaim
+    end
+
+    APIServer->>ValidWH: AdmissionReview (optional fast-fail)
+    alt optional fast-fail
+        ValidWH-->>APIServer: reject request
+    else
+        ValidWH-->>APIServer: allow
+    end
+
+    APIServer-->>Dev: 201 Created
+    APIServer-->>Instance: store Instance
+    APIServer-->>Claim: store ResourceQuotaClaim
+
+    %% --- Quota Reconciliation Path ---
+    QOp-->>Claim: watch ADDED
+    QOp->>Grant: GET spec.hard (limits)
+    QOp->>Amberflo: GET usage totals for metric + dimensions
+    Amberflo-->>QOp: usage total returned
+
+    alt Usage < Limit
+        QOp->>Grant: PATCH status.usage += requested
+        QOp->>Claim: PATCH status = Granted
+    else Over quota
+        QOp->>Claim: PATCH status = Denied
+    end
+
+    %% --- Controller Action Based on Claim ---
+    InstCtrl-->>Instance: watch
+    alt Claim Granted
+        InstCtrl->>APIServer: remove finalizer
+        InstCtrl->>Infra: provision workload (pods or VM)
+        Instance-->Dev: Phase = Running
+    else Claim Denied
+        Instance-->Dev: Phase = Failed (QuotaExceeded)
+    end
+
+    %% --- Telemetry & Metering Flow ---
+    Note over Instance, Telemetry: Resource is running and emitting metrics/events
+    Instance->>Telemetry: Emit usage event (cpu=8, location=dfw, ...)
+    Telemetry->>Vector: Format as OTel metric/event
+    Vector->>Amberflo: POST usage event to /meters API
+
+    %% --- Tear-down & cleanup ---
+    Dev->>APIServer: kubectl delete Instance
+    APIServer->>Instance: mark deletionTimestamp
+    InstCtrl->>Claim: delete ResourceQuotaClaim
+    QOp-->>Claim: watch DELETED
+    QOp->>Grant: PATCH status.usage -= released amount
+```
+
+![Sequence Diagram](./sequence_diagram.png)
+
+**Step Breakdown**
+
+
+1. Org/Project admins/developers apply an Instance resource to request provisioning of infrastructure within their project.
+2. The API server invokes the *Mutating* Admission Webhook to process and potentially modify the incoming resource.
+3. Webhook adds a finalizer and creates a `ResourceQuotaClaim` to track the quota request linked to the new Instance.
+4. Webhook submits the new `ResourceQuotaClaim` as a side-effect to the API server so it can later be reconciled.
+5. An optional *Validating* Admission Webhook is called to immediately reject (fail-fast) if quota is exceeded.
+6. The API server creates and persists the Instance and Claim to etcd after mutation and validation are successful.
+7. `quota-operator` detects the new `ResourceQuotaClaim` via its informer/watch and begins reconciliation.
+8. Operator retrieves the associated `ResourceQuotaGrant`, which holds the quota limits and tracked usage.
+9. Operator queries amberflo's usage API (or OpenMeter, etc) to obtain current authoritative usage for the relevant resource and specified dimensions.
+10. Amberflo responds with actual resource usage, allowing the controller to logically evaluate whether the new request fits within the set quota limit.
+11. If resource usage is within the limits, the operator updates the `ResourceQuotaGrant`'s usage and *grants* the claim so the workload can proceed.
+12. If resource usage exceeds limits, the operator *denies* the claim, preventing the workload from consuming resources.
+13. The Instance controller observes the `ResourceQuotaClaim` `status` to decide whether the workload can continue provisioning.
+14. If the quota is *granted*, controller removes finalizer and proceeds to schedule or create infrastructure.
+15. If the quota is *denied*, the Instance enters a `Failed` state, and the user who requested the claim is informed of the quota error in the response
+16. When the Instance is deleted, finalization is triggered, cleaning up all related resources by using the references to the parent resource, project, or organization.
+17. The controller deletes the associated Claim, signaling the quota no longer needs to be reserved.
+18. `quota-operator` observes Claim deletion and automatically updates the `ResourceQuotaGrant` usage by freeing up resources within the specific quota.
 
 ## Production Readiness Review Questionnaire
 
