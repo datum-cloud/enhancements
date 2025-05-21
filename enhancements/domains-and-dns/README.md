@@ -348,6 +348,8 @@ made, the tool will detect and query the authoritative DNS servers for the
 domain to validate that the nonce was deployed as a TXT record, thereby
 confirming domain ownership.
 
+Suggest that we use the methodology described in [draft-ietf-dnsop-domain-verification-techniques-07](https://datatracker.ietf.org/doc/draft-ietf-dnsop-domain-verification-techniques/) Section 4.0 for future RFC compatibility.
+
 #### Domain Name Scanning Tool
 
 As a user, I want a microservice that will scan and report information about my
@@ -443,19 +445,20 @@ sequenceDiagram
   autonumber
 
   participant User
-  participant Portal
-  participant Entri
+  participant API
+  participant Cron
+  participant DNSProvider
   
-  User ->> Portal: Add example.com
-  Portal ->> Entri: Verify example.com
-  Entri ->> User: Modal Dialog for example.com
-  User ->> Entri: Run Entri Domain Ownership Sequence
-  Entri ->> Portal: Domain Ownership Verified
-  Portal ->> User: Domain example.com added to Inventory
-
+  User ->> API: Add example.com
+  API ->> User: Please add DNS TXT validation records
+  API ->> Cron: Please monitor for DNS TXT validation records at DNSProvider
+  Cron ->> DNSProvider: Check for DNS TXT valication records
+  DNSProvidier ->> Cron: NXDOMAIN or valid records
+  Cron ->> API: Update API when valid domain ownership DNS TXT records found
+  API ->> User: Notify user records are avaialble (possible via Webhook)
 ```
 
-Once a domain name is added to Datum Cloud, it is stored as a **Domain** object in our Kubernetes API service. An initial representation for a Domain object may look like:
+Once a domain name is added to the Inventory it is stored as a **Domain** object in our Kubernetes API service. An initial representation for a Domain object may look like:
 
 ```yaml
 apiVersion: datumapis.com/v1alpha
@@ -464,7 +467,21 @@ metadata:
   name: q7.io
 spec:
   name: q7.io
+    verification:
+      requiredDNSRecords:
+        - name: _datum-cloud-challenge.q7.io
+          type: TXT
+          content: <expected value>
 ```
+
+Suggest that we use the methodology described in [draft-ietf-dnsop-domain-verification-techniques-07](https://datatracker.ietf.org/doc/draft-ietf-dnsop-domain-verification-techniques/) Section 4.0 for future RFC compatibility.
+
+### Enhanced Domain Verification Workflow using Entri
+
+
+
+
+
 
 ### Gathering Initial Domain Name State
 
@@ -479,14 +496,38 @@ metadata:
   name: q7.io
 spec:
   name: q7.io
-  registrarIANAID: 1068
-  registrarIANAname: NAMECHEAP INC
+  verification:
+      requiredDNSRecords:
+        - name: _datum-cloud-challenge_.q7.io
+          type: TXT
+          content: <expected value>
+status:
+  registrar:
+    IANAID: 1068
+    IANAname: NAMECHEAP INC
   createdDate: 2012-07-06T13:58:57.00Z
   modifiedDate: 2019-08-17T16:33:24.36Z
   expirationDate: 2029-07-06T13:58:57.00Z
-  nameservers: ns1.digitalocean.com, ns2.digitalocean.com, ns3.digitalocean.com
+  nameservers: 
+  - ns1.digitalocean.com
+  - ns2.digitalocean.com
+  - ns3.digitalocean.com
   DNSSEC: unsigned
-  statusFlags: clientDeleteProhibited, clientTransferProhibited, clientUpdateProhibited
+  statusFlags: 
+  - clientDeleteProhibited
+  - clientTransferProhibited
+  - clientUpdateProhibited
+  statusConditions:
+  - type: OwnershipVerified
+    status: False
+    reason: "WaitingForVerification"
+    message: "Waiting for user to verify ownership of the domain"
+    lastTransitionTime: "2025-05-20T12:00:00Z"
+  - type: Ready
+    status: False
+    reason: "PendingOwnershipVerification"
+    message: "Waiting for user to verify ownership of the domain"
+    lastTransitionTime: "2025-05-20T12:00:00Z"
 ```
 
 ### Performing Routine Domain Name Health Checks
@@ -535,6 +576,29 @@ The domain inventory view will use a table showing all domain names available in
 A ChatGPT inspired mockup:
 
 ![ChatGPT Inspired Mock Up](ChatGPT-Domain-Inventory.png)
+
+We might consider having the following matrix of status states:
+
+- Secure: Expiration is >180 dates from current date AND the following EPP status
+flags are set: serverDeleteProhibited, serverTransferProhibited,
+serverUpdateProhibited 
+- Normal: Expiration is >180 dates from current date AND
+the following EPP status flags are set: clientDeleteProhibited,
+clientTransferProhibited, clientUpdateProhibited 
+- Unlocked: Expiration is >180
+dates from current date AND none of the above EPP status flags are set. The
+domain is likely to be "OK". 
+- Warning: Expiration is < 180 dates from current
+date OR Any flag other than this un Secure, Normal, or Critical. 
+- Critical: Anytime any EPP flag of autoRenewPeriod, inactive, pendingDelete,
+pendingRestore, pendingRenew, pendingTransfer, pendingUpdate, redemptionPeriod,
+renewPeriod, serverHold, serverRenewProhibited, transferPeriod, clientHold,
+clientRenewProhibited
+
+There may be edge cases for Registry and Registrars that do not implement all of
+these EPP code. Per
+https://www.icann.org/resources/pages/epp-status-codes-2014-06-16-en, we may
+want to fall back to understand the meaning of "OK".
 
 
 ### Domain Detail View
