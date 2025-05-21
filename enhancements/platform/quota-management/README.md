@@ -3,65 +3,8 @@ status: provisional
 stage: alpha
 latest-milestone: "v0.1"
 ---
-<!--
-Inspired by https://github.com/kubernetes/enhancements/tree/master/keps/NNNN-kep-template
-
-Goals are aligned in principle with those described at https://github.com/kubernetes/enhancements/blob/master/keps/sig-architecture/0000-kep-process/README.md
-
-Recommended reading:
-  - https://developers.google.com/tech-writing
--->
-
-<!--
-**Note:** When your Enhancement is complete, all of these comment blocks should be removed.
-
-To get started with this template:
-
-- [x] **Make a copy of this template directory.**
-  Copy this template into the desired path and name it `short-descriptive-title`.
-- [ ] **Fill out this file as best you can.**
-  At minimum, you should fill in the "Summary" and "Motivation" sections.
-  These should be easy if you've preflighted the idea of the Enhancement with the
-  appropriate stakeholders.
-- [ ] **Create a PR for this Enhancement.**
-  Assign it to stakeholders who are sponsoring this process.
-- [ ] **Merge early and iterate.**
-  Avoid getting hung up on specific details and instead aim to get the goals of
-  the Enhancement clarified and merged quickly. The best way to do this is to just
-  start with the high-level sections and fill out details incrementally in
-  subsequent PRs.
-
-Just because a Enhancement is merged does not mean it is complete or approved. Any Enhancement
-marked as `provisional` is a working document and subject to change. You can
-denote sections that are under active debate as follows:
-
-```
-<<[UNRESOLVED optional short context or usernames ]>>
-Stuff that is being argued.
-<<[/UNRESOLVED]>>
-```
-
-When editing RFCs, aim for tightly-scoped, single-topic PRs to keep discussions
-focused. If you disagree with what is already in a document, open a new PR
-with suggested changes.
-
-One Enhancement corresponds to one "feature" or "enhancement" for its whole lifecycle.
-You do not need a new Enhancement to move from beta to GA, for example. If
-new details emerge that belong in the Enhancement, edit the Enhancement. Once a feature has
-become "implemented", major changes should get new RFCs.
-
-The canonical place for the latest set of instructions (and the likely source
-of this file) is [here](/docs/rfcs/template/README.md).
-
-**Note:** Any PRs to move a Enhancement to `implementable`, or significant changes once
-it is marked `implementable`, must be approved by each of the Enhancement approvers.
-If none of those approvers are still appropriate, then changes to that list
-should be approved by the remaining approvers and/or the owning SIG (or
-SIG Architecture for cross-cutting RFCs).
--->
 
 # Quota Management
-
 
 - [Summary](#summary)
 - [Motivation](#motivation)
@@ -88,120 +31,83 @@ SIG Architecture for cross-cutting RFCs).
 
 This enhancement proposes the development and implementation of a comprehensive quota management system within the Datum Cloud platform. This system will empower platform administrators to define, enforce, and manage resource consumption limits for tenants at both the organizational and project levels. Datum employees will have the ability to view and modify these quota levels, while Datum Cloud users will be able to see their allocated quotas and current resource usage. The system aims to provide predictable capacity management, enable customer tier enforcement, offer transparency to customers regarding their resource limits, and include enforcement mechanisms to reject API requests that would exceed these limits. Furthermore, services offered on the Datum Cloud platform will be able to register the resources they manage for quota protection and set default quota levels.
 
-<!--
-This section is incredibly important for producing high-quality, user-focused
-documentation such as release notes or a development roadmap. It should be
-possible to collect this information before implementation begins, in order to
-avoid requiring implementors to split their attention between writing release
-notes and implementing the feature itself. Enhancement editors should help to ensure
-that the tone and content of the `Summary` section is useful for a wide audience.
-
-A good summary is probably at least a paragraph in length.
-
-Both in this section and below, follow the guidelines of the [documentation
-style guide]. In particular, wrap lines to a reasonable length, to make it
-easier for reviewers to cite specific portions, and to minimize diff churn on
-updates.
-
-[documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
--->
-
-
-
 ## Motivation
 
 The ability to create, observe, and self-manage resource quotas within organizations and their projects provides numerous benefits to both internal and external administrators of the system. By providing full transparency and observability into key metrics and their limits, quota management also ensures operational stability and reliability, enables accurate cost predictability, prevents accidental or abusive overuse, and instills confidence in resource planning and the enforcement of internal and regulatory policies. The safeguards put in place through quota management will enable users to fully explore the Datum Cloud ecosystem and variety of functionality it provides, without worrying about exceeding the thresholds that have been set within their organzation and projects.
-
-<!--
-This section is for explicitly listing the motivation, goals, and non-goals of
-this Enhancement.  Describe why the change is important and the benefits to users.
--->
 
 ### Goals
 
 - Provide clear system context and architectural approach to the creation of a quota management system within Datum Cloud, including new Custom Resource Definitions
 - Outline the ability of **organizational and project administrators** to create and manage specific resource quota limits within their organization or projects.
 - Outline the ability of **Datum Cloud platform administrators** to create and manage global quota limits applied to all organizations and projects within the system.
-- Enable Datum Cloud users to view their allocated quota levels and the number of resources consumed against each quota.
-- Define how services on the Datum Cloud platform can register resources for quota protection and set default quota levels.
+- Enable full visibility into the consumption metrics of provisioned workloads running in Datum Cloud in relation to set quota limits
+- Enable Datum Cloud users to view their allocated quota limits and the number of resources consumed against each quota.
+- Define the API design for services registering quotas and for managing quota thresholds for projects and organizations.
 - Ensure the system can enforce defined quota limits, for example, by rejecting API requests that would exceed these limits.
 - Facilitate predictable capacity management for the platform.
 - Support customer tier enforcement (e.g., free vs. paid tiers) through configurable quotas.
-- Define the API design for services registering quotas and for managing quota thresholds for projects and organizations.
 - Enable enhancement document handoff for implementation of the quota management enhancement within Datum Cloud.
 - Remain service agnostic to not avoid tightly coupling the architecture to a specific SaaS vendor (amberflo, OpenMeter, etc)
-- Define a `BillingAccount` CRD, as this definition is required as a part of registering new organizations within both Datum and the downstream SaaS integration handling billing and tracking resource allocations (amberflo, OpenMeter, etc)
-
-
-<!-- 
-- Enable full visibility into the consumption metrics of provisioned workloads running in Datum Cloud in relation to set quota limits (???) -->
-
-
 
 ### Non-Goals
 
 - Provide detailed implementation specifics of how the metering and billing components of the system will work, outside of the acknowledgement of their overall role in system architecture from a quota management perspective. This includes how resource consumption is translated into actual billable units and invoices. 
-      - An exception to this is creating a new `BillingAccount` custom resource that ties an organization to a billing account, which is a pre-requisite for downstream functionality.
--   Provide implementation specifics of any third-party SaaS integration in regards to quota management, metering and billing.
--   Define the future Milo Service Catalog and service registration.
--   Define the exact user interface (UI) mockups or user experience (UX) flows for managing or viewing quotas, beyond the functional requirements.
--   Define how time-series metrics (e.g. CPU hours, data written, etc) will be implemented by the data plane.
--   Define how alerts can be created and sent organizational and project administrators to inform them that they are approaching the quota threshholds they set for the resources. 
-
-<!--
-What is out of scope for this Enhancement? Listing non-goals helps to focus discussion
-and make progress.
--->
-
+- Provide implementation specifics of any third-party SaaS integration in regards to quota management, metering and billing.
+- Define the future Milo Service Catalog and service registration.
+- Define the exact user interface (UI) mockups or user experience (UX) flows for managing or viewing quotas, beyond the functional requirements.
+- Define how time-series metrics (e.g. CPU hours, data written, etc) will be implemented by the data plane.
+- Define how alerts can be created and sent organizational and project administrators to inform them that they are approaching the quota threshholds they set for the resources. 
 
 ## Proposal
 
-<!--
-This is where we get down to the specifics of what the proposal actually is.
-This should have enough detail that reviewers can understand exactly what
-you're proposing, but should not include things like API designs or
-implementation. What is the desired outcome and how do we measure success?.
-The "Design Details" section below is for the real
-nitty-gritty.
--->
+This enhancement proposes the design and architectural foundation for a quota management system integrated into Datum Cloud. The system will allow for the definition, management, and enforcement of resource quota limits at both organizational and project levels by external and internal administrators. 
 
-This enhancement proposes the design and architectural foundation for a quota management system integrated into Datum Cloud. The system will allow for the definition and enforcement of resource limits at both organizational and project levels by both external administrators as well as Datum employees.
+### Desired Outcome and Definition of Success
 
-### Definition of Success
-
-
+Once implemented, the quota management system will have seamless integration with Datum Cloud services and downstream external vendors. Both internal and external platform administrators will be able to use the system to easily create and manage quotas through highly scalabe architecture and implementation. The system should properly allocate and deallocate resources when claims are granted, deny claims that exceed set limits, and stay in sync with integrated downstream systems such as amberflo.
 
 ### Key Components and Capabilities
 
-1.  **`ResourceQuotaGrant` Definition:**
-    -   Platform administrators can define global default quota grants for various resources.
-    -   Organizational administrators can define organization-specific quotas (e.g., number of projects, number of collaborators/team-members).
-    -   Project administrators can define project-specific quotas (e.g., number of workloads, CPU/memory limits, potentially leveraging Kubernetes ResourceQuotas for namespace-level control).
-    -   Quotas will be designed to support different customer tiers and plans, allowing for varied limits based on subscription levels (e.g., "Free Tier gets 1 collaborator, Pro Tier gets unlimited").
+The `ResourceQuotaClaim` CRD represents the *intent* of the request to create, update/scale, or delete resources. This CRD contains a reference to the owner of the resources being requested (e.g. Instance), as well as the specific resource requests, including name and metric units. The below `yaml` snippet shows an claim created by an incoming request tied to one Instance, which requests the additional allocation of 8 CPU cores and 32GiB of memory, along with the instance count:
 
-2.  **Quota Enforcement:**
-    -   The system will include mutating admission webhooks and a quota-controller reconciler to check against defined quotas during resource creation, modification, or deletion.
-    -   Requests exceeding the defined limits will be rejected with appropriate error messaging.
+1.  **`ResourceQuotaClaim` Definition:**
+    - Administrators use the API to request management of quotas - whether creating, scaling, or deleting them.
+    - Claims will contain the relationship between owning/parent resources and the resources being requested within them.
+    - Claims will be used when determining whether the request by being compared to the `ResourceQuotaGrant` CRD detailed below. 
 
-3.  **Quota Visibility:**
-    -   Datum Cloud users (tenants) will be able to view their current quota allocations and their consumption of resources against these quotas.
-    -   Datum Employees (internal administrators) will have the ability to view and modify quota levels for all projects and organizations.
+2. **`ResourceQuotaGrant` Definition:**
+    - Platform administrators can define global default quota grants for various resources.
+    - Organizational administrators can define organization-specific quotas (e.g., number of projects, number of collaborators/team-members).
+    - Project administrators can define project-specific quotas (e.g., number of workloads, CPU/memory limits, potentially leveraging Kubernetes ResourceQuotas for namespace-level control).
+    - Quotas will be designed to support different customer tiers and plans, allowing for varied limits based on subscription levels (e.g., "Free Tier gets 1 collaborator, Pro Tier gets unlimited").
 
-4.  **Service Integration:**
-    -   Services offered on the Datum Cloud platform will need a mechanism to register the resources they manage that should be subject to quotas.
-    -   Services will define default quota levels for the resources they register.
-    -   An API will be designed for services to register these quotable resources and for the management (CRUD operations) of quota thresholds for projects and organizations.
-    -   The integration of the downstream metering and billing SaaS platform will remain service-agnostic to ensure flexibility of implementation in the future.
+3. **`ServiceQuotaDefinition` Definition:**
+    - Administrators can register resources to allow them to be managed by quotas
+    - This is necessary to request resources and generate `ResourceQuotaClaim`s, as well as create `ResourceQuotaGrant`s
+    - If an attempt is made to generate a claim on a resource that has yet to be registered, it will be denied.
 
-5.  **Architectural Considerations:**
-    -   Initially, [Kubernetes ResourceQuotas](https://kubernetes.io/docs/concepts/policy/resource-quotas/) was explored for project-level resource control, while acknowledging its potential limitations for project-wide (cross-namespace) totals. Due to this limitation, Kubernetes ResourceQuotas was determined to not provide the functionality desired for cross-namespace resource quota management.
-    -   The concept of "Resource Grants" tied to product plans, as discussed in issue #78, will be considered to dynamically configure quotas based on purchased plans.
+4.  **Quota Enforcement:**
+    - The system will include mutating admission webhooks and a quota-controller reconciler to check against defined quotas during resource creation, modification, or deletion.
+    - Requests exceeding the defined limits will be rejected with appropriate error messaging.
+
+5.  **Quota Visibility:**
+    - Datum Cloud users (tenants) will be able to view their current quota allocations and their consumption of resources against these quotas.
+    - Datum Employees (internal administrators) will have the ability to view and modify quota levels for all projects and organizations.
+
+6.  **Service Integration:**
+    - Services offered on the Datum Cloud platform will need a mechanism to register the resources they manage that should be subject to quotas.
+    - Services will define default quota levels for the resources they register.
+    - An API will be designed for services to register these quotable resources and for the management (CRUD operations) of quota thresholds for projects and organizations.
+    - The integration of the downstream metering and billing SaaS platform will remain service-agnostic to ensure flexibility of implementation in the future.
+
+7.  **Architectural Considerations:**
+    - Initially, [Kubernetes ResourceQuotas](https://kubernetes.io/docs/concepts/policy/resource-quotas/) was explored for project-level resource control, while acknowledging its potential limitations for project-wide (cross-namespace) totals. Due to this limitation, Kubernetes ResourceQuotas was determined to not provide the functionality desired for cross-namespace resource quota management.
+    - The concept of "Resource Grants" tied to product plans, as discussed in issue #78, will be considered to dynamically configure quotas based on purchased plans.
 
 **Proposal Deliverables**
 - An updated enhancement document (this document) detailing the system architecture
 - A Proof of Concept (POC) demonstrating functional quota system integration with a Datum Cloud project, and a complete API design for service quota registration and management.
 - Information outlining on an architectural level how Quota Management will be integrated into Milo in the near future.
-This enhancement proposal aims to provide system architecture of a new quota management system within Datum Cloud.
 
 ### User Stories (Optional)
 
@@ -243,7 +149,7 @@ Different risks must be taken into account when considering implementation of th
 
 - The potential to block all resource creation, preventing administration of resources due to network failure or timeouts.
 - The potential for actual resource usage being out-of-sync with the cluster-state, leading to:
-      * Allowing allocation of resources beyond the set quota limits on both external and internal levels, bypassing enforcement.
+      - Allowing allocation of resources beyond the set quota limits on both external and internal levels, bypassing enforcement.
       - Denying resource allocation when there are enough free resources to allow the request the ability to proceed.
 
 ## Design Details
@@ -267,28 +173,23 @@ The `ResourceQuotaClaim` CRD represents the *intent* of the request to create, u
 apiGroup: 
 kind: ResourceQuotaClaim
 metadata:
-  # Connect the claim’s lifetime to the workload that needs the quota
+  # Connect the claim's lifetime to the workload that needs the quota
   name: instance-abc123-claim
   namespace: proj-abc 
-  # Here for garbage collection convenience
-  ownerRef: 
-    apiGroup: compute.datumapis.com 
-    kind: Instance
-    name: instance-abc123
-    uid: <uuid>
   finalizers:
   - quota.datumapis.com/usage-release
 spec:
-  # The reference to the resource that owns the resources being requested. Will be used to key off of within reconciliation.
+  # The reference to the resource that owns the resources being requested. 
+  # Will be used to key off of during reconciliation.
   resourceRef: 
     apiGroup: compute.datumapis.com 
     kind: Instance 
     name: instance-abc123 
-    uid: <uuid>
-  # Resources being requested for
+    uid: <uid>
+  # Resources being requested
   resources:
   - name: compute.datumapis.com/instances/cpu
-    quantity: "8”
+    quantity: "8"
   - name: compute.datumapis.com/instances/memoryAllocated
     quantity: "32GiB"
   - name: compute.datumapis.com/instances/count
@@ -305,19 +206,20 @@ Status:
 
 #### `ResourceQuotaGrant`
 
-The `ResourceQuotaGrant` CRD declares the resource limits for a project or organization (it can be bound to either via `spec.subjectRef`). More granularly, it declares which specific resources are limited by existing quotas, how the those limits vary by different dimensions (such as `dimensionLabels` and `buckets`), and how much of each resource is still free (which is maintained by the controller).
+The `ResourceQuotaGrant` CRD declares the resource limits for a project or organization (it can be bound to either via `spec.resourceRef`). More granularly, it declares which specific resources are limited by existing quotas, how the those limits vary by different dimensions (such as `dimensionLabels` and `buckets`), and how much of each resource is still free (which is maintained by the quota controller).
 
 ```yaml
-apiVersion: quota.datumapis.com/v1alpha1
+apiGroup: compute.datumapis.com
 kind: ResourceQuotaGrant
 metadata:
   name: proj-abc
 spec:
-  subjectRef:
-    apiGroup: quota.datumapis.com
+  # Reference to project or oganization since the CRD can use either
+  resourceRef:
+    apiGroup: compute.datumapis.com
     kind: Project
     name: proj-abc
-
+    uid: <uid>
   limits:
   # 1. CPU cores allocated per project / location / instance type
   - name: compute.datumapis.com/instances/cpu
@@ -346,7 +248,7 @@ spec:
       selector:
         matchLabels:
           compute.datumapis.com/location: dfw
-          compute.datumapis.com/instanceType: c3.small
+          compute.datumapis.com/instanceType: datumcloud/d1-standard-2
 
   # 2. Memory (GiB) allocated per project / location / instance type
   - name: compute.datumapis.com/instances/memoryAllocated
@@ -380,7 +282,7 @@ spec:
       selector:
         matchLabels:
           compute.datumapis.com/location: dfw
-          compute.datumapis.com/instanceType: c3.small
+          compute.datumapis.com/instanceType: datumcloud/d1-standard-2
 
   # 4. Gateway count per project
   - name: network.datumapis.com/gateways
@@ -397,23 +299,118 @@ spec:
           operator: Exists
 
 ```
+### `ServiceQuotaDefinition`
+
+The `ServiceQuotaDefinition` CRD allows services to define the specific resource types are available to have quotas applied to them as the first step in management of their quotas before requesting resources. This CRD is distinct from the `ResourceQuotaClaim` (which actually *requests* resources) and `ResourceQuotaGrant` (which defines the *limits* for those resources). The inclusion of a `ServiceQuotaDefinition` CRD in the system would allow services to validate that a `ResourceQuotaGrant` is accurately set for both a valid resource type and it's dimensions. It also decouples the declaration and registration of the types of resources they want to manage from operator logic, removing the need to make changes for every new resource type.
+
+```yaml
+apiGroup: compute.datumapis.com
+kind: ServiceQuotaDefinition
+metadata:
+  # Unique name for the definition
+  name: <my-service-quota>
+spec:
+  # Service which owns the quota definition
+  resourceRef:
+    apiGroup: compute.datumapis.com
+    kind: Service
+    name: <service-name>
+    uid: <uid>
+  # Fully qualified name of the resource being managed.
+  # This should match the 'name' field in `ResourceQuotaClaim.spec.resources`
+  # and also in `ResourceQuotaGrant.spec.limits`.
+  resourceName: compute.datumapis.com/instances/cpu
+  # Description of the resource.
+  description: "Number of CPU cores allocated to instances."
+  # Optional global default limit for this resource if it is not explicitly set in a ResourceQuotaGrant.
+  defaultLimit:
+    value: "1000"
+  # The unit of measurement for the resource.
+  unit: "cores"
+  # Dimensions that can be used in ResourceQuotaGrant selectors.
+  allowedDimensions:
+    - compute.datumapis.com/location
+    - compute.datumapis.com/instanceType
+  # Category for grouping quotas
+  category: "Compute"
+```
 
 #### Quota Registration
 
+To enable services on the Datum Cloud platform to integrate with the quota management system, a dedicated API will be provided for services to register the resources they manage that should be subject to quotas. This is achieved through the proposed `ServiceQuotaDefinition` CRD, which acts as a "catalog" for services to declare the types of resources they offer that *can* be managed by the quota system.
 
+Services will create new instances of `ServiceQuotaDefinition` to declare each type of resource they offer that can use quota limits. The `quota-operator` can then use these definitions to understand and validate the types of resources being requested in `ResourceQuotaClaim` objects.
+
+*Registration CRUD Operations*
+
+Services can interact with `ServiceQuotaDefinition` resources using the standard Kubernetes API:
+
+- **Create:** To register a new quotable resource, a service creates a new `ServiceQuotaDefinition` object.
+    ```bash
+    kubectl apply -f my-service-quota-definition.yaml
+    ```
+- **Read:** Services can list or get `ServiceQuotaDefinition`s to inspect existing registrations.
+    ```bash
+    kubectl get servicequotadefinitions
+    kubectl get servicequotadefinition compute-instances-cpu -o yaml
+    ```
+- **Update:** If a resource's definition changes (e.g., its description, allowed dimensions, etc), the service updates the corresponding `ServiceQuotaDefinition` object.
+    ```bash
+    kubectl apply -f updated-service-quota-definition.yaml
+    ```
+- **Delete:** If a service no longer offers a particular quotable resource (or it's being deprecated), the service deletes its `ServiceQuotaDefinition` object.
+    ```bash
+    kubectl delete servicequotadefinition compute-instances-cpu
+    ```
 
 ### Quota Operator Controller
 
-A `quota-operator` will be created which implements logic to convert the *intent* of the incoming `ResourceQuotaClaim` object into the *actual allocation* of resources. It maintains accurate usage totals against each `ResourceQuotaGrant` via the `ResourceQuotaGrant.status.usage` field containing the totals of currently allocated resources. The controller is what enforces per-project or per-organization (tenant) resource quota limits that are declared in the `ResourceQuotaGrant` objects.
+A `quota-operator` will be created which implements logic to convert the *intent* of the incoming `ResourceQuotaClaim` object into the *actual allocation* of resources. It will ensure accurate data stays in sync with the downstream metering system via querying actual usage from the metering engine API and patching usage totals within `ResourceQuotaGrant` via the `ResourceQuotaGrant.status.usage` field. The controller will enforce per-project or per-organization (tenant) resource quota limits that are declared in the `ResourceQuotaGrant` objects.
 
 The reconciliation loop for this controller will contain the following logic:
 
-1. Watches newly generated `ResourceQuotaClaim` objects that were automatically generated by the admission webhook whenever a new resource is created/scaled that will count against the quota.
-2. Validates the `ResourceQuotaClaim` structure and fails early if it is incorrect.
-3. Queries external source (e.g. amberflo) via API to determine the actual usage of the requested resource to accurately inform the decision to be made for the claim.
-4. Makes ultimate decision on whether to `Grant` or `Deny` the claim request based on synced data with the external source.
-5. Reconciles quota thresholds when a `ResourceQuotaGrant` limit changes (e.g. when an administrator raises or lowers quota limits, or the organization undergoes a plan/tier upgrade)
-6. Exposes the resulting status of the request
+1. **Watches newly created or updated `ResourceQuotaClaim` objects** via Kubernetes informers. These claims are typically auto-generated by the admission webhook when a new resource (e.g., `Instance`, `Gateway`) is created or scaled and will consume quota.
+
+2. **Validates the `ResourceQuotaClaim` structure**:
+   - Ensures required fields like `resources`, `dimensions`, and `resourceRef` are present and well-formed.
+   - Optionally verifies that the `resourceRef` points to a valid object in the API server.
+   - If validation fails, the operator sets the claim `status.phase = Denied` with an appropriate `reason`.
+
+3. **Retrieves the corresponding `ResourceQuotaGrant`**:
+   - Looks up the `Grant` by `project`, `organization`, or via an explicit reference on the claim.
+   - Reads the declared `spec.limits` quota limits and bucket selectors.
+   - Applies label/selector logic to find the correct bucket for the claim's dimensions (e.g., `location=dfw`, `instanceType=datumcloud/d1-standard-2`).
+
+4. **Queries an external usage source (e.g., Amberflo)** to get the current actual usage for the metric and dimension(s) defined in the claim:
+   - Makes a real-time HTTP request to the usage API.
+   - This usage is treated as the source of truth (not just `ResourceQuotaGrant.status.usage`, which may be stale or partial).
+
+5. **Evaluates whether the claim would exceed quota**:
+   - Calculates: `actualUsage + requestedAmount > bucketLimit?`
+   - If the total would stay within the limit:
+     - Optionally updates `ResourceQuotaGrant.status.usage` as a local cache or mirror.
+     - Sets `ResourceQuotaClaim.status.phase = Granted`.
+   - If the request would exceed the quota:
+     - Sets `ResourceQuotaClaim.status.phase = Denied`.
+     - Optionally emits a Kubernetes `Event` and records `status.reason`.
+
+6. **Handles updates to `ResourceQuotaGrant` limits**:
+   - When a Grant is updated (e.g., an admin raises CPU from 100 to 200), the operator re-reconciles affected claims.
+   - Previously denied claims may now be granted if usage fits under the new limits.
+
+7. **Emits final status and metrics**:
+   - Updates the `ResourceQuotaClaim.status` with the outcome (`Granted` or `Denied`).
+   - Optionally emits Prometheus metrics or logs (e.g., `quota_claims_granted_total`, `quota_claims_denied_total`).
+
+**Notes**
+
+Patching the `ResourceQuotaGrant.status.usage` field is optional and serves as a low-latency cache of the most recently known usage for each quota bucket. This could provide benefits to the system such as:
+
+- Fast-rejection for obvious quota breaking claims without needing to query amberflo
+- Auditability, observability, and transparency by creating a point-in-time snapshot of denied claims which provides denial reasoning and other contextual information
+- Best effort last known good view fall-back if amberflo is temporarily unavailable
+
+If implemented, the potential for stale data **must** by accounted for. ***It should not be used for final quota enforcement nor billing purposes.***
 
 **Failure Blast Radius**
 
@@ -429,107 +426,104 @@ The admission webhook is responsible for and executes the following steps:
 2. Automatically creates a `ResourceClaimQuota` object based on the intent of the intercepted request.
 3. Attaches labels and annotations to the object to enable easy claim deletion via a finalizer when workloads are torn down.
 
-### Sequence Diagram
+### Architectural and Sequence Diagrams
 
-Amberflo acts as the real-time usage authority and will be kept in sync with the quota system. The telemetry system pipeline streams metered events (via Vector) amberflo's ingestion API. When quota decisions are made within the `quota-operator`, the operator queries amberflo via API to check true usage before granting a ResourceQuotaClaim. This ensures quota enforcement is aligned with what is ultimately billed downstream.
+![C2 Architecture Diagram](./c2_architecture_diagram.png)
 
-```mermaid
-%% Sequence – Instance provisioning + telemetry + Amberflo usage sync
-sequenceDiagram
-    autonumber
-    participant Dev as Developer / CI
-    participant APIServer as Kubernetes API Server
-    participant MutateWH as Mutating Webhook<br>(quota-claim injector)
-    participant ValidWH as Validating Webhook<br>(optional)
-    participant Claim as ResourceQuotaClaim (Pending)
-    participant Grant as ResourceQuotaGrant
-    participant QOp as quota-operator (controller)
-    participant Amberflo as Amberflo Usage API
-    participant Telemetry as Telemetry / Metering Pipeline
-    participant Vector as Vector Agent
-    participant Instance as Instance CR
-    participant InstCtrl as Instance Controller
+---
 
-    %% --- Workload Provisioning Flow ---
-    Dev->>APIServer: kubectl apply Instance
-    APIServer->>MutateWH: AdmissionReview (Instance draft)
-    MutateWH-->>APIServer: +finalizer<br>+create Claim
+A metering engine such as [amberflo](https://docs.amberflo.io) acts as the real-time metering usage authority, and will be queried for live metrics to compare against resource quotas set in Datum Cloud. The telemetry system pipeline sends metered events (via Vector) to the external metering engine and billing processor.
 
-    par (Claim side-effect)
-        MutateWH->>APIServer: POST ResourceQuotaClaim
-    end
-
-    APIServer->>ValidWH: AdmissionReview (optional fast-fail)
-    alt optional fast-fail
-        ValidWH-->>APIServer: reject request
-    else
-        ValidWH-->>APIServer: allow
-    end
-
-    APIServer-->>Dev: 201 Created
-    APIServer-->>Instance: store Instance
-    APIServer-->>Claim: store ResourceQuotaClaim
-
-    %% --- Quota Reconciliation Path ---
-    QOp-->>Claim: watch ADDED
-    QOp->>Grant: GET spec.hard (limits)
-    QOp->>Amberflo: GET usage totals for metric + dimensions
-    Amberflo-->>QOp: usage total returned
-
-    alt Usage < Limit
-        QOp->>Grant: PATCH status.usage += requested
-        QOp->>Claim: PATCH status = Granted
-    else Over quota
-        QOp->>Claim: PATCH status = Denied
-    end
-
-    %% --- Controller Action Based on Claim ---
-    InstCtrl-->>Instance: watch
-    alt Claim Granted
-        InstCtrl->>APIServer: remove finalizer
-        InstCtrl->>Infra: provision workload (pods or VM)
-        Instance-->Dev: Phase = Running
-    else Claim Denied
-        Instance-->Dev: Phase = Failed (QuotaExceeded)
-    end
-
-    %% --- Telemetry & Metering Flow ---
-    Note over Instance, Telemetry: Resource is running and emitting metrics/events
-    Instance->>Telemetry: Emit usage event (cpu=8, location=dfw, ...)
-    Telemetry->>Vector: Format as OTel metric/event
-    Vector->>Amberflo: POST usage event to /meters API
-
-    %% --- Tear-down & cleanup ---
-    Dev->>APIServer: kubectl delete Instance
-    APIServer->>Instance: mark deletionTimestamp
-    InstCtrl->>Claim: delete ResourceQuotaClaim
-    QOp-->>Claim: watch DELETED
-    QOp->>Grant: PATCH status.usage -= released amount
-```
+When quota decisions need to made within the `quota-operator`, the quota operator will query amberflo via API to check true usage before granting the `ResourceQuotaClaim` based on quota limits set in `ResourceQuotaGrant`. This ensures quota enforcement is aligned with what is ultimately billed downstream.
 
 ![Sequence Diagram](./sequence_diagram.png)
 
-**Step Breakdown**
+**Sequence Diagram Step Breakdown**
 
+#### Instance Provisioning & Admission Control
 
-1. Org/Project admins/developers apply an Instance resource to request provisioning of infrastructure within their project.
-2. The API server invokes the *Mutating* Admission Webhook to process and potentially modify the incoming resource.
-3. Webhook adds a finalizer and creates a `ResourceQuotaClaim` to track the quota request linked to the new Instance.
-4. Webhook submits the new `ResourceQuotaClaim` as a side-effect to the API server so it can later be reconciled.
-5. An optional *Validating* Admission Webhook is called to immediately reject (fail-fast) if quota is exceeded.
-6. The API server creates and persists the Instance and Claim to etcd after mutation and validation are successful.
-7. `quota-operator` detects the new `ResourceQuotaClaim` via its informer/watch and begins reconciliation.
-8. Operator retrieves the associated `ResourceQuotaGrant`, which holds the quota limits and tracked usage.
-9. Operator queries amberflo's usage API (or OpenMeter, etc) to obtain current authoritative usage for the relevant resource and specified dimensions.
-10. Amberflo responds with actual resource usage, allowing the controller to logically evaluate whether the new request fits within the set quota limit.
-11. If resource usage is within the limits, the operator updates the `ResourceQuotaGrant`'s usage and *grants* the claim so the workload can proceed.
-12. If resource usage exceeds limits, the operator *denies* the claim, preventing the workload from consuming resources.
-13. The Instance controller observes the `ResourceQuotaClaim` `status` to decide whether the workload can continue provisioning.
-14. If the quota is *granted*, controller removes finalizer and proceeds to schedule or create infrastructure.
-15. If the quota is *denied*, the Instance enters a `Failed` state, and the user who requested the claim is informed of the quota error in the response
-16. When the Instance is deleted, finalization is triggered, cleaning up all related resources by using the references to the parent resource, project, or organization.
-17. The controller deletes the associated Claim, signaling the quota no longer needs to be reserved.
-18. `quota-operator` observes Claim deletion and automatically updates the `ResourceQuotaGrant` usage by freeing up resources within the specific quota.
+1. Org/Project/Platform admins apply an `Instance` resource to request provisioning of infrastructure within their project.
+
+2. The Kubernetes API server invokes a *Mutating Admission Webhook* to process and potentially modify the incoming resource.
+
+3. The webhook performs two key side effects:
+   - Adds a finalizer to the `Instance` resource to block scheduling until quota is resolved.
+   - Submits a corresponding `ResourceQuotaClaim` to the API server for the same namespace and project.
+
+4. The webhook completes admission by returning the mutated `Instance` to the API server.
+
+5. An optional *Validating Admission Webhook* may run after mutation to reject the request immediately (fail-fast) if quota is clearly exceeded (e.g., based on cached values).
+
+6. The API server persists the modified `Instance` and newly created `ResourceQuotaClaim` to etcd (the Kubernetes backing store).
+
+---
+
+#### Quota Evaluation & Grant Decision
+
+7. The `quota-operator` (running in the management cluster) detects the new `ResourceQuotaClaim` using Kubernetes informers and begins reconciliation.
+
+8. The operator loads the relevant `ResourceQuotaGrant` for the project, which defines:
+   - Resource limits (e.g., CPU, memory, instance count)
+   - Matching dimension selectors (e.g., `location`, `instanceType`)
+   - Usage buckets with scoped overrides
+
+9. The operator queries **Amberflo's usage API** to obtain current authoritative usage totals for the specified resource and dimensions:
+   - Includes `projectId`, `resource type`, and any labels such as `location=dfw`, `instanceType=c3.small`.
+
+10. Amberflo responds with the actual usage value (e.g., "920 cores used").
+
+11. The operator compares the Amberflo usage + requested amount against the applicable quota bucket.
+
+12. The quota decision:
+    - **If within limit**:
+      - Updates `ResourceQuotaGrant.status.usage` (if used as a cache)
+      - Updates `ResourceQuotaClaim.status.phase = Granted`
+    - **If over quota**:
+      - Updates `ResourceQuotaClaim.status.phase = Denied`
+      - Adds a `reason` message for diagnostics
+
+---
+
+#### Instance Controller Behavior
+
+13. The `Instance` controller (running in the project cluster) watches the `ResourceQuotaClaim.status` to determine whether to proceed.
+
+14. If the claim is **granted**:
+    - Removes the finalizer from the `Instance`
+    - Proceeds to provision the infrastructure (e.g., pods, machines, gateways)
+    - Transitions the `Instance` status to `Running`
+
+15. If the claim is **denied**:
+    - Leaves the `Instance` in a `Failed` state
+    - Sets a user-visible error describing the quota violation
+
+---
+
+#### Telemetry & Metering Integration with Amberflo
+
+16. Once the `Instance` is running, it begins emitting telemetry and metering data (e.g., allocated CPU, memory, etc.).
+
+17. The telemetry system (e.g., OpenTelemetry SDKs) collects usage events and forwards them to a local **Vector agent** for formatting.
+
+18. The **Vector agent** pushes the usage events to **Amberflo's ingestion API** via HTTP as structured metering events:
+    - Each event includes `meterApiName`, `customerId` (project ID), `timestamp`, `value`, and any relevant dimensions (e.g., location).
+
+19. Amberflo aggregates these events in real time, updates the usage ledger, and exposes usage totals to be consumed by the quota system.
+
+---
+
+#### Tear-down & Quota Release
+
+20. When the `Instance` is deleted, Kubernetes triggers the finalizer to run clean-up logic.
+
+21. The `Instance` controller deletes the associated `ResourceQuotaClaim` as part of the finalizer teardown process.
+
+22. The `quota-operator` observes the deletion of the `ResourceQuotaClaim` via its watch and:
+    - Frees up quota in the metering engine so future workloads can be scheduled
+    - Patches `
+
+23. All related telemetry and infrastructure resources are cleaned up as part of normal workload lifecycle management.
+
 
 ## Production Readiness Review Questionnaire
 
