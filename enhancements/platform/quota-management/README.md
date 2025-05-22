@@ -580,10 +580,10 @@ Status:
       reason: PendingValidation
       message: "Validation of limits is pending."
     # Optionally indicates the freshness of cached usage data, if implemented.
-    - Type: UsageSynchronized
-    - Status: "True", "False", "Unknown"
-    - Reason: (e.g., "SyncSuccessful", "SyncFailed", "StaleData", "CachingDisabled")
-    - Message: Human-readable message.
+    # - Type: UsageSynchronized
+    # - Status: "True", "False", "Unknown"
+    # - Reason: (e.g., "SyncSuccessful", "SyncFailed", "StaleData", "CachingDisabled")
+    # - Message: Human-readable message.
     - type: UsageSynchronized
       status: Unknown
       lastTransitionTime: "2023-01-01T12:00:00Z"
