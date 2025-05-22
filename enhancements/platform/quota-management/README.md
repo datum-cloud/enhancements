@@ -322,11 +322,8 @@ metadata:
   name: <my-service-quota>
 spec:
   # Service which owns the quota definition
-  resourceRef:
-    apiGroup: compute.datumapis.com
-    kind: Service
-    name: <service-name>
-    uid: <uid>
+  serviceRef:
+    name: compute.datumapis.com
   # Fully qualified name of the resource being managed.
   # This should match the 'name' field in `ResourceQuotaClaim.spec.resources`
   # and also in `ResourceQuotaGrant.spec.limits`.
