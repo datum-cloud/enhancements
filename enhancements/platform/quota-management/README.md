@@ -267,11 +267,9 @@ TODO add mitigation steps to explain how the below risks are accounted for
 - The potential to block all resource creation, preventing administration of
   resources due to network failure or timeouts.
 - The potential for actual resource usage being out-of-sync with the
-      cluster-state, leading to: 
-      - Allowing allocation of resources beyond the
+      cluster-state, leading to: - Allowing allocation of resources beyond the
       set quota limits on both external and internal levels, bypassing
-      enforcement. 
-      - Denying resource allocation when there are enough free
+      enforcement. - Denying resource allocation when there are enough free
       resources to allow the request the ability to proceed.
 
 ## Design Details
@@ -953,87 +951,191 @@ are numbered to correspond to the major interactions shown in the diagram.
 
 #### Service Quota Definition Registration (Prerequisite)
 
-Before any resource quotas can be claimed or enforced, a `Service Owner` must define what resources are quotable. This typically happens when a service is onboarded or updated.
+Before any resource quotas can be claimed or enforced, a `Service Owner` must
+define what resources are quotable. This typically happens when a service is
+onboarded or updated.
 
-1.  **Define & Apply `ServiceQuotaDefinition`**: The `Service Owner` (or an automated process) applies a `ServiceQuotaDefinition` (SQD) manifest to the Kubernetes `API Server` (e.g., `kubectl apply -f compute-cpu-sqd.yaml`). This SQD (e.g., for `compute-cpu`) declares a resource type as manageable by the quota system, specifying details like `resourceName`, `description`, `unit`, `defaultLimit`, and `allowedDimensions`.
-2.  **Store & Initialize `SQD`**: The `API Server` stores the `ServiceQuotaDefinition`. Its `status` is initialized, with conditions like `Ready` and `DefinitionValid` typically starting as `Unknown` (Reason: `Initializing` or `PendingValidation`).
-3.  **`quota-operator` Validates `SQD`**: The `quota-operator` (QOp), which watches for `ServiceQuotaDefinition` resources, detects the new or modified SQD. It validates the SQD's `spec` against its internal rules (e.g., ensuring required fields are present, values are correctly formatted).
+1.  **Define & Apply `ServiceQuotaDefinition`**: The `Service Owner` (or an
+    automated process) applies a `ServiceQuotaDefinition` (SQD) manifest to the
+    Kubernetes `API Server` (e.g., `kubectl apply -f compute-cpu-sqd.yaml`).
+    This SQD (e.g., for `compute-cpu`) declares a resource type as manageable by
+    the quota system, specifying details like `resourceName`, `description`,
+    `unit`, `defaultLimit`, and `allowedDimensions`.
+2.  **Store & Initialize `SQD`**: The `API Server` stores the
+    `ServiceQuotaDefinition`. Its `status` is initialized, with conditions like
+    `Ready` and `DefinitionValid` typically starting as `Unknown` (Reason:
+    `Initializing` or `PendingValidation`).
+3.  **`quota-operator` Validates `SQD`**: The `quota-operator` (QOp), which
+    watches for `ServiceQuotaDefinition` resources, detects the new or modified
+    SQD. It validates the SQD's `spec` against its internal rules (e.g.,
+    ensuring required fields are present, values are correctly formatted).
 4.  **Update `SQD` Status**: Based on validation:
-    *   **If Valid**: The `quota-operator` patches the `SQD.status` via the `API Server`. `conditions.DefinitionValid` becomes `True` (Reason: `ValidationSuccessful`), and `conditions.Ready` becomes `True` (Reason: `DefinitionActive`), indicating the resource type is now actively managed by the quota system.
-    *   **If Invalid**: The `quota-operator` patches `SQD.status` to reflect the failure, setting `conditions.DefinitionValid` to `False` (Reason: e.g., `InvalidDefinition`) and `conditions.Ready` to `False`.
+    *   **If Valid**: The `quota-operator` patches the `SQD.status` via the `API
+        Server`. `conditions.DefinitionValid` becomes `True` (Reason:
+        `ValidationSuccessful`), and `conditions.Ready` becomes `True` (Reason:
+        `DefinitionActive`), indicating the resource type is now actively
+        managed by the quota system.
+    *   **If Invalid**: The `quota-operator` patches `SQD.status` to reflect the
+        failure, setting `conditions.DefinitionValid` to `False` (Reason: e.g.,
+        `InvalidDefinition`) and `conditions.Ready` to `False`.
 
 #### Instance Provisioning & Admission Control
 
-Once quotable resources are defined (via SQDs), users (Admins/Developers or CI/CD) can request resources like `Instances`.
+Once quotable resources are defined (via SQDs), users (Admins/Developers or
+CI/CD) can request resources like `Instances`.
 
-5.  **Request `Instance` Creation**: An `Admin / CI` process submits an `Instance` custom resource manifest to the `API Server`.
-6.  **Mutating Webhook Intercepts & Modifies**: The `API Server` sends an `AdmissionReview` request for the `Instance` to the `Mutating Admission Webhook`.
-    *   The webhook modifies the `Instance` resource, primarily by adding a finalizer (e.g., `quota.datumapis.com/instance-protection`) to block its full provisioning until quota is approved.
-    *   Crucially, the webhook *also* constructs and sends a `POST` request to the `API Server` to create a new `ResourceQuotaClaim` (RQC) object. This RQC details the resources the `Instance` intends to consume (e.g., CPU, memory).
-    *   The `API Server` stores this new `RQC`. Its initial `status` is `Pending`, with conditions like `Validated`, `QuotaChecked`, and `Granted` set to `Unknown` or `False` (Reason: `Processing` or `PendingValidation`).
-    *   The webhook then returns the mutated `Instance` (with finalizer) to the `API Server`.
-7.  **Optional Validating Webhook Check**: The `API Server` may then send another `AdmissionReview` request (now with the mutated `Instance` and awareness of the RQC intent) to an optional `Validating Admission Webhook`.
-    *   This webhook can perform a "fast-fail" check. For example, it might look at cached `ResourceQuotaGrant.status.usage` or apply simple, quick rules to deny the request if quota is obviously exceeded.
-    *   **If Denied by Validating Webhook**: The webhook rejects the request. The `API Server` does not store the `Instance`, and the RQC might be updated to `Denied` (Reason: `ValidatingWebhookDenied`). The user receives an error.
+5.  **Request `Instance` Creation**: An `Admin / CI` process submits an
+    `Instance` custom resource manifest to the `API Server`.
+6.  **Mutating Webhook Intercepts & Modifies**: The `API Server` sends an
+    `AdmissionReview` request for the `Instance` to the `Mutating Admission
+    Webhook`.
+    *   The webhook modifies the `Instance` resource, primarily by adding a
+        finalizer (e.g., `quota.datumapis.com/instance-protection`) to block its
+        full provisioning until quota is approved.
+    *   Crucially, the webhook *also* constructs and sends a `POST` request to
+        the `API Server` to create a new `ResourceQuotaClaim` (RQC) object. This
+        RQC details the resources the `Instance` intends to consume (e.g., CPU,
+        memory).
+    *   The `API Server` stores this new `RQC`. Its initial `status` is
+        `Pending`, with conditions like `Validated`, `QuotaChecked`, and
+        `Granted` set to `Unknown` or `False` (Reason: `Processing` or
+        `PendingValidation`).
+    *   The webhook then returns the mutated `Instance` (with finalizer) to the
+        `API Server`.
+7.  **Optional Validating Webhook Check**: The `API Server` may then send
+    another `AdmissionReview` request (now with the mutated `Instance` and
+    awareness of the RQC intent) to an optional `Validating Admission Webhook`.
+    *   This webhook can perform a "fast-fail" check. For example, it might look
+        at cached `ResourceQuotaGrant.status.usage` or apply simple, quick rules
+        to deny the request if quota is obviously exceeded.
+    *   **If Denied by Validating Webhook**: The webhook rejects the request.
+        The `API Server` does not store the `Instance`, and the RQC might be
+        updated to `Denied` (Reason: `ValidatingWebhookDenied`). The user
+        receives an error.
     *   **If Allowed by Validating Webhook**: The webhook allows the request.
-8.  **Store `Instance` & Confirm Creation**: If not rejected by the validating webhook, the `API Server` stores the (mutated) `Instance` resource and returns a `201 Created` response to the `Admin / CI`.
+8.  **Store `Instance` & Confirm Creation**: If not rejected by the validating
+    webhook, the `API Server` stores the (mutated) `Instance` resource and
+    returns a `201 Created` response to the `Admin / CI`.
 
 #### Quota Reconciliation by `quota-operator`
 
-The `quota-operator` processes the `ResourceQuotaClaim` to decide if the requested resources can be granted.
+The `quota-operator` processes the `ResourceQuotaClaim` to decide if the
+requested resources can be granted.
 
-9.  **`quota-operator` Detects `RQC`**: The `quota-operator` detects the new `ResourceQuotaClaim` via its Kubernetes informer.
+9.  **`quota-operator` Detects `RQC`**: The `quota-operator` detects the new
+    `ResourceQuotaClaim` via its Kubernetes informer.
 10. **Validate `RQC` Against `SQD`**:
-    *   The `quota-operator` fetches the relevant `ServiceQuotaDefinition` from the `API Server` that corresponds to the resource types listed in `RQC.spec.resources`.
-    *   **If `SQD` is found and `RQC` is valid against it** (e.g., `resourceName` matches, requested `dimensions` are allowed): The `quota-operator` patches `RQC.status`, setting `conditions.Validated` to `True` (Reason: `ValidationSuccessful`).
-    *   **If `SQD` is not found or `RQC` is invalid**: The `quota-operator` patches `RQC.status` to `phase: Denied`, sets `conditions.Validated` to `False` (Reason: e.g., `UnknownResourceName` or `InvalidDimension`), and `conditions.Ready` to `True` (Reason: `ClaimDenied`). Reconciliation for this RQC stops.
-11. **Retrieve `ResourceQuotaGrant`**: If RQC validation passed, the `quota-operator` retrieves the `ResourceQuotaGrant` (RQG) for the RQC's project or organization from the `API Server`. The RQG contains the actual quota limits and bucketing rules.
-12. **Query Amberflo for Usage**: The `quota-operator` makes a real-time API call to `Amberflo Usage API` to get the current authoritative usage for the specific resource(s) and dimension(s) defined in the RQC, scoped to the relevant project/organization.
-13. **Amberflo Returns Usage**: `Amberflo` responds with the current usage total (e.g., "920 cores used for project X in dfw"). The `quota-operator` then updates `RQC.status`, setting `conditions.QuotaChecked` to `True` (Reason: `CheckSuccessful`).
-14. **Evaluate Quota & Update `RQC` Status**: The `quota-operator` compares `(Amberflo Usage + RQC Requested Amount)` against the limit in the corresponding bucket of the `ResourceQuotaGrant`.
+    *   The `quota-operator` fetches the relevant `ServiceQuotaDefinition` from
+        the `API Server` that corresponds to the resource types listed in
+        `RQC.spec.resources`.
+    *   **If `SQD` is found and `RQC` is valid against it** (e.g.,
+        `resourceName` matches, requested `dimensions` are allowed): The
+        `quota-operator` patches `RQC.status`, setting `conditions.Validated` to
+        `True` (Reason: `ValidationSuccessful`).
+    *   **If `SQD` is not found or `RQC` is invalid**: The `quota-operator`
+        patches `RQC.status` to `phase: Denied`, sets `conditions.Validated` to
+        `False` (Reason: e.g., `UnknownResourceName` or `InvalidDimension`), and
+        `conditions.Ready` to `True` (Reason: `ClaimDenied`). Reconciliation for
+        this RQC stops.
+11. **Retrieve `ResourceQuotaGrant`**: If RQC validation passed, the
+    `quota-operator` retrieves the `ResourceQuotaGrant` (RQG) for the RQC's
+    project or organization from the `API Server`. The RQG contains the actual
+    quota limits and bucketing rules.
+12. **Query Amberflo for Usage**: The `quota-operator` makes a real-time API
+    call to `Amberflo Usage API` to get the current authoritative usage for the
+    specific resource(s) and dimension(s) defined in the RQC, scoped to the
+    relevant project/organization.
+13. **Amberflo Returns Usage**: `Amberflo` responds with the current usage total
+    (e.g., "920 cores used for project X in dfw"). The `quota-operator` then
+    updates `RQC.status`, setting `conditions.QuotaChecked` to `True` (Reason:
+    `CheckSuccessful`).
+14. **Evaluate Quota & Update `RQC` Status**: The `quota-operator` compares
+    `(Amberflo Usage + RQC Requested Amount)` against the limit in the
+    corresponding bucket of the `ResourceQuotaGrant`.
     *   **If Within Limit (Granted)**:
-        *   `RQC.status` is patched: `phase: Granted`, `conditions.Granted: True` (Reason: `QuotaAvailable`), `conditions.Ready: True` (Reason: `ClaimGranted`).
-        *   *(Optional Cache Update)*: `quota-operator` may patch `ResourceQuotaGrant.status.usage` to reflect the newly allocated amount as a cached value.
+        *   `RQC.status` is patched: `phase: Granted`, `conditions.Granted:
+            True` (Reason: `QuotaAvailable`), `conditions.Ready: True` (Reason:
+            `ClaimGranted`).
+        *   *(Optional Cache Update)*: `quota-operator` may patch
+            `ResourceQuotaGrant.status.usage` to reflect the newly allocated
+            amount as a cached value.
     *   **If Over Limit (Denied)**:
-        *   `RQC.status` is patched: `phase: Denied`, `conditions.Granted: False` (Reason: `QuotaExceeded`), `conditions.Ready: True` (Reason: `ClaimDenied`).
+        *   `RQC.status` is patched: `phase: Denied`, `conditions.Granted:
+            False` (Reason: `QuotaExceeded`), `conditions.Ready: True` (Reason:
+            `ClaimDenied`).
 
 #### `Instance` Controller Reacts to `RQC` Status
 
-The `Instance Controller` (which manages `Instance` resources) acts based on the `ResourceQuotaClaim`'s final status.
+The `Instance Controller` (which manages `Instance` resources) acts based on the
+`ResourceQuotaClaim`'s final status.
 
-15. **`Instance` Controller Watches `RQC`**: The `Instance Controller` is watching the `status` of the `ResourceQuotaClaim` associated with the `Instance` it manages.
+15. **`Instance` Controller Watches `RQC`**: The `Instance Controller` is
+    watching the `status` of the `ResourceQuotaClaim` associated with the
+    `Instance` it manages.
 16. **Provision or Fail `Instance`**:
     *   **If `RQC.status.phase == Granted`**:
-        *   The `Instance Controller` removes its finalizer from the `Instance` resource (by patching it via the `API Server`).
-        *   It then proceeds to provision the actual backend infrastructure (e.g., creating Pods, VMs via cloud provider APIs).
-        *   The `Instance.status` is updated to reflect its lifecycle (e.g., `Pending` -> `Provisioning` -> `Running`).
+        *   The `Instance Controller` removes its finalizer from the `Instance`
+            resource (by patching it via the `API Server`).
+        *   It then proceeds to provision the actual backend infrastructure
+            (e.g., creating Pods, VMs via cloud provider APIs).
+        *   The `Instance.status` is updated to reflect its lifecycle (e.g.,
+            `Pending` -> `Provisioning` -> `Running`).
     *   **If `RQC.status.phase == Denied`**:
-        *   The `Instance Controller` updates `Instance.status` to `Phase: Failed` and includes a reason derived from the `RQC.status.conditions.message` (e.g., "QuotaExceeded for CPU"). The `Instance` is not provisioned.
+        *   The `Instance Controller` updates `Instance.status` to `Phase:
+            Failed` and includes a reason derived from the
+            `RQC.status.conditions.message` (e.g., "QuotaExceeded for CPU"). The
+            `Instance` is not provisioned.
 
 #### Telemetry & Metering Flow (Post-Provisioning)
 
-If the `Instance` is successfully provisioned and running, it (or its underlying components) emits usage data.
+If the `Instance` is successfully provisioned and running, it (or its underlying
+components) emits usage data.
 
-17. **`Instance` Emits Usage**: The running `Instance` generates usage data (e.g., CPU allocated, data written, active time).
-18. **Telemetry Pipeline**: This data is collected by a `Telemetry / Metering Pipeline` (e.g., OpenTelemetry SDKs) within the workload or an infrastructure-level agent.
-19. **`Vector` Agent Forwards to `Amberflo`**: A `Vector` agent (or similar aggregator/shipper) formats these raw usage events into structured metering events and POSTs them to `Amberflo's /meters API`. These events include `meterApiName`, `customerId` (project/org ID), `timestamp`, `value`, and relevant dimensions.
-20. **`Amberflo` Aggregates Usage**: `Amberflo` ingests and aggregates these events in real-time, updating its usage ledger. This ledger provides the authoritative usage data queried by the `quota-operator` (in step 12).
+17. **`Instance` Emits Usage**: The running `Instance` generates usage data
+    (e.g., CPU allocated, data written, active time).
+18. **Telemetry Pipeline**: This data is collected by a `Telemetry / Metering
+    Pipeline` (e.g., OpenTelemetry SDKs) within the workload or an
+    infrastructure-level agent.
+19. **`Vector` Agent Forwards to `Amberflo`**: A `Vector` agent (or similar
+    aggregator/shipper) formats these raw usage events into structured metering
+    events and POSTs them to `Amberflo's /meters API`. These events include
+    `meterApiName`, `customerId` (project/org ID), `timestamp`, `value`, and
+    relevant dimensions.
+20. **`Amberflo` Aggregates Usage**: `Amberflo` ingests and aggregates these
+    events in real-time, updating its usage ledger. This ledger provides the
+    authoritative usage data queried by the `quota-operator` (in step 12).
 
 #### Tear-down & Quota Release
 
 When an `Instance` is deleted by a user or process.
 
-21. **Delete `Instance` Request**: An `Admin / CI` process issues a `kubectl delete Instance` command.
-22. **`API Server` Marks for Deletion**: The `API Server` marks the `Instance` object with a `deletionTimestamp`. This triggers the finalizer logic.
-23. **`Instance` Controller Finalizer Logic**: The `Instance Controller`, detecting the `deletionTimestamp` on an `Instance` it manages with its finalizer still present:
-    *   Initiates the deletion of the associated `ResourceQuotaClaim` by sending a `DELETE` request for the RQC to the `API Server`. The `API Server` then marks the RQC for deletion.
+21. **Delete `Instance` Request**: An `Admin / CI` process issues a `kubectl
+    delete Instance` command.
+22. **`API Server` Marks for Deletion**: The `API Server` marks the `Instance`
+    object with a `deletionTimestamp`. This triggers the finalizer logic.
+23. **`Instance` Controller Finalizer Logic**: The `Instance Controller`,
+    detecting the `deletionTimestamp` on an `Instance` it manages with its
+    finalizer still present:
+    *   Initiates the deletion of the associated `ResourceQuotaClaim` by sending
+        a `DELETE` request for the RQC to the `API Server`. The `API Server`
+        then marks the RQC for deletion.
 24. **`quota-operator` Handles `RQC` Deletion**:
     *   The `quota-operator` detects the deletion of the `ResourceQuotaClaim`.
-    *   *(Optional Cache Update)*: If `ResourceQuotaGrant.status.usage` caching is active, the `quota-operator` patches it to decrement the usage by the amount released by the deleted RQC.
-    *   The `quota-operator` might also perform explicit actions with `Amberflo` if needed to signal resource release, though often, the cessation of telemetry from the deleted resource handles this implicitly in the metering system.
-25. **Deprovision Infrastructure**: The `Instance Controller` ensures the actual backend infrastructure for the `Instance` is deprovisioned.
-26. **Remove Finalizer**: Once all cleanup is done (RQC deleted, infrastructure gone), the `Instance Controller` removes its finalizer from the `Instance` resource by patching it via the `API Server`.
-27. **`API Server` Deletes `Instance`**: With the finalizer removed, the Kubernetes garbage collector permanently deletes the `Instance` object from etcd.
+    *   *(Optional Cache Update)*: If `ResourceQuotaGrant.status.usage` caching
+        is active, the `quota-operator` patches it to decrement the usage by the
+        amount released by the deleted RQC.
+    *   The `quota-operator` might also perform explicit actions with `Amberflo`
+        if needed to signal resource release, though often, the cessation of
+        telemetry from the deleted resource handles this implicitly in the
+        metering system.
+25. **Deprovision Infrastructure**: The `Instance Controller` ensures the actual
+    backend infrastructure for the `Instance` is deprovisioned.
+26. **Remove Finalizer**: Once all cleanup is done (RQC deleted, infrastructure
+    gone), the `Instance Controller` removes its finalizer from the `Instance`
+    resource by patching it via the `API Server`.
+27. **`API Server` Deletes `Instance`**: With the finalizer removed, the
+    Kubernetes garbage collector permanently deletes the `Instance` object from
+    etcd.
 
 ## Production Readiness Review Questionnaire
 
