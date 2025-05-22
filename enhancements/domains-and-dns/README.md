@@ -202,18 +202,6 @@ The WHOIS health check system will:
   - Track registrar changes
   - Alert on modifications
 
-### Improper DNS Configuration
-
-Improper DNS configuration can contribute to platform setup problems. Typical
-systems ask users to copy and paste DNS A, AAAA, CNAME, and TXT records from the
-new platform into an existing DNS service provider. These steps are error prone
-for users. Problems can include:
-
-- Improperly copy/pasting values
-- Placing a CNAME at the root of a domain name
-- Creating new records with high TTLs, that are then cached (with incorrect
-  data) upon DNS query
-
 ### Effects of DNS TTLs and "negative caching" (a.k.a DNS "propagation")
 
 TTLs control the longevity of cached records in the DNS system. When an end
@@ -228,6 +216,18 @@ for the time period in the by the domain's negative cache TTL value (part of the
 domain's SOA record); c) the same occurs, however, the negative cache TTL is set
 to value defined as part of the local configuration of the recursive DNS server,
 which may be longer than that of the domain's SOA record.
+
+### Improper DNS Configuration
+
+Improper DNS configuration can contribute to platform setup problems. Typical
+systems ask users to copy and paste DNS A, AAAA, CNAME, and TXT records from the
+new platform into an existing DNS service provider. These steps are error prone
+for users. Problems can include:
+
+- Improperly copy/pasting values
+- Placing a CNAME at the root of a domain name
+- Creating new records with high TTLs, that are then cached (with incorrect
+  data) upon DNS query
 
 ### Improper TLS/SSL Configuration
 
@@ -348,7 +348,9 @@ made, the tool will detect and query the authoritative DNS servers for the
 domain to validate that the nonce was deployed as a TXT record, thereby
 confirming domain ownership.
 
-Suggest that we use the methodology described in [draft-ietf-dnsop-domain-verification-techniques-07](https://datatracker.ietf.org/doc/draft-ietf-dnsop-domain-verification-techniques/) Section 4.0 for future RFC compatibility.
+Suggest that we use the methodology described in
+[draft-ietf-dnsop-domain-verification-techniques-07](https://datatracker.ietf.org/doc/draft-ietf-dnsop-domain-verification-techniques/)
+Section 4.0 for future RFC compatibility.
 
 #### Domain Name Scanning Tool
 
@@ -434,58 +436,206 @@ required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
 
-Users will be able to add domain names to their inventory on Datum Cloud. Once a domain is added, its ownership will be verified using common domain ownership techniques (at the moment, we plan to use Entri). Once verified, in accordance with our User Stories above, Datum will be able to perform various health checks on those domains.
+Users will be able to add domain names to their inventory on Datum Cloud. Once a
+domain is added, its ownership will be verified using common domain ownership
+techniques (at the moment, we plan to use Entri). Once verified, in accordance
+with our User Stories above, Datum will be able to perform various health checks
+on those domains.
 
-### Adding a Domain and Verifying Ownership
+### Adding a Domain
 
-To start, a domain needs to be added to the system. The workflow to add a domain name is featured in the state diagram below:
+To start, a domain needs to be added to the Inventory. 
 
-```mermaid
-sequenceDiagram
-  autonumber
-
-  participant User
-  participant API
-  participant Cron
-  participant DNSProvider
-  
-  User ->> API: Add example.com
-  API ->> User: Please add DNS TXT validation records
-  API ->> Cron: Please monitor for DNS TXT validation records at DNSProvider
-  Cron ->> DNSProvider: Check for DNS TXT valication records
-  DNSProvidier ->> Cron: NXDOMAIN or valid records
-  Cron ->> API: Update API when valid domain ownership DNS TXT records found
-  API ->> User: Notify user records are avaialble (possible via Webhook)
-```
-
-Once a domain name is added to the Inventory it is stored as a **Domain** object in our Kubernetes API service. An initial representation for a Domain object may look like:
+Once a domain name is added to the Inventory it is stored as a **Domain** object
+in our Kubernetes API service. An initial representation for a Domain object may
+look like:
 
 ```yaml
 apiVersion: datumapis.com/v1alpha
 kind: Domain
 metadata:
-  name: q7.io
-spec:
-  name: q7.io
-    verification:
-      requiredDNSRecords:
-        - name: _datum-cloud-challenge.q7.io
-          type: TXT
-          content: <expected value>
+  name: example.com
 ```
 
-Suggest that we use the methodology described in [draft-ietf-dnsop-domain-verification-techniques-07](https://datatracker.ietf.org/doc/draft-ietf-dnsop-domain-verification-techniques/) Section 4.0 for future RFC compatibility.
+### Domain Ownership Verification
 
-### Enhanced Domain Verification Workflow using Entri
+With a domain added, we can start a DNS TXT record based verification process.
+Suggest that we use the methodology described in
+[draft-ietf-dnsop-domain-verification-techniques-07](https://datatracker.ietf.org/doc/draft-ietf-dnsop-domain-verification-techniques/)
+Section 4.0 for future RFC compatibility.
 
+The workflow to add a domain name is featured in the state diagram below:
 
+```mermaid
+sequenceDiagram
+  autonumber
+  actor user
 
+  box project-control-plane
+    participant namespaceA
+  end
 
+  box core-control-plane
+    participant network-services-operator
+  end
 
+  box external
+    participant dns
+    participant dns-provider
+  end
+
+  user ->> namespaceA: Create Hostname
+  activate namespaceA
+  namespaceA ->> user: Created
+  deactivate namespaceA
+
+  namespaceA -->> network-services-operator: Observe Creation
+  activate network-services-operator
+
+  network-services-operator ->> namespaceA: Update status w/ TXT record requirement
+  deactivate network-services-operator
+
+  user ->> namespaceA: Check status of Hostname
+  namespaceA ->> user: TXT record requirement
+  user ->> dns-provider: Add TXT record
+  dns-provider ->> user: Added
+
+  loop until verified or expired
+    network-services-operator ->> dns: Get TXT record
+
+    alt Not found
+      dns ->> network-services-operator: NXDOMAIN
+      network-services-operator ->> namespaceA: Update status w/ last attempt
+    else Match
+      dns ->> network-services-operator: TXT
+      network-services-operator ->> namespaceA: Update status as verified
+    end
+  end
+```
+
+During this time, the `Domain` object is updated to include domain verification
+status data:
+
+```yaml
+apiVersion: datumapis.com/v1alpha
+kind: Domain
+metadata:
+  name: example.com
+status:
+  verification:
+        requiredDNSRecords:
+          - name: _datum-cloud-challenge_.example.com
+            type: TXT
+            content: <expected value>
+```
+
+### Streamlined Domain Verification Workflow using Entri
+
+We would like to streamline the Domain Verification Workflow for Portal-based
+interactions using Entri. Entri is "The easiest way for your users to connect
+domains." Basically, given a TXT record for domain name verification, Entri
+tries to automate the process of logging into the DNS Provider, adding the TXT
+record, and checking for existence of the record in the DNS system (they call
+this "propagation" but this is technically wrong).
+
+In this flow, the domain is added via dialog in Portal. Datum API will need to
+provide the Domain Verification TXT record. 
+
+From there:
+
+- We can use the Entri Connect ["checkDomain"
+  function](https://developers.entri.com/api-reference#check-domain) to see if
+  Entri can help configure this domain.
+- If Entri Connect cannot help with the domain, we can abandon this proceess and
+  revert to normal flow documented above.
+- Otherwise, if Entri Connect can help with this domain, we can pop an [Entri
+  modal
+  window](https://developers.entri.com/api-reference#entri-showentri-config) to
+  begin the Entri configuration process. An entri "config" object will need to
+  be constructed to continue.
+- Entri provides support for a
+  [webhook](https://developers.entri.com/api-reference#webhooks) that runs for
+  72 hours after kicking off the Entri Connect process, scanning the DNS for the
+  requested change. The `type` and `propagation_status` status fields are of
+  interest.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor user
+
+  box cloud-portal
+    participant portal
+  end
+
+  box project-control-plane
+    participant namespaceA
+  end
+
+  box core-control-plane
+    participant network-services-operator
+  end
+
+  box external
+    participant entri
+  end
+
+  user ->> portal: Create Domain
+  portal ->> namespaceA: Create Domain
+  activate namespaceA
+  namespaceA ->> portal: Created
+  deactivate namespaceA
+
+  namespaceA -->> network-services-operator: Observe Creation
+  activate network-services-operator
+
+  network-services-operator ->> namespaceA: Update status w/ TXT record requirement
+  deactivate network-services-operator
+
+  namespaceA -->> portal: Observe status update
+
+  portal ->> user: Entri Modal w/ dnsRecords
+
+  user ->> entri: Complete Entri process
+  entri ->> user: Process complete
+
+  entri -->> network-services-operator: Records added (webhook)
+  network-services-operator ->> namespaceA: Update status as verified
+
+```
+
+### Setting Expectations with Domain Negative Cache TTL
+
+Querying the domain's SOA record for its negative cache TTL can be useful in
+setting expectations for a user. For example, if the domain ownership
+verification TXT record is queried for, before it exists at the domain's
+authoritative DNS servers, an NXDOMAIN response will be cached for the negative
+cache TTL defined in the SOA record for the domain.
+
+We may want to implement a query for the domain's SOA record to get the negative
+cache TTL. For example:
+
+```
+14:51:06 ~ $ dig +short q7.io SOA
+ns1.digitalocean.com. hostmaster.q7.io. 1745521895 10800 3600 604800 1800
+```
+
+For the domain q7.io, the negative cache TTL is 1800 seconds. 
+
+Therefore, in this case, we may want to include a reminder that DNS changes may
+take up to 2x the negative cache TTL time. For example, a warning like "It may
+take up to ${2x Negative Cache TTL} for modifications to #DOMAIN to appear in
+the public DNS system".
 
 ### Gathering Initial Domain Name State
 
-Once a domain is added a verified, details about the domain name should be fetched from public available WHOIS data and inserted into the Domain resource object. Datum will need to crawl WHOIS data, or find a method to obtain WHOIS data, to populate information into the Domain resource. The purpose of collecting this data is to make it available for viewing via API or Portal, and to be used to detection of events against the domain name (which ultimately could lead to outages or misconfiguration events).
+Once a domain is added a verified, details about the domain name should be
+fetched from public available WHOIS data and inserted into the Domain resource
+object. Datum will need to crawl WHOIS data, or find a method to obtain WHOIS
+data, to populate information into the Domain resource. The purpose of
+collecting this data is to make it available for viewing via API or Portal, and
+to be used to detection of events against the domain name (which ultimately
+could lead to outages or misconfiguration events).
 
 For example, the domain q7.io would like the following after being crawled:
 
@@ -493,30 +643,28 @@ For example, the domain q7.io would like the following after being crawled:
 apiVersion: datumapis.com/v1alpha
 kind: Domain
 metadata:
-  name: q7.io
-spec:
-  name: q7.io
+  name: example.com
+status:
   verification:
       requiredDNSRecords:
-        - name: _datum-cloud-challenge_.q7.io
+        - name: _datum-cloud-challenge_.example.com
           type: TXT
           content: <expected value>
-status:
   registrar:
     IANAID: 1068
     IANAname: NAMECHEAP INC
-  createdDate: 2012-07-06T13:58:57.00Z
-  modifiedDate: 2019-08-17T16:33:24.36Z
-  expirationDate: 2029-07-06T13:58:57.00Z
-  nameservers: 
-  - ns1.digitalocean.com
-  - ns2.digitalocean.com
-  - ns3.digitalocean.com
-  DNSSEC: unsigned
-  statusFlags: 
-  - clientDeleteProhibited
-  - clientTransferProhibited
-  - clientUpdateProhibited
+    createdDate: 2012-07-06T13:58:57.00Z
+    modifiedDate: 2019-08-17T16:33:24.36Z
+    expirationDate: 2029-07-06T13:58:57.00Z
+    nameservers: 
+    - ns1.digitalocean.com
+    - ns2.digitalocean.com
+    - ns3.digitalocean.com
+    DNSSEC: unsigned
+    statusFlags: 
+    - clientDeleteProhibited
+    - clientTransferProhibited
+    - clientUpdateProhibited
   statusConditions:
   - type: OwnershipVerified
     status: False
@@ -532,7 +680,9 @@ status:
 
 ### Performing Routine Domain Name Health Checks
 
-After gathering the initial domain state, we can now perform routine health checks for the domain as a convenience for Datum Cloud users. The sequence diagram below indicates this flow:
+After gathering the initial domain state, we can now perform routine health
+checks for the domain as a convenience for Datum Cloud users. The sequence
+diagram below indicates this flow:
 
 ```mermaid
 sequenceDiagram
@@ -555,13 +705,19 @@ sequenceDiagram
   User ->> Portal: View example.com
 ```
 
-If a change is detected (compare the registry results to the data in the Domain resource object), then an event can be triggered to flag the change to a User. The Domain object should get updated to reflect the change, and the prior data should be stored for a period of time so that the user is aware of the change. 
+If a change is detected (compare the registry results to the data in the Domain
+resource object), then an event can be triggered to flag the change to a User.
+The Domain object should get updated to reflect the change, and the prior data
+should be stored for a period of time so that the user is aware of the change. 
 
-Depending upon the capability of Datum's eventing systems, we may want to cause a real time notification to be triggered, but that should be out of scope at this time.
+Depending upon the capability of Datum's eventing systems, we may want to cause
+a real time notification to be triggered, but that should be out of scope at
+this time.
 
 ### Domain Inventory View
 
-The domain inventory view will use a table showing all domain names available in the organization.
+The domain inventory view will use a table showing all domain names available in
+the organization.
 
 | Domain Name | Expiration  | Registrar     | DNS Provider   | Status | Last Change Detected | Actions     |
 | ----------- | ----------- | ------------- | -------- | -------------- | ------------------- | ----------- |
@@ -570,8 +726,10 @@ The domain inventory view will use a table showing all domain names available in
 
 - UX Details:
   - Sortable Columns: Name, Expiration, Status, Last Change Detected
-  - Search & Filter: Text search by domain name; filter by name, registrar, DNS provider, or expiration date
-  - Row Highlighting for Changes: Use a subtle yellow background tint (e.g., bg-yellow-50) on any row with detected WHOIS changes in the last 7 days
+  - Search & Filter: Text search by domain name; filter by name, registrar, DNS
+    provider, or expiration date
+  - Row Highlighting for Changes: Use a subtle yellow background tint (e.g.,
+    bg-yellow-50) on any row with detected WHOIS changes in the last 7 days
 
 A ChatGPT inspired mockup:
 
@@ -603,7 +761,8 @@ want to fall back to understand the meaning of "OK".
 
 ### Domain Detail View
 
-View additional details about a domain name by clicking the "Details" button in the Inventory View. A possible view is:
+View additional details about a domain name by clicking the "Details" button in
+the Inventory View. A possible view is:
 
 ```yaml
 ------------------------------------------
