@@ -1237,23 +1237,27 @@ sequenceDiagram
     participant InstanceCR as Instance CR <br> (in Project APIServer)
 
     User->>+ProjAPIServer: Apply `Instance` manifest
+    
     ProjAPIServer->>+MiloMutateWH: AdmissionReview for `Instance` (CREATE/UPDATE)
     MiloMutateWH->>MiloAPIServer: `CREATE` `ResourceQuotaClaim`
     MiloAPIServer->>RQC: Store `ResourceQuotaClaim`
     note right of RQC: Initial Status: <br> - phase: Pending <br> - conditions.Validated: Unknown <br> - conditions.Granted: False
     MiloAPIServer-->>MiloMutateWH: Ack (RQC Created)
-    MiloMutateWH-->>-ProjAPIServer: AdmissionReviewResponse (Patch `Instance` with finalizer)
-    ProjAPIServer->>InstanceCR: Mutate `Instance` (add finalizer)
+    MiloMutateWH-->>-ProjAPIServer: AdmissionReviewResponse (Patch `Instance` with finalizer) 
+    %% ProjAPIServer is now briefly inactive after MiloMutateWH responds
     
-    ProjAPIServer->>+MiloValidWH: AdmissionReview for `Instance`
+    ProjAPIServer->>InstanceCR: Mutate `Instance` (add finalizer) %% No activation needed for this internal action
+    
     alt Optional Fast-Fail by MiloValidWH
-        MiloValidWH-->>-ProjAPIServer: Deny Request (AdmissionReviewResponse {allowed: false})
-        ProjAPIServer-->>-User: Error (e.g., 403 Forbidden - Quota Check Failed by Webhook)
+        ProjAPIServer->>+MiloValidWH: AdmissionReview for `Instance` %% ProjAPIServer re-activates to call MiloValidWH
+        MiloValidWH-->>-ProjAPIServer: Deny Request (AdmissionReviewResponse {allowed: false}) %% ProjAPIServer deactivates after MiloValidWH responds
+        ProjAPIServer-->>-User: Error (e.g., 403 Forbidden - Quota Check Failed by Webhook) %% Final deactivation by User response
         note over RQC: RQC might be updated to Denied later by quota-operator if Validating Webhook denies.
     else MiloValidWH Allows
-        MiloValidWH-->>-ProjAPIServer: Allow Request (AdmissionReviewResponse {allowed: true})
-        ProjAPIServer->>InstanceCR: Store `Instance` (with finalizer, if not already stored and only mutated)
-        ProjAPIServer-->>-User: Ack (Instance Created/Updated, pending quota)
+        ProjAPIServer->>+MiloValidWH: AdmissionReview for `Instance` %% ProjAPIServer re-activates to call MiloValidWH
+        MiloValidWH-->>-ProjAPIServer: Allow Request (AdmissionReviewResponse {allowed: true}) %% ProjAPIServer deactivates after MiloValidWH responds
+        ProjAPIServer->>InstanceCR: Store `Instance` (with finalizer, if not already stored and only mutated) %% No activation for this
+        ProjAPIServer-->>User: Ack (Instance Created/Updated, pending quota) %% Final deactivation by User response
     end
 ```
 
