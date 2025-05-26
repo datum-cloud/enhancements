@@ -31,13 +31,10 @@ latest-milestone: "v0.1"
     - [Quota Registration](#quota-registration)
     - [Quota Operator Controller](#quota-operator-controller)
     - [Admission Webhooks](#admission-webhooks)
-    - [Architectural and Sequence
-      Diagrams](#architectural-and-sequence-diagrams)
-      - [Architecture Diagram (C1 - System
-        Context)](#architecture-diagram-c1---system-context)
-      - [Architecture Diagram (C2 -
-        Containers/Components)](#architecture-diagram-c2---containerscomponents)
-      - [Sequence Diagram](#sequence-diagram)
+    - [Architecture Diagrams](#architecture-diagrams)
+      - [C1 Diagram - System Context](#c1-diagram---system-context)
+      - [C2 Diagram - Containers/Components](#c2-diagram---containerscomponents)
+    - [Sequence Diagrams](#sequence-diagrams)
       - [Sequence Diagram Step Breakdown](#sequence-diagram-step-breakdown)
         - [Service Quota Definition Registration
           (Prerequisite)](#service-quota-definition-registration-prerequisite)
@@ -980,9 +977,9 @@ admissions webhooks registered with their own Project APIServers. This allows
 the Quota Management system to be *pluggable* and *extensible* to support new
 services and features without requiring changes to the system itself.
 
-### Architectural and Sequence Diagrams
+## Architecture Diagrams
 
-#### Architecture Diagram (C1 - System Context)
+### C1 Diagram - System Context
 
 ```mermaid
 %% C1 - System Context Diagram: Milo Quota Management System
@@ -1021,7 +1018,7 @@ graph TD
 
 ```
 
-#### Architecture Diagram (C2 - Containers/Components)
+### C2 Diagram - Containers/Components
 
 ```mermaid
 %% C2 - Container Diagram: Milo Quota Management System & Interactions
@@ -1100,154 +1097,18 @@ flowchart TD
 
 ---
 
-#### Sequence Diagram
+## Sequence Diagrams
 
 The below sequence diagram illustrates the end-to-end flow of quota management,
 from service registration to resource provisioning and eventual teardown.
 
-```mermaid
-%% Sequence Diagram - Quota Management Enhancement - Milo Integration
-sequenceDiagram
-    autonumber
 
-    participant SvcOwner as Service Owner/Admin
-    participant Dev as Admin / CI
-    participant ProjAPIServer as Project K8s APIServer <br>(Manages Instance CR)
-    participant MiloAPIServer as Milo APIServer <br>(quota.miloapis.com)
-    participant MiloMutateWH as Milo Mutating Webhook <br>(ResourceQuotaClaim injector)
-    participant MiloValidWH as Quota Service Validating Webhook <br>(optional fast-fail)
-    participant ServiceQuotaRegistration as ServiceQuotaRegistration <br>(in Milo)
-    participant ResourceQuotaClaim as ResourceQuotaClaim <br>(in Milo)
-    participant ResourceQuotaGrant as ResourceQuotaGrant <br>(in Milo)
-    participant MiloQOp as Milo quota-operator
-    participant amberflo as amberflo Usage API
-    participant Instance as Instance CR <br>(in Project Cluster)
-    participant InstCtrl as Instance Controller <br>(in Project Cluster)
-    participant Telemetry as Telemetry / Metering Pipeline
-    participant Vector as Vector Agent
-    participant Infra as Backend Infrastructure
+### Sequence Diagram Step Breakdown
 
-    %% --- Service Quota Definition Registration (Prerequisite) ---
-    Note over SvcOwner, MiloAPIServer: Service Owner registers quotable resources with Milo
-    SvcOwner->>MiloAPIServer: kubectl apply ServiceQuotaRegistration (e.g., compute-cpu.yaml)
-    MiloAPIServer-->>ServiceQuotaRegistration: Store ServiceQuotaRegistration
-    note right of ServiceQuotaRegistration: Initial Status:  - conditions.Ready: Unknown (Reason: Initializing)  - conditions.DefinitionValid: Unknown (Reason: PendingValidation)
-    MiloQOp-->>ServiceQuotaRegistration: Watch ``ADDED`/MODIFIED` ServiceQuotaRegistration
-    MiloQOp->>ServiceQuotaRegistration: Validate ServiceQuotaRegistration spec (e.g., fields, structure)
-    alt ServiceQuotaRegistration spec is valid
-        MiloQOp->>MiloAPIServer: `PATCH` ServiceQuotaRegistration.status
-        note right of ServiceQuotaRegistration: Updated Status:  - conditions.DefinitionValid: True (Reason: ValidationSuccessful)  - conditions.Ready: True (Reason: DefinitionActive)
-    else ServiceQuotaRegistration spec is invalid
-        MiloQOp->>MiloAPIServer: `PATCH` ServiceQuotaRegistration.status
-        note right of ServiceQuotaRegistration: Updated Status:  - conditions.DefinitionValid: False (Reason: InvalidDefinition)  - conditions.Ready: False
-    end
+The sequence diagram steps are broken down into multiple sections for narrative
+and ease of understanding. 
 
-    %% --- Instance Provisioning & Admission Control ---
-    Note over Dev, ProjAPIServer: Admin requests a new Instance in Project Cluster
-    Dev->>ProjAPIServer: kubectl apply Instance
-    Note over ProjAPIServer, MiloMutateWH: Instance creation in Project Cluster triggers ResourceQuotaClaim creation in Milo. This could be direct API call from Instance Controller or webhook on Instance CR if ProjAPIServer calls Milo. For simplicity, showing a trigger.
-    ProjAPIServer->>MiloMutateWH: AdmissionReview for Instance (or equivalent trigger for ResourceQuotaClaim)
-    MiloMutateWH-->>ProjAPIServer: Mutate Instance (add finalizer for quota check, if applicable to Instance CR)
-    par ResourceQuotaClaim Creation by Milo Mutating Webhook
-        MiloMutateWH->>MiloAPIServer: Create ResourceQuotaClaim for Instance
-        MiloAPIServer-->>ResourceQuotaClaim: Store ResourceQuotaClaim
-        note right of ResourceQuotaClaim: Initial Status:  - phase: Pending  - conditions.Ready: False (Reason: Processing)  - conditions.Validated: Unknown (Reason: PendingValidation)  - conditions.QuotaChecked: Unknown (Reason: PendingQuotaCheck)  - conditions.Granted: False (Reason: AwaitingDecision)
-    end
-    ProjAPIServer->>MiloValidWH: AdmissionReview for Instance (optional fast-fail for ResourceQuotaClaim from Milo)
-    alt optional fast-fail (e.g., based on cached ResourceQuotaGrant.status.usage or simple checks in Milo)
-        MiloValidWH-->>ProjAPIServer: Deny request (Instance not created/rolled back)
-        MiloQOp->>MiloAPIServer: `PATCH` ResourceQuotaClaim.status (if ResourceQuotaClaim was created before denial)
-        note right of ResourceQuotaClaim: Status Update (Optional):  - phase: Denied (Reason: ValidatingWebhookDenied)
-    else
-        MiloValidWH-->>ProjAPIServer: Allow request
-        ProjAPIServer-->>Instance: Store Instance (with finalizer)
-        ProjAPIServer-->>Dev: 201 Created (Instance)
-    end
-
-
-    %% --- Quota Reconciliation Path by Milo quota-operator ---
-    Note over MiloQOp, ResourceQuotaClaim: Milo quota-operator reconciles the new ResourceQuotaClaim
-    MiloQOp-->>ResourceQuotaClaim: Watch `ADDED` ResourceQuotaClaim (e.g., for instance-abc123)
-    
-    MiloQOp->>MiloAPIServer: `GET` relevant ServiceQuotaRegistration for ResourceQuotaClaim.spec.resources
-    alt ServiceQuotaRegistration found AND ResourceQuotaClaim spec is valid against ServiceQuotaRegistration (resourceName, dimensions, etc.)
-        MiloQOp->>MiloAPIServer: `PATCH` ResourceQuotaClaim.status
-        note right of ResourceQuotaClaim: Status Update:  - conditions.Validated: True (Reason: ValidationSuccessful)
-        
-        MiloQOp->>MiloAPIServer: `GET` ResourceQuotaGrant for ResourceQuotaClaim's project/org
-        note left of ResourceQuotaGrant: ResourceQuotaGrant contains limits, selectors, buckets
-
-        MiloQOp->>amberflo: `GET` current usage from amberflo API (for ResourceQuotaClaim.spec.resources & dimensions)
-        amberflo-->>MiloQOp: Return usage total (e.g., "500 cores")
-        MiloQOp->>MiloAPIServer: `PATCH` ResourceQuotaClaim.status
-        note right of ResourceQuotaClaim: Status Update:  - conditions.QuotaChecked: True (Reason: CheckSuccessful)
-
-        alt Calculated (Current Usage + ResourceQuotaClaim.spec.resources.quantity) <= ResourceQuotaGrant Limit for matching bucket
-            MiloQOp->>MiloAPIServer: `PATCH` ResourceQuotaClaim.status (Granted)
-            note right of ResourceQuotaClaim: Status Update:  - phase: Granted  - conditions.Granted: True (Reason: QuotaAvailable)  - conditions.Ready: True (Reason: ClaimGranted)
-            opt Update ResourceQuotaGrant Cache in Milo
-                 MiloQOp->>MiloAPIServer: `PATCH` ResourceQuotaGrant.status.usage (+= requested amount for the bucket)
-                 note left of ResourceQuotaGrant: ResourceQuotaGrant.status.usage updated (cache)
-            end
-        else Usage would exceed ResourceQuotaGrant Limit
-            MiloQOp->>MiloAPIServer: `PATCH` ResourceQuotaClaim.status (Denied due to Quota Exceeded)
-            note right of ResourceQuotaClaim: Status Update:  - phase: Denied  - conditions.Granted: False (Reason: QuotaExceeded)  - conditions.Ready: True (Reason: ClaimDenied)
-        end
-    else ServiceQuotaRegistration not found OR ResourceQuotaClaim spec invalid against ServiceQuotaRegistration
-        MiloQOp->>MiloAPIServer: `PATCH` ResourceQuotaClaim.status (Denied due to Validation Failure)
-        note right of ResourceQuotaClaim: Status Update:  - phase: Denied  - conditions.Validated: False (Reason: e.g., UnknownResourceName or InvalidDimension)  - conditions.Ready: True (Reason: ClaimDenied)
-    end
-
-    %% --- Instance Controller Reacts to ResourceQuotaClaim Status from Milo ---
-    Note over InstCtrl, Instance: Instance Controller (Project Cluster) acts based on ResourceQuotaClaim status from Milo
-    InstCtrl-->>ResourceQuotaClaim: Watch ResourceQuotaClaim.status (from MiloAPIServer, for its owned Instance)
-    alt ResourceQuotaClaim.status.phase == Granted
-        InstCtrl->>ProjAPIServer: `PATCH` Instance (remove quota finalizer)
-        InstCtrl->>Infra: Provision workload (pods, VM, etc.)
-        note right of Instance: Instance Status: Pending -> Provisioning -> Running
-        InstCtrl->>ProjAPIServer: `PATCH` Instance.status (e.g., Phase=Running)
-    else ResourceQuotaClaim.status.phase == Denied
-        note right of Instance: Instance Status: Pending -> Failed
-        InstCtrl->>ProjAPIServer: `PATCH` Instance.status (e.g., Phase=Failed, Reason=ResourceQuotaClaim.status.conditions.message from Milo)
-    end
-
-    %% --- Telemetry & Metering Flow (Post-Provisioning if Granted) ---
-    Note over Instance, Telemetry: If Instance is running, it emits usage metrics
-    alt Instance is Running
-        Instance->>Telemetry: Emit usage event (cpu=8, location=dfw, ...)
-        Telemetry->>Vector: Format & Forward event
-        Vector->>amberflo: `POST` usage event to amberflo /meters API
-        amberflo->>amberflo: Aggregate usage, update ledger
-    end
-
-    %% --- Tear-down & Quota Release ---
-    Note over Dev, ProjAPIServer: Admin deletes the Instance in Project Cluster
-    Dev->>ProjAPIServer: kubectl delete Instance
-    ProjAPIServer->>Instance: Mark Instance with deletionTimestamp
-    
-    Note over InstCtrl, ResourceQuotaClaim: Instance controller (Project Cluster) handles finalizer for graceful shutdown, interacts with Milo for ResourceQuotaClaim
-    InstCtrl-->>Instance: Detect deletionTimestamp & finalizer present
-    InstCtrl->>MiloAPIServer: `DELETE` ResourceQuotaClaim associated with Instance
-    MiloAPIServer-->>ResourceQuotaClaim: ResourceQuotaClaim marked for deletion
-    
-    MiloQOp-->>ResourceQuotaClaim: Watch `DELETED`  ResourceQuotaClaim
-    note right of MiloQOp: Milo Operator might trigger explicit usage release/adjustment in amberflo if necessary, or rely on amberflo's TTL/idempotency for usage.
-    opt Update ResourceQuotaGrant Cache in Milo if used
-        MiloQOp->>MiloAPIServer: `PATCH` ResourceQuotaGrant.status.usage (-= released amount for the bucket)
-        note left of ResourceQuotaGrant: ResourceQuotaGrant.status.usage updated (cache)
-    end
-    InstCtrl->>Infra: Deprovision workload
-    InstCtrl->>ProjAPIServer: `PATCH` Instance (remove finalizer, after ResourceQuotaClaim deleted and other cleanup)
-    ProjAPIServer-->>Instance: Instance object eventually deleted by garbage collector
-```
-
-#### **Sequence Diagram Step Breakdown**
-
-The below steps accompany the sequence diagram and detail the major interactions
-shown in the diagram. Although they are numbered to correspond to the major
-interactions shown in the diagram, they are not numbered to correspond to the
-steps in the diagram (which are grouped for narrative and ease of
-understanding). The breakdown is organized into the following sections:
+The breakdown is organized into the following main sections: 
 
 - **Service Quota Definition Registration (Prerequisite)**
 - **Instance Provisioning & Admission Control**
@@ -1302,6 +1163,32 @@ define what resources types are enabled to be quotable.
         `ServiceQuotaRegistration.status` (via the **Milo APIServer**) to
         reflect the failure.
 
+```mermaid
+%% Sequence Diagram - Service Quota Definition Registration (Prerequisite)
+sequenceDiagram
+    autonumber
+    participant SvcOwner as Service Owner/Admin
+    participant MiloAPIServer as Milo APIServer <br> (quota.miloapis.com, in MCP)
+    participant MiloQOp as Milo quota-operator <br> (in MCP)
+    participant SQRegistration as ServiceQuotaRegistration <br> (CR in Milo APIServer)
+
+    SvcOwner->>+MiloAPIServer: Apply `ServiceQuotaRegistration` manifest (e.g., compute-cpu.yaml)
+    MiloAPIServer->>SQRegistration: Store `ServiceQuotaRegistration`
+    note right of SQRegistration: Initial Status: <br> - conditions.Ready: Unknown (Initializing) <br> - conditions.DefinitionValid: Unknown (PendingValidation)
+    MiloAPIServer-->>-SvcOwner: Ack (Manifest Applied)
+
+    MiloQOp-->>MiloAPIServer: Watch `ServiceQuotaRegistration` (ADDED/MODIFIED)
+    note left of MiloQOp: Detects new/updated SQRegistration
+    MiloQOp->>SQRegistration: Validate `spec` (fields, structure)
+    alt `ServiceQuotaRegistration.spec` is valid
+        MiloQOp->>MiloAPIServer: `PATCH` `ServiceQuotaRegistration.status`
+        note right of SQRegistration: Updated Status: <br> - conditions.DefinitionValid: True (ValidationSuccessful) <br> - conditions.Ready: True (DefinitionActive)
+    else `ServiceQuotaRegistration.spec` is invalid
+        MiloQOp->>MiloAPIServer: `PATCH` `ServiceQuotaRegistration.status`
+        note right of SQRegistration: Updated Status: <br> - conditions.DefinitionValid: False (InvalidDefinition) <br> - conditions.Ready: False (e.g. InvalidSpec)
+    end
+```
+
 #### Instance Provisioning & Admission Control
 
 Once services are registered as offering quotable resources, users can request
@@ -1311,7 +1198,7 @@ resources (e.g., an `Instance`) from the Owning Service's APIServer in the PCP.
     tenant or an automated system) submits an `Instance` custom resource
     manifest to the **Owning Service's K8s APIServer (PCP APIServer, e.g., the
     `compute.datumapis.com` APIServer in a specific project).**
-6.   **Mutating Webhook Intercepts & Modifies**: The **PCP APIServer** sends an
+6.  **Mutating Webhook Intercepts & Modifies**: The **PCP APIServer** sends an
     `AdmissionReview` request for the `Instance` creation/update/deletion to the
     **Milo Mutating Webhook service** (which is registered with the PCP
     APIServer). - It modifies the `Instance` resource by adding a finalizer
@@ -1322,20 +1209,53 @@ resources (e.g., an `Instance`) from the Owning Service's APIServer in the PCP.
         returns an `AdmissionReviewResponse` (indicating success and including
     the mutated `Instance`) to the **PCP APIServer**. The PCP APIServer then
         continues its admission chain.
-7. **Validating Admission Webhook**: Following the mutating webhook phase, the
+7.  **Validating Admission Webhook**: Following the mutating webhook phase, the
     **PCP APIServer** sends another `AdmissionReview` request to the **Milo
     Validating Webhook service** (if registered).
     - This webhook service performs a "fast-fail" check, potentially using
         cached data from `ResourceQuotaGrant`s in the Milo APIServer.
     - **If Denied by Validating Webhook**: The webhook service rejects the
-        request. The **PCP APIServer** does not persist the request `Instance`
-        object. The `ResourceQuotaClaim` would eventually be updated by the
+        request. The **PCP APIServer** does not persist the `Instance` object.
+        The `ResourceQuotaClaim` (if created) would eventually be updated by the
         `quota-operator` to `Denied`.
     - **If Allowed by Validating Webhook**: The webhook service allows the
         request. If all other admission controllers in the PCP APIServer also
         allow it, the `Instance` is persisted by the **PCP APIServer**. Actual
         provisioning is handled later by the Owning Service's controller in the
         PCP after explicit quota approval from Milo.
+
+```mermaid
+%% Sequence Diagram - Instance Provisioning & Admission Control
+sequenceDiagram
+    autonumber 5
+    participant User as Admin / CI Process
+    participant ProjAPIServer as Project APIServer <br> (PCP, e.g., compute.datumapis.com)
+    participant MiloMutateWH as Milo Mutating Webhook <br> (MCP)
+    participant MiloValidWH as Milo Validating Webhook <br> (MCP, Optional)
+    participant MiloAPIServer as Milo APIServer <br> (MCP, quota.miloapis.com)
+    participant RQC as ResourceQuotaClaim <br> (CR in Milo APIServer)
+    participant InstanceCR as Instance CR <br> (in Project APIServer)
+
+    User->>+ProjAPIServer: Apply `Instance` manifest
+    ProjAPIServer->>+MiloMutateWH: AdmissionReview for `Instance` (CREATE/UPDATE)
+    MiloMutateWH->>MiloAPIServer: `CREATE` `ResourceQuotaClaim`
+    MiloAPIServer->>RQC: Store `ResourceQuotaClaim`
+    note right of RQC: Initial Status: <br> - phase: Pending <br> - conditions.Validated: Unknown <br> - conditions.Granted: False
+    MiloAPIServer-->>MiloMutateWH: Ack (RQC Created)
+    MiloMutateWH-->>-ProjAPIServer: AdmissionReviewResponse (Patch `Instance` with finalizer)
+    ProjAPIServer->>InstanceCR: Mutate `Instance` (add finalizer)
+    
+    ProjAPIServer->>+MiloValidWH: AdmissionReview for `Instance`
+    alt Optional Fast-Fail by MiloValidWH
+        MiloValidWH-->>-ProjAPIServer: Deny Request (AdmissionReviewResponse {allowed: false})
+        ProjAPIServer-->>-User: Error (e.g., 403 Forbidden - Quota Check Failed by Webhook)
+        note over RQC: RQC might be updated to Denied later by quota-operator if Validating Webhook denies.
+    else MiloValidWH Allows
+        MiloValidWH-->>-ProjAPIServer: Allow Request (AdmissionReviewResponse {allowed: true})
+        ProjAPIServer->>InstanceCR: Store `Instance` (with finalizer, if not already stored and only mutated)
+        ProjAPIServer-->>-User: Ack (Instance Created/Updated, pending quota)
+    end
+```
 
 #### Quota Reconciliation by `quota-operator`
 
@@ -1364,6 +1284,54 @@ APIServer to decide if the requested resources can be granted.
     - **If Over Limit (Denied)**: Patches `ResourceQuotaClaim.status` in the
         **Milo APIServer** to `Denied`.
 
+```mermaid
+%% Sequence Diagram - Quota Reconciliation by quota-operator
+sequenceDiagram
+    autonumber 9
+    participant MiloQOp as Milo quota-operator <br> (MCP)
+    participant MiloAPIServer as Milo APIServer <br> (MCP, quota.miloapis.com)
+    participant RQC as ResourceQuotaClaim <br> (CR in Milo APIServer)
+    participant SQReg as ServiceQuotaRegistration <br> (CR in Milo APIServer)
+    participant RQGrant as ResourceQuotaGrant <br> (CR in Milo APIServer)
+    participant Amberflo as amberflo Usage API <br> (External)
+
+    MiloQOp-->>MiloAPIServer: Watch `ResourceQuotaClaim` (ADDED/MODIFIED)
+    note left of MiloQOp: Detects new/updated RQC
+    
+    MiloQOp->>MiloAPIServer: `GET` relevant `ServiceQuotaRegistration` for RQC.spec.resources
+    MiloAPIServer-->>SQReg: Return `ServiceQuotaRegistration`
+    MiloQOp->>SQReg: Validate RQC spec against SQReg (resourceName, dimensions, etc.)
+    
+    alt RQC spec is valid against SQReg
+        MiloQOp->>MiloAPIServer: `PATCH` RQC.status (conditions.Validated: True)
+        note right of RQC: RQC Status Update: <br> conditions.Validated: True
+        
+        MiloQOp->>MiloAPIServer: `GET` `ResourceQuotaGrant` for RQC's project/org
+        MiloAPIServer-->>RQGrant: Return `ResourceQuotaGrant`
+        note right of RQGrant: Contains limits, selectors, buckets
+
+        MiloQOp->>+Amberflo: `GET` current usage (for RQC.spec.resources & dimensions)
+        Amberflo-->>-MiloQOp: Return usage total (e.g., "500 cores")
+        MiloQOp->>MiloAPIServer: `PATCH` RQC.status (conditions.QuotaChecked: True)
+        note right of RQC: RQC Status Update: <br> conditions.QuotaChecked: True (CheckSuccessful)
+
+        alt Calculated (Current Usage + RQC.spec.resources.quantity) <= RQGrant Limit
+            MiloQOp->>MiloAPIServer: `PATCH` RQC.status (phase: Granted)
+            note right of RQC: RQC Status Update: <br> - phase: Granted <br> - conditions.Granted: True <br> - conditions.Ready: True
+            opt Update RQGrant Cache
+                 MiloQOp->>MiloAPIServer: `PATCH` `ResourceQuotaGrant.status.usage`
+                 note right of RQGrant: RQGrant.status.usage updated (cache)
+            end
+        else Usage would exceed RQGrant Limit
+            MiloQOp->>MiloAPIServer: `PATCH` RQC.status (phase: Denied, reason: QuotaExceeded)
+            note right of RQC: RQC Status Update: <br> - phase: Denied <br> - conditions.Granted: False <br> - conditions.Ready: True
+        end
+    else RQC spec invalid OR SQReg not found
+        MiloQOp->>MiloAPIServer: `PATCH` RQC.status (phase: Denied, reason: ValidationFailed)
+        note right of RQC: RQC Status Update: <br> - phase: Denied <br> - conditions.Validated: False <br> - conditions.Ready: True
+    end
+```
+
 #### Owning Service Reacts to `ResourceQuotaClaim` Status
 
 The Owning Service controller (running in the PCP) acts based on the
@@ -1386,6 +1354,35 @@ APIServer in the MCP.
         - The **`Instance` Controller** updates `Instance.status` to `Phase:
           Failed` and the `Instance` is not provisioned in the PCP.
 
+```mermaid
+%% Sequence Diagram - Owning Service Reacts to ResourceQuotaClaim Status
+sequenceDiagram
+    autonumber 15
+    participant InstCtrl as Instance Controller <br> (PCP)
+    participant MiloAPIServer as Milo APIServer <br> (MCP, quota.miloapis.com)
+    participant RQC as ResourceQuotaClaim <br> (CR in Milo APIServer)
+    participant ProjAPIServer as Project APIServer <br> (PCP, e.g., compute.datumapis.com)
+    participant InstanceCR as Instance CR <br> (in Project APIServer)
+    participant BackendInfra as Backend Infrastructure <br> (e.g., VMs, Pods in PCP)
+
+    InstCtrl-->>MiloAPIServer: Watch `ResourceQuotaClaim.status` (for its owned Instance)
+    note left of InstCtrl: Continuously monitors RQC from Milo APIServer
+    
+    alt RQC.status.phase == Granted
+        InstCtrl->>+ProjAPIServer: `PATCH` `InstanceCR` (remove quota finalizer)
+        ProjAPIServer-->>-InstCtrl: Ack
+        InstCtrl->>+BackendInfra: Provision workload (pods, VM, etc.)
+        BackendInfra-->>-InstCtrl: Ack (Workload Provisioned)
+        InstCtrl->>+ProjAPIServer: `PATCH` `InstanceCR.status` (e.g., Phase=Running)
+        ProjAPIServer-->>-InstCtrl: Ack
+        note right of InstanceCR: Instance Status: Pending -> Provisioning -> Running
+    else RQC.status.phase == Denied
+        InstCtrl->>+ProjAPIServer: `PATCH` `InstanceCR.status` (e.g., Phase=Failed, Reason=RQC.status.conditions.message)
+        ProjAPIServer-->>-InstCtrl: Ack
+        note right of InstanceCR: Instance Status: Pending -> Failed
+    end
+```
+
 #### Telemetry & Metering Flow (Post-Provisioning if Granted)
 
 When an `Instance` is successfully provisioned, it emits usage metrics to the
@@ -1400,6 +1397,23 @@ metering engine for recording.
     metrics.
 20. **Metering Engine Update**: The metering engine updates the
     `ResourceQuotaGrant` status with the latest usage data.
+
+```mermaid
+%% Sequence Diagram - Telemetry & Metering Flow (Post-Provisioning if Granted)
+sequenceDiagram
+    autonumber 17
+    participant RunningInstance as Running Instance <br> (PCP, e.g., a Pod/VM)
+    participant TelemetryAgent as Telemetry Agent/Collector <br> (PCP, e.g., Vector)
+    participant Amberflo as amberflo Usage API / Ledger <br> (External)
+
+    alt Instance is Running and Emitting Usage
+        RunningInstance->>+TelemetryAgent: Emit usage event (e.g., cpu=8, location=dfw)
+        TelemetryAgent->>+Amberflo: `POST` usage event to /meters API
+        note right of Amberflo: Aggregates usage, <br> updates internal ledger
+        Amberflo-->>-TelemetryAgent: Ack (Usage Recorded)
+        TelemetryAgent-->>-RunningInstance: Ack (or async, depending on agent)
+    end
+```
 
 #### Tear-down & Quota Release (PCP initiates, MCP reflects)
 
@@ -1430,6 +1444,51 @@ steps occur:
     APIServer**.
 27. **PCP APIServer Deletes `Instance`**: The **PCP APIServer** permanently
     deletes the `Instance` object.
+
+```mermaid
+%% Sequence Diagram - Tear-down & Quota Release
+sequenceDiagram
+    autonumber 21
+    participant User as Admin / CI Process
+    participant ProjAPIServer as Project APIServer <br> (PCP)
+    participant InstanceCR as Instance CR <br> (in Project APIServer)
+    participant InstCtrl as Instance Controller <br> (PCP)
+    participant MiloAPIServer as Milo APIServer <br> (MCP)
+    participant RQC as ResourceQuotaClaim <br> (CR in Milo APIServer)
+    participant MiloQOp as Milo quota-operator <br> (MCP)
+    participant RQGrant as ResourceQuotaGrant <br> (CR in Milo APIServer, for cache)
+    participant Amberflo as amberflo Usage API <br> (External)
+    participant BackendInfra as Backend Infrastructure <br> (PCP)
+
+    User->>+ProjAPIServer: `DELETE` `InstanceCR`
+    ProjAPIServer->>InstanceCR: Mark `InstanceCR` with deletionTimestamp
+    ProjAPIServer-->>-User: Ack (Deletion request accepted)
+
+    InstCtrl-->>InstanceCR: Detect deletionTimestamp & finalizer
+    InstCtrl->>+MiloAPIServer: `DELETE` `ResourceQuotaClaim` (associated with InstanceCR)
+    MiloAPIServer-->>RQC: Mark `ResourceQuotaClaim` for deletion
+    MiloAPIServer-->>-InstCtrl: Ack (RQC deletion initiated)
+
+    MiloQOp-->>MiloAPIServer: Watch `ResourceQuotaClaim` (DELETED)
+    note left of MiloQOp: Detects RQC deletion
+    opt Optional: Update RQGrant Cache
+        MiloQOp->>MiloAPIServer: `PATCH` `ResourceQuotaGrant.status.usage` (-= released amount)
+        note right of RQGrant: RQGrant.status.usage cache updated
+    end
+    opt Optional: Explicit Usage Deallocation if required by Metering System
+        MiloQOp->>+Amberflo: `POST` usage adjustment / deallocate
+        Amberflo-->>-MiloQOp: Ack
+    end
+    
+    InstCtrl->>+BackendInfra: Deprovision workload
+    BackendInfra-->>-InstCtrl: Ack (Workload Deprovisioned)
+    
+    InstCtrl->>+ProjAPIServer: `PATCH` `InstanceCR` (remove finalizer)
+    ProjAPIServer-->>InstanceCR: Finalizer removed
+    ProjAPIServer-->>-InstCtrl: Ack
+    note right of InstanceCR: Instance object eventually deleted by garbage collector
+
+```
 
 ## Production Readiness Review Questionnaire
 
