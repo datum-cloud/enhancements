@@ -383,8 +383,8 @@ Best practices will be enforced by reviewers based on their knowledge of the
 Datum Cloud ecosystem, including security and alignment with established
 external and internal standards.
 
-- The potential to block all resource creation, preventing administration of
-  resources due to network failure or timeouts.
+- **Risk:** The potential to block all resource creation, preventing
+  administration of resources due to network failure or timeouts.
   - **Mitigations (High-Level):**
     - **Webhook Timeouts & Failure Policy:** Configure admission webhooks (Milo
       Mutating & Validating) with aggressive timeouts. Set their `failurePolicy`
@@ -408,7 +408,7 @@ external and internal standards.
       temporarily bypass quota checks (e.g., by temporarily removing or altering
       webhook configurations). This is a last-resort measure, as it introduces
       manual intervention and potential for misconfiguration.
-- The potential for actual resource usage being out-of-sync with the
+- **Risk:** The potential for actual resource usage being out-of-sync with the
   cluster-state, leading to: 
   - Allowing allocation of resources beyond the set quota limits on both
     external and internal levels, bypassing enforcement.
@@ -431,7 +431,7 @@ external and internal standards.
         usage data to the metering system (`amberflo`) is resilient, with
         appropriate retries, buffering (e.g., in Vector agents), and error
         handling to minimize lost or delayed usage data.
-  - Denying resource allocation when there are enough free resources to allow
+  - **Risk:** Denying resource allocation when there are enough free resources to allow
     the request the ability to proceed.
     - **Mitigations (High-Level):**
       - **Real-time Usage Queries:** The `quota-operator` should *always*
