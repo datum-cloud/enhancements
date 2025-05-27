@@ -38,6 +38,7 @@ latest-milestone: "v0.1"
       - [Sequence Diagram Step Breakdown](#sequence-diagram-step-breakdown)
         - [Service Quota Definition
           RegistrationPrerequisite](#service-quota-definition-registration-prerequisite)
+        - [Defining Resource Quota Limits (`ResourceQuotaGrant` Creation)](#defining-resource-quota-limits-resourcequotagrant-creation)
         - [Instance Provisioning &
           AdmissionControl](#instance-provisioning--admission-control)
         - [Quota Reconciliation by
@@ -1126,6 +1127,7 @@ and ease of understanding.
 The breakdown is organized into the following main sections: 
 
 - **Service Quota Definition Registration (Prerequisite)**
+- **Defining Resource Quota Limits**
 - **Instance Provisioning & Admission Control**
 - **Quota Reconciliation by `quota-operator`**
 - **Instance Controller Reacts to ResourceQuotaClaim Status from Milo**
@@ -1201,6 +1203,57 @@ sequenceDiagram
     else `ServiceQuotaRegistration.spec` is invalid
         MiloQOp->>MiloAPIServer: `PATCH` `ServiceQuotaRegistration.status`
         note right of SQRegistration: Updated Status: <br> - conditions.DefinitionValid: False (InvalidDefinition) <br> - conditions.Ready: False (e.g. InvalidSpec)
+    end
+```
+
+#### Defining Resource Quota Limits (`ResourceQuotaGrant` Creation)
+
+After a service's resources are registered via `ServiceQuotaRegistration`, Tenant or Platform Administrators can define specific quota limits for projects or organizations by creating `ResourceQuotaGrant` resources in the Milo APIServer.
+
+1.  **Admin Defines & Applies `ResourceQuotaGrant`**: A **Tenant Administrator**
+    (for a specific project/org) or a **Platform Administrator** (for
+    global/default grants) creates a `ResourceQuotaGrant` manifest. This
+    manifest specifies the target project/organization, the `resourceName`
+    (e.g., `compute.datumapis.com/instances/cpu`), and the `limits` including
+    `buckets` with specific values and selectors (dimensions such as location
+    and instance type). The admin applies this manifest to the **Milo APIServer
+    (`quota.miloapis.com`) in the MCP**.
+2.  **Store & Initialize `ResourceQuotaGrant`**: The **Milo APIServer** stores
+    the new `ResourceQuotaGrant` CR. Its `status` is initialized (e.g.,
+    `conditions.Ready: Unknown`, `conditions.LimitsValid: Unknown`).
+3.  **`quota-operator` Validates `ResourceQuotaGrant`**: The `quota-operator`, watching `ResourceQuotaGrant` resources, detects the new CR. It validates the `spec.limits` against the corresponding `ServiceQuotaRegistration` (e.g., checking if `resourceName` is registered, if dimensions in selectors are allowed).
+4.  **Update `ResourceQuotaGrant` Status**:
+    - **If Valid**: The `quota-operator` patches the `ResourceQuotaGrant.status` (e.g., `conditions.LimitsValid: True`, `conditions.Ready: True`) via the **Milo APIServer**. The quota limits are now active and enforceable.
+    - **If Invalid**: The `quota-operator` patches `ResourceQuotaGrant.status` (e.g., `conditions.LimitsValid: False`, `conditions.Ready: False` with reasons) via the **Milo APIServer**.
+
+```mermaid
+%% Sequence Diagram - Defining Resource Quota Limits (ResourceQuotaGrant Creation)
+sequenceDiagram
+    autonumber
+    participant Admin as Tenant/Platform Admin
+    participant MiloAPIServer as Milo APIServer <br> (quota.miloapis.com, in MCP)
+    participant MiloQOp as Milo quota-operator <br> (in MCP)
+    participant RQGrant as ResourceQuotaGrant <br> (CR in Milo APIServer)
+    participant SQRegistration as ServiceQuotaRegistration <br> (CR in Milo APIServer, for validation lookup)
+
+    Admin->>+MiloAPIServer: Apply `ResourceQuotaGrant` manifest (e.g., project-x-cpu-limits.yaml)
+    MiloAPIServer->>RQGrant: Store `ResourceQuotaGrant`
+    note right of RQGrant: Initial Status: <br> - conditions.Ready: Unknown <br> - conditions.LimitsValid: Unknown
+    MiloAPIServer-->>-Admin: Ack (Manifest Applied)
+
+    MiloQOp-->>MiloAPIServer: Watch `ResourceQuotaGrant` (ADDED/MODIFIED)
+    note left of MiloQOp: Detects new/updated RQGrant
+    
+    MiloQOp->>MiloAPIServer: `GET` relevant `ServiceQuotaRegistration` for RQGrant.spec.limits[*].resourceName
+    MiloAPIServer-->>SQRegistration: Return `ServiceQuotaRegistration`
+    
+    MiloQOp->>RQGrant: Validate `spec.limits` against SQRegistration (resourceName, dimensions, bucket selectors)
+    alt `ResourceQuotaGrant.spec.limits` are valid
+        MiloQOp->>MiloAPIServer: `PATCH` `ResourceQuotaGrant.status`
+        note right of RQGrant: Updated Status: <br> - conditions.LimitsValid: True <br> - conditions.Ready: True (GrantActive)
+    else `ResourceQuotaGrant.spec.limits` are invalid
+        MiloQOp->>MiloAPIServer: `PATCH` `ResourceQuotaGrant.status`
+        note right of RQGrant: Updated Status: <br> - conditions.LimitsValid: False (e.g., InvalidDimensionSelector) <br> - conditions.Ready: False
     end
 ```
 
