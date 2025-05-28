@@ -437,5 +437,20 @@ and edge nodes. Future work for us to consider:
 - “Deliver better performance than MPLS for a fraction of the cost.”
 - “Multi-tenant ready and ready to productize.”
 
+**Service plane Features:**
+
+| Feature name | Description |  Demo  | Use Case | 
+| :---- | :---- | :---- | :----|
+| L3VPN | Layer 3 VPN | Prefix reachability and shoot packets to private prefixes| NaaS providers |
+| Deterministic routing | Applications/services drive path selection with their specifications/profiles | Run a ping with different DSCP codepoints that take different paths in the network | Real-time inference |
+| Partner Peering| Private and encrypted connectivity with partners | Get routes from AWS and GCP, Leak routes between partner routing tables and shoot packets | Replace PTP MPLS connectivity with IP connectivity with all the features of MPLS L3VPN including QoS and minus the cost and complexity |  
+| Provider peering | Private and encrypted connectivity between providers for B2B networking| Create shared routing tables between 2 providers and provide path computation, installation and traffic on different types of paths between then them, traffic generation is via APIs between providers | Allow for secure B2B connectivity for Agent2Agent and API access
+|Global span | Multi-cloud secured connectivity across Cloud providers | Get routes using APIs,compute paths,  Shoot Ipv4 packets between GCP and AWS using private overlapping prefixes | MPLS like private connectivity at lower cost with QoS |
+|Customer connect | Access Provider VPC via private, encrypted connectivity using private attachment addresses from provider IP pool |  Private address from provider allocated to customer attachment | No attackable, visible public addresses ever|
+|Rate-limiting, policing| Allow rate-limiting and policing policies to be applied on Edge | use iPerf and drop packets on ingress to Datum Edge at predefined limits| Customers cannot exceed specific consumption limits set for traffic classes|  
+|Dashboard - Observability| Be able to view L3 prefixes exchanged and calculated paths and their classes for those prefixes | Show L3 prefixes being exchanged and paths computed per-VPC and across VPC peerings | Give customers deep insight into path computation,selection and metrics |
+|Traceability| L3-L7 probes for tracing traffic to different prefixes | show L3-L7 behavior using per-packet/session/connection/transaction traceability|
+|Debuggability| Packet traces and per-hop treatment of packets for different classes of traffic | Collect packet traces and render them in wireshark |
+
 ---
 
