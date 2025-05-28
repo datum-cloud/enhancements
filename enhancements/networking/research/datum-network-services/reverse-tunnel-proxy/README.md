@@ -162,7 +162,7 @@ know that this has succeeded?
 
 - Define a repeatable L4-L7 network topology that can be used by developers to create "inside-out" tunnels that expose local services to the Internet.
 - Define a user experience built around `datumctl serve` -  an existing tool in our toolchain that we expect will be comfortable for developers and devops.
-- Define a set of K8s API CRDs and related APIs for the provisioning and de-provisioning of the service.
+- Define a set of K8s APIs and related CRDs for the provisioning and de-provisioning of the service.
 - Define a set of clients and service daemons (rathole, frp, etc) used for actual tunnel creation, and integrate into `datumctl` and Datum Cloud.
 - Produce appropriate technology bindings allowing for integration with Datum Gateways (Envoy).
 
@@ -173,7 +173,7 @@ What is out of scope for this Enhancement? Listing non-goals helps to focus disc
 and make progress.
 -->
 
-- We are not providing L2 or L3 services with DRTP.
+- We are not providing L2 or L3 services with DRT, this is scoped to Galactic VPC.
 - We are not optimizing routing or paths in this iteration.
 
 ## Proposal
@@ -191,19 +191,19 @@ Datum Reverse Tunnel Proxy (DRTP) is the solution. DTRP has the following compon
 
 - DRTP Service Definition: Defining a DTRP requires the following pieces of data:  
   - Local Application Name/Type/Hostname/IP/Port  
-    -  Example: PostgresSQL/TCP/sqlserver.corp.com/5432  
+    -  Example: PostgresSQL/TCP/sqlserver.corp.com/5432  (Reference this data as $SERVICE_DETAIL below.)
   -  Edge Allowlist CIDRs: One or more CIDRs defining permitted clients.
 
-- `datumctl serve`: An extension to `datumctl` that provides the client side of the DTRP connection. Invocation of datum-nsd requires a $SERVICEID and a $SECRET.  
-  -  DRTP connects to Datum Cloud on start, presenting its $SERVICEID and $SECRET to unlock a bootstrapping API call to download the Local Application Name/Type/Hostname/IP/Port and 2x nearby Datum Cloud POPs to connect to.
+- `datumctl serve`: An extension to `datumctl` that provides the client side of the DTRP connection. 
+  -  DRTP connects to Datum Cloud on start, presenting its $SERVICE_DETAIL to unlock a bootstrapping API call to connect the Local Application Name/Type/Hostname/IP/Port and 2x nearby Datum Cloud POPs to connect to.
+  - Authentication and authorization is handled by existing workflows in `datumctl`.
+  - Uses `rathole-client` to make the connection to the $SERVICE_DETAIL and initiate the inside-to-outside reversed tunnel.
 
-- rathole-server (or similar): Running in Datum Cloud POPs, this daemon is responsible for accepting inbound connections from datum-nsd, and turning them into reverse tunneled connections. Assume that these connections are now available on Datum PodCIDRs.
+- rathole-server (or similar): Running in Datum Cloud POPs, is a daemon responsible for accepting inbound connections from `datumctl servce`, and turning them into reverse tunneled connections. Once established, we believe that these connections will be available on Datum PodCIDRs.
 
 - Datum Gateway: Our standard Datum Edge Reverse Proxy Service (Gateway API) configured with a TCPRoute/HTTPRoute and an EndpointSlice pointing at the PodCIDR of the appropriate rathole-servers.
 
 Once configured and deployed, using `datumctl serve` means that a local daemon, say NGINX on localhost:8080, can be made available on the global internet, via Datum Gateways. A remote user should be able to be given a Datum Gateway FQDN (and possibly a port number), to access the NGINX server running locally.
-
-(NOTE TO REVIEWERS: JOSH HAS A GOOD STATE DIAGRAM TO FEATURE HERE)
 
 ### User Stories (Optional)
 
@@ -223,7 +223,7 @@ SelectStar [states](https://docs.selectstar.com/integrations/private-network): �
 Instead of engaging the technical support team:
 
 * User Joe defines a DRTP service in the Portal/API. Joe provides a Service Name, Protocol (TCP or UDP), Local Hostname/IP Address, and Local Port Number. He is pointing at the data source he wants to expose to SelectStar. 
-* Datum Cloud responds with a $SERVICEID and $SECRET, plus a link to download datumctl, and configuration instructions.  
+* Datum Cloud responds with a $SERVICE_DETAIL and $SECRET, plus a link to download datumctl, and configuration instructions.  
 * This also causes Datum Cloud to start up a Rathole Server in 2x Datum POPs, designed to accept an inbound Rathole Client connection, and to expose an endpoint on the Datum PodCIDR network.   
 
 * User Joe does something like:
@@ -305,6 +305,237 @@ change are understandable. This may include API specs (though not always
 required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
+
+### State Diagram
+
+The diagram below attempts to capture critical interactions in the DRTP system.
+
+```mermaid
+sequenceDiagram
+  autonumber
+
+  participant user
+  participant postgressql
+  participant datumctl
+
+  box datum-api
+    participant control-plane
+  end
+
+  box datum-edge
+    participant datum-tunnel-proxy
+    participant proxy-pod
+    participant proxy-pod-svc
+    participant datum-gateway
+
+  end
+
+  user ->> postgressql: Start, listen on localhost:5432
+  activate postgressql
+  user ->> datumctl: Start `datumctl serve`, connections should be forwarded to localhost:5432
+  activate datumctl
+  datumctl ->> control-plane: Discover nearby DRTPServer(s), register DRTPConnection
+  activate control-plane
+  control-plane ->> datumctl: Connect to DRTPServer_Primary, configure DRTPServer_Secondary
+  deactivate control-plane
+
+  postgressql ->> datum-tunnel-proxy: Connect to DRTPServer_Primary
+
+  activate datum-tunnel-proxy
+
+  datum-tunnel-proxy ->> proxy-pod: Create
+  activate proxy-pod
+  datum-tunnel-proxy ->> proxy-pod-svc: Create
+  activate proxy-pod-svc
+  datum-tunnel-proxy ->> datum-gateway: Program
+
+  datum-tunnel-proxy <<->> proxy-pod: Establish connection, proxy
+
+  control-plane ->> datumctl: Gateway address: abc.prism.global.datum-dns.net
+
+  datumctl ->> user: Gateway address: abc.prism.global.datum-dns.net
+
+  remote <<->> datum-gateway: Connect abc.prism.global.datum-dns.net
+  activate datum-gateway
+
+  datum-gateway <<->> proxy-pod-svc: Connect
+  proxy-pod-svc <<->> proxy-pod: Connect
+
+  proxy-pod <<->> datum-tunnel-proxy: Forward
+
+  datum-tunnel-proxy <<->> datumctl: Forward
+
+  datumctl <<->> postgressql: Connect
+
+
+  deactivate proxy-pod-svc
+  deactivate proxy-pod
+  deactivate datum-tunnel-proxy
+  deactivate datumctl
+  deactivate postgressql
+  deactivate datum-gateway
+
+```
+
+### Assumptions
+- Datum Gateway has TCPRoute and HTTPRoute routes enabled in Envoy.
+
+### Establishing DRTPServer Availability (Rathole Server)
+
+- Suggest the use of a `DaemonSet` to deploy the Rathole Server daemon across the Datum Fleet.
+- Each instance of Rathole Server should self-register with a K8s API server that enables service discovery. Important details include:
+  - Server Latitude and Longitude (Could be defined statically using our topology knowledge, or based upon IP geolocation information) - to be used to determine the best Datum POP for a `datumctl serve` client to connect to.
+  - Server WAN IP Address - the IP address for `datumctl serve` to connect to.
+  - Server Instance Name - Bare Metal Host + container pod identifier for debugging.
+
+```
+apiVersion: datumapis.com/v1alpha
+kind: DRTPServer
+metadata:
+  name: worker-001-nyc-ac/instance-xyz
+  latititude: 40.7128° N
+  longitude: 74.0060° W
+  server_ip: 199.38.181.25
+status:
+  health: 100
+```
+
+`datumctl` will be able to query an API to discover nearby `DRTPServers`. See "Registering a DRTPConnection (DatumCTL + Rathole Client)" below.
+
+### Registering a DRTPConnection (DatumCTL + Rathole Client)
+
+By knowing our available DRTPServer nodes, by our K8s API "registry", we can now use `datumctl server` to create a connection.
+
+- User identifies his/her local service to present via `datumctl serve`.
+- `datumctl serve` connects to Datum control plane API to register the requested connection. The request includes $SERVICE_DETAIL (PostgresSQL/TCP/sqlserver.corp.com/5432), plus the client's detected WAN IP.
+- The API service takes multiple actions:
+  - Hand back an array of DRTPServer objects to be used for `datumctl server` to configure Rathole Client.
+  - Register a `DRTPConnection` object in the control-plane, designed to configure Rathole Server on the appropriate `DRTPServer` instance.
+- The results of this API call are then used to configure and start Rathole Client via `datumctl serve`. 
+
+```
+apiVersion: datumapis.com/v1alpha
+kind: DRTPConnection
+metadata:
+  DRTPServer_Primary: # ref to a DRTPServer
+  DRTPServer_Secondary: # ref to a 2nd DRTPServer
+  DRTPServer_ACL: # ref to an Access Control List for the Service
+status:
+  DRTPServer_Primary:
+    programmingStatus: 'programmed'
+    clientStatus: 'connected'
+    podCIDR: 10.10.10.10
+    podCIDRPort: 58721
+  DRTPServer_Secondary:
+    programmingStatus: 'init'
+    clientStatus: 'waiting'
+    podCIDR:
+    podCIDRPort:
+```
+
+### Adding an Envoy Gateway
+
+With a `DRTPConnection` object available and healthy, we can program an Envoy Gateway for global access to the DRTP connection.
+
+#### Gateway
+
+Program a gateway and claim a hostname for use. For this example, use a TCPRoute to get us back to the PostgresSQL instance run by the user.
+
+**NOTE: For TCPRoute based workloads, we will not be able to use SNI for connection identification. Therefore, we will need a way to vend IP addresses and port numbers associated to Gateways.**
+
+```
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: drtp-gateway
+spec:
+  gatewayClassName: datum-external-global-proxy
+  listeners:
+  - name: drtp-gateway
+    protocol: TCP
+    port: 54321
+    allowedRoutes:
+      kinds:
+      - kind: TCPRoute
+```
+
+#### TCP Route Example
+
+```
+apiVersion: gateway.networking.k8s.io/v1
+kind: TCPRoute
+metadata:
+  name: drtp-route
+spec:
+  parentRefs:
+  - name: drtp-gateway
+    kind: Gateway
+  rules:
+      backendRefs:
+      - group: discovery.k8s.io
+        kind: EndpointSlice
+        name: DRTPServer_Primary
+        port: 58721
+
+```
+
+#### EndpointSlices
+
+For this Gateway, the EndpointSlices point back to the DRTPServer_Primary and DRTPServer_Secondary objects.
+
+**Note: If the DRTPConnection object exposes a K8s service we can reference directly from a route, then an EndpointSlice may not be necessary at all. Seeking expert input here.
+
+```
+---
+kind: EndpointSlice
+metadata:
+  name: DRTPServer_Primary
+addressType: IPv4
+apiVersion: discovery.k8s.io/v1
+endpoints:
+- addresses:
+  - # podCIDR here
+  conditions:
+    ready: true
+    serving: true
+    terminating: false
+ports:
+- name: PostsqlSQL
+  appProtocol: TCP
+  port: 58721
+---
+kind: EndpointSlice
+metadata:
+  name: DRTPServer_Secondary
+addressType: IPv4
+apiVersion: discovery.k8s.io/v1
+endpoints:
+- addresses:
+  - # 
+  conditions:
+    ready: false
+    serving: false
+    terminating: false
+ports:
+- name: PostgresSQL
+  appProtocol: TCP
+  port: 58721  
+```
+
+### Access Control Lists (ACLs)
+
+An important feature of DRTP, is to support the use of ACLs to provide policy controlling access to the service exposed via DRTP. ACLs should be able to be placed upon the `podCIDR` endpoints used for the DRTPConnection itself (the Rathole Server) as well as the resulting `Gateway` object.
+
+Example: It may be a case where a user wants to expose a PostgresSQL DB via DRTP, but not to the world. An ACL will be used to help control that.
+
+### Future Thoughts on App to App Connections
+
+On our roadmap, we have the concept of "App to App Connections." DRTP can be the basis for 25% of an App to App Connection. Looking forward:
+
+- The first quarter of an App to App Connection is a `DRTPConnection` - this effectively gets a service onto an "inside-out" tunnel to the Datum infrastructure.
+- The next quarter of an App to App Connection is a mechanism to securely initiate a connection from a client (in our PostgresSQL oriented example, say, Tableau Analytics) but without needing to have a priori knowledge of IPs / ports for an ACL. Imagine the command `datumctl connect` which: 1) Makes an outbound connection to Datum's Infratructure; 2) presents the remote PostgresSQL on `localhost:5432`. Magic wormhole!
+- The next quarter of an App to App Connection is the "optimized virtual cross connect" - this requires a "software based letter of authorization" (e.g. authentication / policy), middle mile route optimization across the Datum backbone, and fast path failover. Network policy in Galactic VPC can be used to pick fast pass, low loss paths, or FEC enabled paths.
+- The last quarter of an App to App Connection is the visibility of what is effectively a "socket across the Internet". Imagine being able to see the serving node telemetry (from the `datumctl serve` side) to the serving POP (the Rathole Server), to the middle mile network, to the client (the `datumctl connect` side)?!!!
 
 ## Production Readiness Review Questionnaire
 
