@@ -23,6 +23,35 @@ latest-milestone: "v0.1"
       - [Story 2](#story-2)
     - [Notes/Constraints/Caveats (Optional)](#notesconstraintscaveats-optional)
     - [Risks and Mitigations](#risks-and-mitigations)
+      - [Risk: The potential to block all resource creation, preventing
+        administration of resources due to network failure or
+        timeouts.](#risk-the-potential-to-block-all-resource-creation-preventing-administration-of-resources-due-to-network-failure-or-timeouts)
+        - [Mitigations (High-Level):](#mitigations-high-level)
+          - [Webhook Timeouts & Failure
+            Policy:](#webhook-timeouts--failure-policy)
+          - [`quota-operator` Resilience:](#quota-operator-resilience)
+          - [Monitoring & Alerting:](#monitoring--alerting)
+          - [Emergency Bypass (Break-Glass
+            Procedure):](#emergency-bypass-break-glass-procedure)
+      - [Risk: The potential for actual resource usage being out-of-sync with
+        the cluster-state, leading to: 
+        - Allowing allocation of resources beyond the set quota limits on both
+          external and internal levels, bypassing
+          enforcement.](#risk-the-potential-for-actual-resource-usage-being-out-of-sync-with-the-cluster-state-leading-to-allowing-allocation-of-resources-beyond-the-set-quota-limits-on-both-external-and-internal-levels-bypassing-enforcement)
+        - [Mitigations (High-Level):](#mitigations-high-level-1)
+          - [Authoritative Usage Source:](#authoritative-usage-source)
+          - [Webhook `failurePolicy: Ignore`
+            Trade-off:](#webhook-failurepolicy-ignore-trade-off)
+          - [Post-Outage Reconciliation:](#post-outage-reconciliation)
+          - [Robust Telemetry Pipeline:](#robust-telemetry-pipeline)
+      - [Risk: Denying resource allocation when there are enough free resources
+        to allow the request the ability to
+        proceed.](#risk-denying-resource-allocation-when-there-are-enough-free-resources-to-allow-the-request-the-ability-to-proceed)
+        - [Mitigations (High-Level):](#mitigations-high-level-2)
+          - [Real-time Usage Queries:](#real-time-usage-queries)
+          - [Cautious Use of Cached Data:](#cautious-use-of-cached-data)
+          - [Metering System Reliability:](#metering-system-reliability)
+          - [Clear Status Reporting:](#clear-status-reporting)
   - [Design Details](#design-details)
     - [Custom Resource Definitions](#custom-resource-definitions)
       - [`ServiceQuotaRegistration`](#servicequotaregistration)
@@ -38,7 +67,8 @@ latest-milestone: "v0.1"
       - [Sequence Diagram Step Breakdown](#sequence-diagram-step-breakdown)
         - [Service Quota Definition
           RegistrationPrerequisite](#service-quota-definition-registration-prerequisite)
-        - [Defining Resource Quota Limits (`ResourceQuotaGrant` Creation)](#defining-resource-quota-limits-resourcequotagrant-creation)
+        - [Defining Resource Quota Limits (`ResourceQuotaGrant`
+          Creation)](#defining-resource-quota-limits-resourcequotagrant-creation)
         - [Instance Provisioning &
           AdmissionControl](#instance-provisioning--admission-control)
         - [Quota Reconciliation by
@@ -129,7 +159,7 @@ quota management system within the Milo platform. This system, operating as a
 centralized service within the Datum Management Control Plane (MCP), will
 empower Datum Employees and Datum Cloud administrators to define, manage, and
 enforce resource consumption limits at both the organizational and project
-levels.
+level.
 
 Datum employees will have the ability to view and modify these quota levels at a
 global level across all organizations and projects, while Datum Cloud
@@ -139,7 +169,8 @@ current resource usage within the Datum Cloud Portal.
 The system aims to provide predictable capacity management, enable customer tier
 enforcement, offer transparency to customers regarding their resource limits,
 and include enforcement mechanisms to reject claim requests that would exceed
-these limits. Furthermore, services offered on the Datum Cloud platform (operating within individual PCPs) will be able to register the resources they
+these limits. Furthermore, services offered on the Datum Cloud platform
+(operating within individual PCPs) will be able to register the resources they
 manage for quota protection and set default quota levels by interacting with the
 central Milo Quota Management service.
 
@@ -161,7 +192,7 @@ The safeguards put in place through quota management will enable users to fully
 explore the Datum Cloud and Milo ecosystems and the variety of functionality
 they provide, without the risk of exceeding the thresholds that have been set
 within their organization and projects; leading to unexpected costs incurred by
-the tenant.
+the organization.
 
 ### Goals
 
@@ -175,9 +206,9 @@ the tenant.
     as fallbacks.
   - Create claims that request additional resources, allocations, or
     deprovisioning.
-- Define the API for **Datum Cloud tenants** to view and manage their quota
-  limits and the live data showing the current resources consumed against each
-  quota.
+- Define the API for **Datum Cloud Organizations** to view and manage their
+  quota limits and the live data showing the current resources consumed against
+  each quota.
 - Define the API for **Datum Employees** to create and manage global quota
   limits applied to all organizations and projects across the platform.
 - Enable full visibility into the consumption metrics of provisioned workloads
@@ -217,56 +248,93 @@ the tenant.
 ## Proposal
 
 This enhancement proposes the design, architecture, and implementation of a
-quota management system in Milo, which will operate as a centralized service
-within the Datum Management Control Plane (MCP) and integrate with Datum Cloud
-services running in tenant Project Control Planes (PCPs). The system will allow
-for the registration, management, and enforcement of resource quota limits at
-both organizational and project levels by external and internal administrators.
+quota management system in Milo. This system will operate as a centralized
+service within the Datum Management Control Plane (MCP) and is designed for
+integration by Datum Cloud services running in organization Project Control
+Planes (PCPs). It will allow for the registration, management, and enforcement
+of resource quota limits at both organizational and project levels by external
+and internal administrators.
 
 ### Desired Outcome and Definition of Success
 
-Once implemented, the Milo Quota Management system (hosted in the MCP) will have
-seamless integration with Datum Cloud services (running in PCPs) and downstream
-external vendors. Both internal and external platform administrators will be
-able to use the system to easily create and manage quotas through highly
-scalable architecture and implementation. The system should properly allocate
-and deallocate resources when claims are granted, deny claims that exceed set
-limits, and stay in sync with integrated downstream systems such as amberflo.
+Once implemented, Datum Cloud services should be able to seamlessly integrate
+with the Milo Quota Management system and downstream external vendors. Both
+internal and external platform administrators will be able to use the system to
+easily create and manage quotas through highly scalable architecture and
+implementation. The system should properly allocate and and deallocate resources
+when claims are granted, deny claims that exceed set limits, and stay in sync
+with integrated downstream systems such as amberflo.
 
 ### Key Components and Capabilities
 
 There are several key components that will comprise the architecture and
 implementation of the quota management system, primarily residing within the
-Datum Management Control Plane (MCP) and exposing APIs for interaction from
-tenant Project Control Planes:
+Datum Management Control Plane (MCP) and exposing APIs that will be used by
+Datum Cloud services to register their resources for quota management.
 
 1.  **`ResourceQuotaClaim` Definition (Hosted in MCP):**
-    - Tenants (via their project/org administrators or automated processes interacting with Owning Services in Project Control Planes) can use the API indirectly (e.g., by creating resources like `Instances` in their PCP) to request resource changes. The Owning Service, via webhook calls to Milo (in the Management Control Plane), then triggers the creation of a `ResourceQuotaClaim` in the Milo APIServer.
-    - Claims will contain the relationship between owning/parent resources and
-      the resources being requested within them.
-    - Claims will be used when determining whether the request should be granted
-      or denied by being compared to the `ResourceQuotaGrant` limits. W
+    - **Datum Cloud Services** are the primary actors that create and manage
+      `ResourceQuotaClaim` objects in the `Core Milo APIServer`. When a user
+      action (e.g., creating an `Instance` via the Cloud Portal or API) or an
+      automated process requires resource allocation that is subject to quota,
+      the responsible Datum Cloud Service (Owning Service) will generate a
+      `ResourceQuotaClaim`.
+    - This claim represents the service's intent to consume a specific quantity
+      of a registered resource (e.g., CPU cores, memory) for a particular
+      project or organization.
+    - Claims will contain a reference to the owning service and the specific
+      resource instance in the Project Control Plane (PCP) that requires the
+      quota (e.g., a particular `Instance` CR).
+    - The `quota-operator` evaluates these claims against the applicable
+      `ResourceQuotaGrant` limits to determine if the request should be
+      `Granted` or `Denied`.
+    - Users and organization/project administrators typically do not interact
+      directly with `ResourceQuotaClaim` objects; they interact with the Datum
+      Cloud Service, which then handles the claim lifecycle.
+
 2.  **`ResourceQuotaGrant` Definition (Hosted in MCP):**
-    - **Platform Administrators (Datum Employees)** can define global default
-      quota grants for all resources by creating `ResourceQuotaGrant` objects in
-      the Milo APIServer that apply to all projects and organizations across the
-      platform.
-    - **Organizational Administrators (Tenants)** can define
-      organization-specific quotas by creating `ResourceQuotaGrant` objects in
-      the Milo APIServer that apply to all projects within the organization.
-    - **Project Administrators (Tenants)** can define project-specific quotas by
-      creating `ResourceQuotaGrant` objects in the Milo APIServer that apply to
-      specific projects within the organization.
-    - In a future enhancement, resource quotas will be able to support different
-      customer tiers and plans, allowing for varied limits based on subscription
-      levels (e.g., "Free Tier gets 1 collaborator" and "Pro Tier gets
-      unlimited").
+    - **The Quota Management system** will create default `ResourceQuotaGrant`s
+      for each organization (for organization-level quotas like project count
+      and collaborator count) and for each project (for resource consumption
+      quotas like CPU, memory, instance count, etc.) on initialization. These
+      ensure that safeguards are in place that prevent attempts to claim/create
+      resources that exceed the limits set for the organization and project
+      before specific grants are further configured.
+    - **Platform Administrators (Datum Employees)** can define and override
+      default `ResourceQuotaGrant`s for both organization-level quotas (e.g.,
+      max projects per org) and project-level resource consumption quotas (e.g.,
+      CPU limits per project). While the system may automatically configure many
+      default thresholds, Platform Administrators have the flexibility to make
+      adjustments as needed across the platform.
+    - **Organizational Administrators** can view and manage `ResourceQuotaGrant`
+      objects that pertain to their organization-specific limits, such as the
+      maximum number of projects allowed within their organization or the total
+      number of collaborators. They do not directly manage grants for
+      project-level resource consumption (e.g., CPU, memory for a specific
+      project).
+    - **Project Administrators** can define and manage `ResourceQuotaGrant`
+      objects for their specific projects. These grants control project-level
+      resource consumption quotas like CPU, memory, instance counts, gateway
+      counts, etc., and can override any platform-defined default grants for
+      those resources within their project, provided they align with broader
+      platform policies if applicable.
+    - In a future enhancement, the system will be able to support different
+      customer tiers and plans that are tied to specific grants, allowing for
+      varied limits based on subscription levels (e.g., "Free Tier gets 1
+      collaborator" and "Pro Tier gets unlimited").
+    - **Aggregating Quota Grants:** In scenarios where multiple
+      `ResourceQuotaGrant` objects apply to the same resource and dimensions for
+      a given project or organization (e.g., a default grant for CPU and an
+      additional grant from a Datum Employee to increase CPU), the
+      `quota-operator` must have a defined strategy for aggregating these limits
+      to determine the effective total quota. This typically means summing the
+      limits from all applicable grants. The system should provide clarity on
+      the effective total limit to users and administrators.
 
 3.  **`ServiceQuotaRegistration` Definition (Hosted in MCP):**
-    - **Service Owners/Administrators (representing the Datum Cloud service
-      instances, which are hosted within the tenant PCPs)** can register
-      resources to allow them to be managed by quotas by creating
-      `ServiceQuotaRegistration` objects in the Milo APIServer.
+    - **Service Owner/Admin** can register resources that _enable_ them to be
+      managed by quotas by creating `ServiceQuotaRegistration` objects in the
+      `Core Milo APIServer`.
     - This is necessary for creating `ResourceQuotaGrant` objects that define
       quota limits, as well as for requesting resources and generating a
       `ResourceQuotaClaim`.
@@ -274,7 +342,11 @@ tenant Project Control Planes:
       registered, it will be denied.
 
 4.  **Quota Enforcement (Orchestrated from MCP):**
-    - The system will use a mutating admission webhook and a `quota-operator` reconciler, both running in the MCP. The webhook will be configured on Owning Service APIServers (in PCPs) to intercept resource requests originating there. The operator will then check these requests against defined quotas.
+    - The system will use a mutating admission webhook and a `quota-operator`
+      reconciler, both running in the MCP. The webhook will be configured on
+      `Project-X Milo APIServer` instances (in PCPs) to intercept resource
+      requests originating there. The operator will then check these requests
+      against defined quotas.
     - The system will determine near real-time metric usage via integration with
       a downstream metering engine (e.g. amberflo, which is used as an example
       in this enhancement) to determine if the request should be granted or
@@ -285,22 +357,23 @@ tenant Project Control Planes:
       additional observability and an audit trail detailing why specific claim
       requests were denied.
     - The system will be designed to be resilient to failures of the metering
-      engine and the Milo APIServer, ensuring that the system can continue to
-      function even if one of these components is unavailable.
+      engine and the `Core Milo APIServer`, ensuring that the system can
+      continue to function even if one of these components is unavailable.
 
 5.  **Quota Visibility:**
-    - Datum Cloud tenants will be able to view their current quota allocations
-      and their consumption of resources against their self managed and global
+    - Datum Cloud users will be able to view their current quota allocations and
+      their consumption of resources against their self managed and global
       platform quotas via the Datum Cloud Portal.
     - Datum Employees (internal administrators) will have the ability to view
       and modify quota levels for all projects and organizations via the Datum
       Staff Portal.
 
 6.  **Service Integration (MCP coordinating with PCPs):**
-    - Services offered on the Datum Cloud platform running within the tenant
+    - Services offered on the Datum Cloud platform running within organization
       PCPs will need a mechanism to register the resources they manage (via
-      `ServiceQuotaRegistration` in the MCP) that should be subject to quotas.
-    - A centralized API, hosted by the Milo APIServer in the MCP, will be
+      `ServiceQuotaRegistration` in the `Core Milo APIServer` (in the MCP)) that
+      should be subject to quotas.
+    - A centralized API, hosted by the `Core Milo APIServer` in the MCP, will be
       designed for services to register these quotable resources and
       subsequently manage their quota limits for projects and organizations via
       a `ResourceQuotaGrant`.
@@ -322,8 +395,9 @@ tenant Project Control Planes:
       #78](https://github.com/datum-cloud/enhancements/issues/78), will be added
       as a future enhancement to dynamically configure quotas based on the
       specific plans and tiers.
-    - A "Resource Claim", as represented in this enhancement, was inspired by the
-      `ResourceClaim` type within the [Kubernetes Dynamic Resource Allocation
+    - A "Resource Claim", as represented in this enhancement, was inspired by
+      the `ResourceClaim` type within the [Kubernetes Dynamic Resource
+      Allocation
       API](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/#api)
       to model how changes to resources are requested
 
@@ -344,9 +418,10 @@ bogged down.
 -->
 
 #### Story 1
- As a Datum Cloud tenant administrator, I should be able to view and manage
- quota limits for my organization and project-level resources, so that I can
- easily manage the resource limits configured for my organization and projects.
+ As a Datum Cloud organization or project administrator, I should be able to
+ view and manage quota limits for my organization and project-level resources,
+ so that I can easily manage the resource limits configured for my organization
+ and projects.
 
 #### Story 2
  As a Datum Cloud Employee, I should be able to view and manage quota limits for
@@ -373,121 +448,143 @@ Best practices will be enforced by reviewers based on their knowledge of the
 Datum Cloud ecosystem, including security and alignment with established
 external and internal standards.
 
-- **Risk:** The potential to block all resource creation, preventing
-  administration of resources due to network failure or timeouts.
-  - **Mitigations (High-Level):**
-    - **Webhook Timeouts & Failure Policy:** Configure admission webhooks (Milo
-      Mutating & Validating) with aggressive timeouts. Set their `failurePolicy`
-      to `Ignore`. This ensures that if the Quota Management Service is
-      unreachable or times out, resource creation/modification requests to
-      Owning Services can still proceed (albeit without immediate quota
-      enforcement). This prioritizes platform availability.
-    - **`quota-operator` Resilience:** Design the `quota-operator` to retry
-      calls to external dependencies like the metering system (`amberflo`) with
-      exponential backoff. If dependencies are unavailable for an extended
-      period, the operator should clearly indicate this (e.g., in
-      `ResourceQuotaClaim` status) and might temporarily deny new claims (or use
-      cached data with *extreme caution* if implemented, clearly marking
-      approvals as conditional).
-    - **Monitoring & Alerting:** Implement comprehensive monitoring and alerting
-      for the Quota Management Service and its connectivity to critical
-      dependencies (Milo APIServer, `amberflo`).
-    - **Emergency Bypass (Break-Glass Procedure):** For extreme, prolonged
-      outages of the core quota enforcement mechanism, a well-documented,
-      audited, and access-controlled procedure should allow Datum Employees to
-      temporarily bypass quota checks (e.g., by temporarily removing or altering
-      webhook configurations). This is a last-resort measure, as it introduces
-      manual intervention and potential for misconfiguration.
-- **Risk:** The potential for actual resource usage being out-of-sync with the
-  cluster-state, leading to: 
-  - Allowing allocation of resources beyond the set quota limits on both
-    external and internal levels, bypassing enforcement.
-    - **Mitigations (High-Level):**
-      - **Authoritative Usage Source:** The `quota-operator` must treat the
-        external metering system (`amberflo`) as the authoritative source of
-        truth for current usage when evaluating `ResourceQuotaClaim`s.
-      - **Webhook `failurePolicy: Ignore` Trade-off:** Acknowledging that
-        setting `failurePolicy: Ignore` for webhooks (to maintain platform
-        availability if Milo is down) can lead to temporary periods where new
-        resources are provisioned without an immediate quota check. This could
-        result in temporary over-allocation.
-      - **Post-Outage Reconciliation:** When the Milo Quota Management service
-        recovers (or webhooks are re-enabled/fixed), the `quota-operator` will
-        reconcile existing claims and usage. New requests for already over-limit
-        projects/organizations will be denied until usage falls within limits.
-        Alerts can be triggered for SREs/Platform Admins to review significant
-        discrepancies.
-      - **Robust Telemetry Pipeline:** Ensure the telemetry pipeline sending
-        usage data to the metering system (`amberflo`) is resilient, with
-        appropriate retries, buffering (e.g., in Vector agents), and error
-        handling to minimize lost or delayed usage data.
-  - **Risk:** Denying resource allocation when there are enough free resources to allow
-    the request the ability to proceed.
-    - **Mitigations (High-Level):**
-      - **Real-time Usage Queries:** The `quota-operator` should *always*
-        attempt to query the metering system (`amberflo`) in real-time for the
-        most up-to-date usage data before making a decision on a
-        `ResourceQuotaClaim`.
-      - **Cautious Use of Cached Data:** If the optional caching of usage in
-        `ResourceQuotaGrant.status.usage` is implemented, this data *must* be
-        treated as potentially stale. Decisions based purely on this cache
-        should be extremely limited (e.g., only for clear-cut denials where
-        requested > hard_limit_from_cache, never for granting claims if amberflo
-        is unreachable). Logic should *always* favor fresh data from the
-        metering engine.
-      - **Metering System Reliability:** The accuracy and timeliness of the
-        metering system itself are crucial and should be configured for high
-        availability and low data latency.
-      - **Clear Status Reporting:** If a claim is denied due to inability to
-        contact the metering system (despite retries), the
-        `ResourceQuotaClaim.status` should clearly reflect this reason (e.g.,
-        `MeteringSystemUnavailable`), distinguishing it from a denial due to
-        actual quota exhaustion.
+#### Risk: The potential to block all resource creation, preventing
+        administration of resources due to network failure or timeouts.
+
+##### Mitigations (High-Level):
+-   **Webhook Timeouts & Failure Policy:** Configure admission webhooks (Milo
+    Mutating & Validating) with aggressive timeouts. Set their `failurePolicy`
+    to `Ignore`. This ensures that if the Quota Management Service is
+    unreachable or times out, resource creation/modification requests to Owning
+    Services can still proceed (albeit without immediate quota enforcement).
+    This prioritizes platform availability.
+-   **`quota-operator` Resilience:** Design the `quota-operator` to retry calls
+    to external dependencies like the metering system (`amberflo`) with
+    exponential backoff. If dependencies are unavailable for an extended period,
+    the operator should clearly indicate this (e.g., in `ResourceQuotaClaim`
+    status) and might temporarily deny new claims (or use cached data with
+    *extreme caution* if implemented, clearly marking approvals as conditional).
+-   **Monitoring & Alerting:** Implement comprehensive monitoring and alerting
+    for the Quota Management Service and its connectivity to critical
+    dependencies (`Core Milo APIServer`, `amberflo`).
+-   **Emergency Bypass (Break-Glass Procedure):** For extreme, prolonged outages
+    of the core quota enforcement mechanism, a well-documented, audited, and
+    access-controlled procedure should allow Datum Employees to temporarily
+    bypass quota checks (e.g., by temporarily removing or altering webhook
+    configurations). This is a last-resort measure, as it introduces manual
+    intervention and potential for misconfiguration.
+
+#### Risk: The potential for actual resource usage being out-of-sync with the
+        cluster-state, leading to: 
+        - Allowing allocation of resources beyond the set quota limits on both
+          external and internal levels, bypassing enforcement.
+
+##### Mitigations (High-Level):
+-   **Authoritative Usage Source:** The `quota-operator` must treat the external
+    metering system (`amberflo`) as the authoritative source of truth for
+    current usage when evaluating `ResourceQuotaClaim`s.
+-   **Webhook `failurePolicy: Ignore` Trade-off:** Acknowledging that setting
+    `failurePolicy: Ignore` for webhooks (to maintain platform availability if
+    Milo is down) can lead to temporary periods where new resources are
+    provisioned without an immediate quota check. This could result in temporary
+    over-allocation.
+-   **Post-Outage Reconciliation:** When the Milo Quota Management service
+    recovers (or webhooks are re-enabled/fixed), the `quota-operator` will
+    reconcile existing claims and usage. New requests for already over-limit
+    projects/organizations will be denied until usage falls within limits.
+    Alerts can be triggered for SREs/Platform Admins to review significant
+    discrepancies.
+-   **Robust Telemetry Pipeline:** Ensure the telemetry pipeline sending usage
+    data to the metering system (`amberflo`) is resilient, with appropriate
+    retries, buffering (e.g., in Vector agents), and error handling to minimize
+    lost or delayed usage data.
+
+#### Risk: Denying resource allocation when there are enough free resources
+        to allow the request the ability to proceed.
+
+##### Mitigations (High-Level):
+-   **Real-time Usage Queries:** The `quota-operator` should *always* attempt to
+    query the metering system (`amberflo`) in real-time for the most up-to-date
+    usage data before making a decision on a `ResourceQuotaClaim`.
+-   **Cautious Use of Cached Data:** If the optional caching of usage in
+    `ResourceQuotaGrant.status.usage` is implemented, this data *must* be
+    treated as potentially stale. Decisions based purely on this cache should be
+    extremely limited (e.g., only for clear-cut denials where requested >
+    hard_limit_from_cache, never for granting claims if amberflo is
+    unreachable). Logic should *always* favor fresh data from the metering
+    engine.
+-   **Metering System Reliability:** The accuracy and timeliness of the metering
+    system itself are crucial and should be configured for high availability and
+    low data latency.
+-   **Clear Status Reporting:** If a claim is denied due to inability to contact
+    the metering system (despite retries), the `ResourceQuotaClaim.status`
+    should clearly reflect this reason (e.g., `MeteringSystemUnavailable`),
+    distinguishing it from a denial due to actual quota exhaustion.
 
 ---
 
 ## Design Details
 
 The Milo Quota Management System will be deployed as a series of components
-within the central Datum Management Control Plane (MCP). It will expose APIs and
-interact with Datum Cloud service instances, which are hosted within individual
-Project Control Planes (PCPs) for each tenant project.
+within the central Milo Management Control Plane (MCP). Its core quota-related
+CRDs and logic will reside within the `Core Milo APIServer` instance, along with
+any organization-scoped resources.
+
+The system will expose APIs and interact with Datum Cloud service instances
+(e.g., `compute.datumapis.com`, `network.datumapis.com`, etc.), which manage
+their primary resources (`Instance`, `Gateway`, `Subnet`, etc.) in
+_project-scoped instances_ of the Milo APIServer component **(referred to as
+`Project-X Milo APIServer` or Project APIServers)**. These Project APIServers
+are the primary entrypoints for users and administrators to interact with their
+project-scoped resources. The `Core Milo APIServer` instance will be responsible
+for managing any organization-scoped resources, such as total `Users` and
+`Project` resources.
 
 ### Custom Resource Definitions
 
 Three main CRDs will be created as core components of the Quota Management
-implementation: `ServiceQuotaRegistration`, `ResourceQuotaClaim` and
-`ResourceQuotaGrant`. These CRDs will be defined and served by the **Milo
-APIServer**, a central component running within the Datum MCP. The API group for
-these CRDs will be `quota.miloapis.com`, aligning with existing API group
-standards; while the Go type definitions for these CRDs will be located within
-the [milo GitHub repository](https://github.com/datum-cloud/milo).
+implementation: 
+
+- `ServiceQuotaRegistration`
+- `ResourceQuotaClaim`
+- `ResourceQuotaGrant`
+
+These CRDs will be defined and served by the **`Core Milo APIServer`**, a
+central component running within the Milo MCP. The API group for these CRDs will
+be `quota.miloapis.com`, aligning with existing API group standards; while the
+Go type definitions for these CRDs will be located within the [milo GitHub
+repository](https://github.com/datum-cloud/milo).
 
 Other `*.datumapis.com` API groups referenced in this document, such as
 `compute.datumapis.com` (hosting resources like `Instance`) and
 `network.datumapis.com` (hosting resources like `Subnet`), are served by
-individual **Project APIServers**. Each Project APIServer is dedicated to a
-specific tenant project and runs its own control plane. These Project APIServers
-are *not* where the Milo quota CRDs reside. However, they will be configured
-(via
+individual **project-scoped Milo APIServer instances** (which again are referred
+to as `Project-X Milo APIServer` or Project APIServers). Each such `Project-X
+Milo APIServer` instance is dedicated to a specific organization's project and
+runs its own control plane logic, even if it shares the same underlying Milo
+APIServer component base as the `[core]` instance.
+
+These `Project-X Milo APIServer` instances are *not* where the Milo quota CRDs
+reside. However, they will instead be configured (via
 [multicluster-runtime](https://github.com/kubernetes-sigs/multicluster-runtime))
-to call Milo's admission webhooks (which run in the MCP and interact with the
-Milo APIServer) when tenant resources are created or modified.
+to call Milo's admission webhooks (which run as part of the central Quota
+Management service in the MCP, and interact with the `Core Milo APIServer`) when
+resources like `Instance` are created or modified within that project.
 
 #### `ServiceQuotaRegistration`
 
-The `ServiceQuotaRegistration` CRD, hosted by the **Milo APIServer** in the MCP,
-allows **Datum Cloud Services** to define and register the specific resource
-types (e.g., `compute.datumapis.com/instances/cpu`) that will become available
-to then have quotas applied to them across the platform via a
-`ResourceQuotaGrant`. Services interact with the Milo APIServer to manage these
-registrations.
+The `ServiceQuotaRegistration` CRD, hosted by the **`Core Milo APIServer`** in
+the MCP, allows **Datum Cloud Services** to define and register the specific
+resource types (e.g., `compute.datumapis.com/instances/cpu`) that will become
+available to then have quotas applied to them across the platform via a
+`ResourceQuotaGrant`. Services interact with the `Core Milo APIServer` to manage
+these registrations.
 
 The inclusion of the `ServiceQuotaRegistration` CRD decouples the registration
-of service quotas and the subsequent management of the quotas themselves;
-removing the need to make changes for every new resource type. This will allow
-for the system to be more flexible and scalable, as well as easier to maintain
-and update over time.
+of service quotas for the organization and the subsequent management of the
+quotas themselves; removing the need to make changes for every new resource type
+within the organization. This will allow for the system to be more flexible and
+scalable, as well as easier to maintain and update over time.
 
 ```yaml
 apiGroup: quota.miloapis.com
@@ -498,10 +595,7 @@ metadata:
 spec:
   # Service which owns the resource being registered.
   serviceRef:
-    apiGroup: compute.datumapis.com
-    kind: Service
     name: compute.datumapis.com
-    uid: <uid>
   # Fully qualified name of the resource being managed.
   # This should match the 'name' field in `ResourceQuotaClaim.spec.resources`
   # and also in `ResourceQuotaGrant.spec.limits`.
@@ -521,7 +615,7 @@ spec:
     - compute.datumapis.com/instanceType
 Status:
   # The specific version of the ServiceQuotaRegistration that was observed by
-  # the Milo APIServer.
+  # the `Core Milo APIServer`.
   observedGeneration: 1
   # Standard kubernetes approach to represent the state of a resource.
   conditions:
@@ -552,10 +646,10 @@ Status:
 
 #### `ResourceQuotaGrant`
 
-The `ResourceQuotaGrant` CRD, hosted by the **Milo APIServer** in the MCP,
-declares the resource quota limits for a project or organization. It is a
-**Namespaced** resource within the Milo APIServer, meaning each grant will
-reside within a namespace that corresponds to the specific project or
+The `ResourceQuotaGrant` CRD, hosted by the **`Core Milo APIServer`** in the
+MCP, declares the resource quota limits for a project or organization. It is a
+**Namespaced** resource within the `Core Milo APIServer`, meaning each grant
+will reside within a namespace that corresponds to the specific project or
 organization it governs.
 
 ```yaml
@@ -567,7 +661,7 @@ metadata:
   namespace: proj-abc
   uid: <uid>
 spec:
-  # Reference to project or oganization since the CRD can use either
+  # Reference to project or organization since the CRD can use either
   resourceRef:
     apiGroup: resources.datumapis.com
     # Either Project or Organization
@@ -579,8 +673,8 @@ spec:
   - name: compute.datumapis.com/instances/cpu
     # Defines how this resource's quota can be dimensionalized
     # to be used in the `selector` field of the buckets.
+    # For a Project-scoped grant, project is implicit.
     dimensionLabels:
-      - resources.datumapis.com/project
       - networking.datumapis.com/location
       - compute.datumapis.com/instanceType
     buckets:
@@ -609,7 +703,6 @@ spec:
   # 2. Memory (GiB) allocated per project / location / instance type
   - name: compute.datumapis.com/instances/memoryAllocated
     dimensionLabels:
-      - resources.datumapis.com/project
       - networking.datumapis.com/location
       - compute.datumapis.com/instanceType
     buckets:
@@ -624,7 +717,6 @@ spec:
   # 3. Instance count per project / location / instance type
   - name: compute.datumapis.com/instances/count
     dimensionLabels:
-      - resources.datumapis.com/project
       - networking.datumapis.com/location
       - compute.datumapis.com/instanceType
     buckets:
@@ -642,17 +734,14 @@ spec:
 
   # 4. Gateway count per project
   - name: network.datumapis.com/gateways
-    dimensionLabels:
-      - resources.datumapis.com/project
+    # For a project-scoped grant on gateways, if location is not a primary dimension for gateways
+    # then dimensionLabels might be empty or just reflect those applicable from ServiceQuotaRegistration.
+    # Assuming for this example, gateways are not further dimensionalized by location *within this grant*.
+    dimensionLabels: []
     buckets:
     - value: "15"
       selector: {}
 
-    - value: "3"
-      selector:
-        matchExpressions:
-        - key: networking.datumapis.com/location
-          operator: Exists
 # Status reflects the validity and applicability of the defined quotas.
 Status:
   observedGeneration: 1
@@ -704,16 +793,17 @@ Status:
 
 #### `ResourceQuotaClaim`
 
-The `ResourceQuotaClaim` CRD, hosted by the **Milo APIServer** in the MCP,
-represents the *intent* of the request to create, update/scale, or delete
-resources against a defined quota. When a user attempts to create a resource
-(e.g., an `Instance`) by interacting with their **Project APIServer**, that
-Project APIServer (via a configured webhook) will trigger the creation of a
-`ResourceQuotaClaim` in the central **Milo APIServer**. This CRD contains a
-reference to the owner of the resources that are being requested (e.g. an
-`Instance` CR managed by a Project APIServer), as well as the specific resource
-requests, including name and quantity. It is a **Namespaced** resource within
-the Milo APIServer, where the namespace corresponds to the tenant's project.
+The `ResourceQuotaClaim` CRD, hosted by the **`Core Milo APIServer`** in the
+MCP, represents the *intent* of a Datum Cloud Service to request/consume
+resources against a defined quota for a specific project. When a user action
+triggers an Owning Service to create a resource (e.g., an `Instance` in a
+specific `Project-X Milo APIServer`), that Owning Service's controller will then
+create a `ResourceQuotaClaim` in the central **`Core Milo APIServer`** storage
+layer. This CRD contains a reference to the Owning Service resource (e.g. an
+`Instance` CR managed by a `Project-X Milo APIServer`), as well as the specific
+resource requests, including name and quantity. It is a **Namespaced** resource
+within the `Core Milo APIServer`, where the namespace corresponds to the
+organization's project.
 
 ```yaml
 apiGroup: quota.miloapis.com
@@ -801,132 +891,139 @@ Status:
 
 ### Quota Registration
 
-To enable Datum Cloud services (whose resources are managed by Project
-APIServers in tenant PCPs) to integrate with the quota management system, a
-dedicated and centralized API, hosted by the **Milo APIServer** in the
-Management Control Plane (MCP), will be provided. This API enables admins to
-register services and the specific resource types that they want to be able to
-create and manage quotas for. This results in the Milo APIServer being aware of
-the types of resources that a project or organization are allowed to create
-quotas for via a `ResourceQuotaGrant`.
+To enable Datum Cloud services (whose primary resources are managed by
+`Project-X Milo APIServer` instances) to integrate with the quota management
+system, a dedicated and centralized API, hosted by the **`Core Milo APIServer`**
+in the Management Control Plane (MCP), will be provided. This API enables
+service owners/admins to register services and the specific resource types that
+they want to be able to create and manage quotas for. This results in the `Core
+Milo APIServer` being aware of the types of resources that a project or
+organization are allowed to create quotas for via a `ResourceQuotaGrant`.
 
 This is achieved through the proposed [`ServiceQuotaRegistration`
-CRD](#ServiceQuotaRegistration) (in the Milo APIServer), which acts as a
+CRD](#ServiceQuotaRegistration) (in the `Core Milo APIServer`), which acts as a
 "catalog" for services to declare the types of resources they offer that *can*
 be managed by the quota system at the project or organization level. This is
 different than the Service Catalog, which will be proposed in a separate
 enhancement.
 
 **Datum CloudServices (via their Service Owners/Admins)** will create new
-instances of `ServiceQuotaRegistration` in the **Milo APIServer** to declare
-each type of resource they offer that can use quota limits. The `quota-operator`
-can then use these definitions to understand and validate the tenant's requests
-for setting the explicit limits for each resource type via a
-`ResourceQuotaGrant`.
+instances of `ServiceQuotaRegistration` in the **`Core Milo APIServer`** to
+declare each type of resource they offer that can use quota limits. The
+`quota-operator` can then use these definitions to understand and validate
+requests for setting the explicit limits for each resource type via a
+`ResourceQuotaGrant` (also in `Core Milo APIServer`).
 
 #### Quota Operator Controller
 
 A `quota-operator` will be created to implement logic to convert the *intent* of
 the incoming `ResourceQuotaClaim` object into the *actual allocation* of
 resources. This controller will reside in the Milo Quota Management service and
-**run within the Datum MCP**. Its core logic would reside in a path such as
-`milo/internal/controller/quota-management/`, and it would be managed by Milo's
-main application process (e.g., `milo/cmd/apiserver/app/`).
+**run within the Milo MCP**. Its core logic would reside in a path such as
+`milo/internal/controller/quota-management/`, and would be managed by Milo's
+main application process (e.g., `milo/cmd/apiserver/app/` which forms part of
+the `Core Milo APIServer` system).
 
-Running within the Milo MCP, it will:
+Running within the Milo MCP, its primary interactions regarding quota CRDs
+(`ServiceQuotaRegistration`, `ResourceQuotaGrant`, and `ResourceQuotaClaim`)
+will be with the **`Core Milo APIServer`**. It will:
 - Watch `ServiceQuotaRegistration`, `ResourceQuotaGrant`, and
-  `ResourceQuotaClaim` objects hosted by the **Milo APIServer**.
+  `ResourceQuotaClaim` objects.
 - Ensure accurate data is kept in sync with the downstream metering system
   (e.g., `amberflo`) by querying actual usage from the metering engine API.
-- Optionally patch usage totals within the `ResourceQuotaGrant.status.usage`
-  field to serve as a fail-fast cache.
-- Enforce per-project or per-organization tenant resource quota limits that are
-  declared in the `ResourceQuotaGrant` objects.
+- Optionally patch usage totals within `ResourceQuotaGrant.status.usage` (in the
+  `Core Milo APIServer`) to serve as a fail-fast cache.
+- Enforce per-project or per-organization resource quota limits that are
+  declared in `ResourceQuotaGrant` objects.
 
 The reconciliation loop for this controller will contain the following logic,
-primarily interacting with the **Milo APIServer** in the MCP:
+again, primarily interacting with the **`Core Milo APIServer`** for quota CRD
+operations:
 
 1.  **Validates Registration**:
-    - Ensures that the specific requested service resource and dimensions, from a
-      `ResourceQuotaClaim` in the **Milo APIServer**, have already been registered
-      via a `ServiceQuotaRegistration`.
+    - Ensures that the specific requested service resource and dimensions from a
+      `ResourceQuotaClaim` have already been registered via a
+      `ServiceQuotaRegistration`.
     - If the registration is not found, the operator sets the claim's
       `status.phase = Denied` and the `status.reason` to
       `"ServiceQuotaRegistration not found"`.
 
-2.  **Watches newly created or updated `ResourceQuotaClaim` objects** via
-    Kubernetes informers connected to the **Milo APIServer**. These claims will
-    be auto-generated by the Milo mutating admission webhook running in the MCP
-    when a new resource (e.g., `Instance`, `Router`) is created, scaled, or
-    deleted via a **Project APIServer**, and the Project APIServer calls the
-    webhook.
+2.  **Watches newly created or updated `ResourceQuotaClaim` objects**. These
+    claims are generated by Owning Service controllers when a new resource
+    (e.g., `Instance`, `Router`) is created, scaled, or deleted in a `Project-X
+    Milo APIServer` instance.
 
 3.  **Validates the `ResourceQuotaClaim` structure**:
-    - Ensures required fields like `resources`, `dimensions`, `resourceRef`, and
-      other required fields are present and have a valid structure.
+    - Ensures required fields like `resources`, `resourceRef`, and other
+      required fields are present and have a valid structure.
     - Verifies that the `resourceRef` (which points to a resource managed by a
-      Project APIServer) is a valid reference to an existing resource.
-      - **Note**: *The operator itself might not be able to directly access the
-        Project APIServer to confirm the existence of the `resourceRef` object;
-        this validation might be based on the structure or information propagated
-        to the claim by the webhook.*
+      `Project-X Milo APIServer` instance) is a valid reference.
+      - **Note**: *The `quota-operator` (running in MCP) might not directly
+        access each `Project-X Milo APIServer` instance to deeply confirm the
+        existence of the `resourceRef` object in real-time for every claim,
+        unless `multicluster-runtime` provides a cached or aggregated view.
+        Validation might initially rely on the structure, information propagated
+        to the claim, or eventual consistency checks.*
     - If validation fails, the operator sets the claim's `status.phase = Denied`
       with an appropriate `reason`.
 
 4.  **Retrieves the corresponding `ResourceQuotaGrant`**:
-    - Looks up the `ResourceQuotaGrant` based on the owning resource's
-      `spec.resourceRef.name` or `spec.resourceRef.uid` in the **Milo
-      APIServer**.
-    - Reads the declared `spec.limits` field, which contains the quota limits and
-      bucket selectors.
+    - Looks up the `ResourceQuotaGrant` based on the claim's namespace
+      (representing the project/org) and the resource details.
+    - Reads the declared `spec.limits` field, which contains the quota limits
+      and bucket selectors.
     - Applies label/selector logic to find the correct bucket for the claim's
       dimensions (e.g., `networking.datumapis.com/location=dfw`,
-      `compute.datumapis.com/instanceType=datumcloud/d1-standard-2`). 
+      `compute.datumapis.com/instanceType=datumcloud/d1-standard-2`).
     - If no bucket is found, the operator sets the claim `status.phase = Denied`
       with an appropriate `reason`.
 
 5.  **Queries the external usage source (e.g., amberflo)** via API to get the
-    live usage data for the metric and dimension(s) defined in the claim (for a
-    resource in a PCP).
+    live usage data for the metric and dimension(s) defined in the claim.
     - If the API is unavailable, the operator sets the claim `status.phase =
-      Denied` in the Milo APIServer with an appropriate `reason`.
+      Denied` with an appropriate `reason`.
     - This usage (queried from the metering engine) is treated as the
       *authoritative source of truth for the data*. The
       `ResourceQuotaGrant.status.usage` field is *not* the authoritative source
       of truth, since it is a cache and may be stale or partial.
 
 6.  **Evaluates whether the claim would exceed quota**:
-    - Calculates: `actualUsage + requestedAmount > bucketLimit` within the Milo
-      APIServer.
+    - All below steps are performed within the context of the `Core Milo
+      APIServer` and its data.
+    - Calculates: `actualUsage + requestedAmount > bucketLimit`.
     - If the total would stay within the limit:
       - Optionally updates `ResourceQuotaGrant.status.usage` as the local cache
         of the most recently known usage for each quota bucket.
       - Sets `ResourceQuotaClaim.status.phase = Granted`.
     - If the request would exceed the quota:
-      - Sets `ResourceQuotaClaim.status.phase = Denied` and provides a reason for
-        the denial.
-      - Emits an `Event` (associated with the `ResourceQuotaClaim` in the Milo
-        APIServer) and records `status.reason` to the claim.
+      - Sets `ResourceQuotaClaim.status.phase = Denied` and provides a reason
+        for the denial.
+      - Emits an `Event` (associated with the `ResourceQuotaClaim`) and records
+        `status.reason` to the claim.
 
 7.  **Handles updates to `ResourceQuotaGrant` limits**:
-    - When a Grant is updated (e.g., an admin raises CPU limits), the operator
-      re-reconciles any affected `ResourceQuotaClaim`s within the Milo APIServer.
-    - Previously denied claims may now be granted if usage fits under the new
-      limits if they were raised.
-    - Previously granted claims may now be denied if usage exceeds the new
-      limits.
+    - When a `ResourceQuotaGrant` is updated (e.g., an admin raises CPU limits),
+      the operator re-reconciles any affected `ResourceQuotaClaim`s.
+    - Previously denied claims (due to `QuotaExceeded`) may be re-evaluated and
+      potentially granted if they now fit under the increased limits.
+    - Decreases in `ResourceQuotaGrant` limits will primarily affect new
+      `ResourceQuotaClaim`s. The handling of already granted/active resources
+      that exceed newly lowered limits is typically managed by alerting and
+      administrative review rather than automatic revocation by the quota
+      system.
 
 8.  **Emits final status and metrics**:
-    - Updates the `ResourceQuotaClaim.status` with the outcome (`Granted` or
+    - Updates `ResourceQuotaClaim.status` with the outcome (`Granted` or
       `Denied`).
-    - Emits Prometheus metrics or logs (e.g., `quota_claims_granted_total`,
+    - Emits relevant Prometheus metrics (e.g., `quota_claims_granted_total`,
       `quota_claims_denied_total`) for observability and auditability.
 
 **Optional Caching**
 
-Patching the `ResourceQuotaGrant.status.usage` field is **optional**, but
-recommended as it serves as a low-latency cache of the most recently known usage
-for each quota bucket. This could provide several benefits to the system:
+Patching the `ResourceQuotaGrant.status.usage` field (in the `Core Milo
+APIServer`) is **optional**, but recommended as it serves as a low-latency cache
+of the most recently known usage for each quota bucket. This could provide
+several benefits to the system:
 
 - *Fast-rejection* for obvious quota breaking claims without needing to query
   amberflo (e.g., requesting to claim 1000 GiB of written data while the quota
@@ -939,52 +1036,184 @@ for each quota bucket. This could provide several benefits to the system:
 
 If implemented, the potential for stale data **must** be accounted for (as with
 all caching implementations), and therefore *should not be used for final quota
-_enforcement nor billing purposes*.
+_enforcement nor billing purposes_.
 
 **Failure Blast Radius**
 
 If the `quota-operator` in the MCP is down, new `ResourceQuotaClaim`s (in the
-**Milo APIServer**) will stall; however, workloads managed by Project APIServers
-are not directly affected, and there is no blocking of writes to them if webhook
-`failurePolicy` is set to `Ignore`.
+**`Core Milo APIServer`**) will stall; however, workloads managed by
+project-scoped Milo APIServer instances (`Project-X Milo APIServer`) are not
+directly affected by the quota-operator outage itself, and there is no blocking
+of writes to them if webhook `failurePolicy` is set to `Ignore`. Resource
+creation might proceed without quota checks until the operator recovers.
+- See the [Risks and Mitigations](#risks-and-mitigations) section for more
+  details.
 
 #### Admission Webhooks
 
 A *stateless mutating admission webhook* and an *optional validating admission
 webhook* will be created as part of the Quota Management service. **These
-webhook services will run within the Milo MCP.** Their Kubernetes configurations
-(`MutatingWebhookConfiguration`, `ValidatingWebhookConfiguration`) will be
-applied to the **Project APIServers** that manage quotable resources. This
-registration will be facilitated by `multi-cluster-runtime`.
+webhook services will run within the Milo MCP** (as part of the central Quota
+Management service) and be registered with the various **`Project-X Milo
+APIServer` instances** that manage quotable resources (e.g., `a compute
+Instance`). This registration will be facilitated by `multi-cluster-runtime`
+(which is already used to manage the `Project-X Milo APIServer` instances).
 
 The logic for these webhooks will reside in the
 `milo/internal/webhook/quota-management/` directory and be registered by the
-main Milo application running in the MCP.
+main application that provides the central Quota Management service functions.
 
-When a user attempts to create or modify a resource (e.g., an `Instance`) via
-their **Project APIServer**, the APIServer will send an `AdmissionReview`
-request to the configured Milo webhook service endpoint (running in the MCP);
-aligning with [K8s Dynamic Admission
-Control](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/),
-standard approach to webhook integration in Kubernetes.
+When a user attempts to create or modify a resource (e.g., an `Instance`) via a
+**`Project-X Milo APIServer` instance** (triggering an action in an Owning
+Service like the `compute.datumapis.com` service), that `Project-X Milo
+APIServer` instance will send an `AdmissionReview` request to the configured
+Milo webhook service endpoint. This aligns with the standard Kubernetes [Dynamic
+Admission
+Control](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/).
 
-- The **mutating webhook** is responsible for creating the `ResourceQuotaClaim`
-  object in the central **Milo APIServer** and instructing the Project APIServer
-  (via the `AdmissionReviewResponse`) to add finalizers to the original resource
-  it manages.
-- The **optional validating webhook** provides an additional safety check,
-  potentially using cached data from `ResourceQuotaGrant`s in the **Milo
-  APIServer** for fast-rejection. It responds to the **Project APIServer**.
-- The Milo MCP will be responsible for managing the lifecycle of the webhooks,
-  including their registration, configuration, and management.
+- The **Milo mutating admission webhook**, when configured for an Owning
+  Service's resource type (e.g., `Instance` in a `Project-X Milo APIServer`):
+    - Its primary role is to inspect the incoming resource and, if it's subject
+      to quota management (particularly using the [Service Controller
+      Driven](#service-controller-driven-recommended-for-most-infrastructuremanaged-resources)
+      pattern), to add a finalizer (e.g.,
+      `quota.miloapis.com/instance-protection`) to the resource within that
+      `Project-X Milo APIServer` via the `AdmissionReviewResponse`. This
+      finalizer prevents the premature deletion of the resource while its quota
+      is being processed or needs to be released.
+    - It generally **does not** create the `ResourceQuotaClaim` (in `Core Milo
+      APIServer`) itself if the Owning Service employs the controller-driven
+      integration pattern, as claim creation is the responsibility of the Owning
+      Service's controller in that scenario.
+- The **optional Milo validating admission webhook** can be used for:
+    - Performing fast-fail checks, potentially using cached data from
+      `ResourceQuotaGrant`s in the **`Core Milo APIServer`**, before an Owning
+      Service controller even attempts to create a `ResourceQuotaClaim`.
+    - Implementing the [Validating Webhook
+      Driven](#validating-webhook-driven-for-immediate-createdeny-resources)
+      integration pattern, where it might synchronously check quota (and
+      potentially trigger a rapid claim process to `Core Milo APIServer` or a
+      direct check) and deny the request if quota is unavailable.
+- The Milo MCP will be responsible for managing the lifecycle of these webhook
+  services.
 
-This setup allows the Quota Management system to hook into the lifecycle of
-resources managed by other Datum Cloud service instances (via their Project
-APIServers) without those services needing direct, hardcoded knowledge of the
-quota management system's specific quota check logic. They only need to have the
-admissions webhooks registered with their own Project APIServers. This allows
-the Quota Management system to be *pluggable* and *extensible* to support new
-services and features without requiring changes to the system itself.
+This setup allows the Quota Management system to reliably participate in the
+lifecycle of resources managed by Owning Services. For example, by ensuring
+resources aren't deleted mid-quota-operation via finalizers, without dictating
+how those services must internally manage their claim creation logic (allowing
+flexibility for controller-driven vs. webhook-driven claim patterns). The Owning
+Services only need to have the relevant Milo admission webhooks registered with
+their respective `Project-X Milo APIServer` instances.
+
+### Service Integration Patterns for Quota Management
+
+Datum Cloud Services can integrate with the Milo Quota Management system using
+primarily two patterns, depending on the nature of the resource being managed
+and the desired user experience:
+
+1.  **Service Controller Driven (Recommended for most infrastructure/managed
+    resources):**
+    -   **Use Case:** Ideal for resources where provisioning might take some
+        time, and it's acceptable for the resource to appear in a "Pending" or
+        "AllocatingQuota" state while the quota check is in progress. This
+        pattern aligns with the principle of eventual consistency and clearly
+        separates resource creation *intent* from *actual data plane
+        provisioning*.
+    -   **Flow:**
+        1.  A user requests the creation/modification of a resource (e.g.,
+            `Instance`) from the Owning Service via its `Project-X Milo
+            APIServer` instance.
+        2.  The Milo mutating admission webhook (if configured for this resource
+            type and registered with the `Project-X Milo APIServer`) may add a
+            finalizer to the `Instance` CR as it's being written to that
+            `Project-X Milo APIServer`.
+        3.  The Owning Service's controller (e.g., `InstanceController` for
+            `project-X`) detects the new/modified `Instance` CR in its
+            `Project-X Milo APIServer`. The initial status of this resource
+            would indicate it's awaiting quota allocation (e.g., `status.phase:
+            PendingQuota`).
+        4.  The Owning Service controller then programmatically creates a
+            `ResourceQuotaClaim` in the central `Core Milo APIServer`. This
+            claim details the resources needed for the `Instance`.
+        5.  The Owning Service controller watches the `status` of this
+            `ResourceQuotaClaim` in the `Core Milo APIServer`.
+        6.  If `ResourceQuotaClaim.status.phase == Granted`:
+            -   The controller proceeds to provision the actual data plane
+                resources (e.g., number of CPUs, memory, etc. for the
+                `Instance`).
+            -   It updates the `Instance.status` in the `Project-X Milo
+                APIServer` to reflect successful provisioning (e.g.,
+                `status.phase: Running`).
+            -   The finalizer added by the Milo webhook remains until the
+                `Instance` is deleted, at which point the Owning Service
+                controller would ensure the corresponding `ResourceQuotaClaim`
+                (in `Core Milo APIServer`) is also deleted (releasing the quota)
+                before removing the finalizer from the `Instance` (in `Project-X
+                Milo APIServer`).
+        7.  If `ResourceQuotaClaim.status.phase == Denied` (e.g., due to
+            `QuotaExceeded`):
+            -   The controller updates the `Instance.status` in the `Project-X
+                Milo APIServer` to reflect the failure (e.g., `status.phase:
+                Failed`, `status.reason: QuotaExceeded`).
+            -   The data plane resources are not provisioned.
+    -   **Benefits:** Provides a good user experience as the requested resource
+        is immediately visible. The status clearly communicates whether it's
+        pending quota, active, or failed due to quota limits. Allows for
+        asynchronous processing and robust handling of resource lifecycles via
+        controllers and finalizers.
+
+2.  **Validating Webhook Driven (For immediate create/deny resources):**
+    -   **Use Case:** Suitable for resources where a pending state is less
+        desirable and immediate feedback on creation is preferred, or where the
+        resource creation is very lightweight (e.g., creating a `User` in an IAM
+        system, adding a collaborator, creating a `Project` where the count is
+        the primary quota).
+    -   **Flow:**
+        1.  A user requests the creation of a resource (e.g., `Instance`) from
+            the Owning Service via its `Project-X Milo APIServer` instance.
+        2.  The `Project-X Milo APIServer`, as part of its admission chain,
+            sends an `AdmissionReview` request to a validating webhook. This
+            webhook can be either:
+            -   A specific webhook provided by the Milo Quota Management system
+                (running in MCP) and configured for the Owning Service's
+                resource type.
+            -   The Owning Service's own validating webhook, which then
+                communicates with the Milo Quota Management system (interacting
+                with `Core Milo APIServer`).
+        3.  The validating webhook (or the logic it calls in Milo) performs a
+            synchronous quota check. This would involve:
+            -   Creating a `ResourceQuotaClaim` in `Core Milo APIServer` and
+                awaiting its immediate resolution (if the claim processing is
+                fast enough for synchronous validation).
+            -   A direct, optimized check against `ResourceQuotaGrant`s (in
+                `Core Milo APIServer`) for simple count-based quotas the Milo
+                system exposes as API endpoint for synchronous checks.
+        4.  If quota is available:
+            -   The validating webhook returns an `AdmissionReviewResponse` with
+                `allowed: true`.
+            -   The `Project-X Milo APIServer` proceeds to persist the new
+                resource (e.g., `Instance` object).
+        5.  If quota is exceeded:
+            -   The validating webhook returns an `AdmissionReviewResponse` with
+                `allowed: false` and an appropriate message.
+            -   The `Project-X Milo APIServer` rejects the resource creation
+                request, and the user receives an immediate error.
+    -   **Considerations:**
+        -   This pattern provides immediate feedback but requires the quota
+            check to be very fast to avoid impacting API responsiveness.
+        -   It's crucial that validating webhooks are configured correctly. Per
+            Kubernetes best practices, validating webhooks run after mutating
+            webhooks. If a Milo mutating webhook is also involved (e.g., to
+            create a claim in some scenarios), the order of execution must be
+            managed.
+        -   The `failurePolicy` for such webhooks should be carefully
+            considered. `Ignore` might lead to quota violations if the webhook
+            is down, while `Fail` could block resource creation if the quota
+            system is unavailable.
+
+Owning Services should choose the integration pattern that best suits their
+resource lifecycle and user experience requirements. For complex resources, the
+controller-driven approach is generally recommended.
 
 ## System Architecture Diagrams
 
@@ -996,7 +1225,7 @@ services and features without requiring changes to the system itself.
 %% C1 - System Context Diagram: Milo Quota Management System
 graph TD
     subgraph User Actors
-        Tenant[Datum Cloud Tenant]
+        Tenant[Datum Cloud User/Org Admin]
         PlatAdmin[Datum Admin/Employee]
     end
 
@@ -1046,7 +1275,7 @@ flowchart TD
         subgraph PCP ["Project Control Plane"]
             ProjectAPIServer["Project APIServer"]
             DatumCloudService["Datum Cloud Service"]
-            ActualResource["Tenant Resources (e.g., Instances, Locations, etc)"]
+            ActualResource["Project Resources (e.g., Instances, Locations, etc)"]
             DatumTelemetry["Telemetry System"]
 
             ProjectAPIServer --> DatumCloudService
@@ -1059,14 +1288,14 @@ flowchart TD
         direction TB
         subgraph MCP ["Management Control Plane"]
             subgraph QuotaSvc ["Quota Management Service"]
-                MiloAPIServer["APIServer <br> (Quota CRDs & API)"]
+                CoreMiloAPIServer["Core Milo APIServer <br> (Quota CRDs & API)"]
                 QuotaOperator["Quota Operator"]
                 MiloMutatingWebhook["Mutating Webhook"]
                 MiloValidatingWebhook["Validating Webhook <br> (Optional)"]
 
                 MiloMutatingWebhook -- "Triggers Claim Logic" --> QuotaOperator
-                QuotaOperator -- "Updates Quota State via" --> MiloAPIServer
-                %% Implicit: Operator & Webhooks read from MiloAPIServer
+                QuotaOperator -- "Updates Quota State via" --> CoreMiloAPIServer
+                %% Implicit: Operator & Webhooks read from CoreMiloAPIServer
             end
         end
     end
@@ -1117,62 +1346,72 @@ from service registration to resource provisioning and eventual teardown.
 ### Sequence Diagram Step Breakdown
 
 The sequence diagram steps are broken down into multiple sections for narrative
-and ease of understanding. 
-
-The breakdown is organized into the following main sections: 
+and ease of understanding:
 
 - **Service Quota Definition Registration (Prerequisite)**
 - **Defining Resource Quota Limits**
 - **Instance Provisioning & Admission Control**
 - **Quota Reconciliation by `quota-operator`**
-- **Instance Controller Reacts to ResourceQuotaClaim Status from Milo**
-- **Telemetry & Metering Flow (POST-Provisioning if Granted)**
+- **Owning Service Reacts to `ResourceQuotaClaim` Status**
+- **Telemetry & Metering Flow (Post-Provisioning if Granted)**
 - **Tear-down & Quota Release**
 
 These steps also distinguish between:
 - The **Owning Service** (e.g., `compute.datumapis.com`): The Datum Cloud
     service that owns a resource (e.g., `Instance`) and is responsible for its
     lifecycle, including actual provisioning. It runs within a **Project Control
-    Plane (PCP)** and has its own K8s APIServer (referred to as the **Owning
-    Service's K8s APIServer / PCP APIServer**).
+    Plane (PCP)** and its resources are managed by a project-scoped Milo
+    APIServer instance (again, referred to as **`Project-X Milo APIServer`**).
 - The **Milo Quota Management Service**: The centralized service running in the
-    MCP (`quota.miloapis.com`) responsible for registering service quota
-    definitions (`ServiceQuotaRegistration`), managing quota limits
-    (`ResourceQuotaGrant`), and quota requests (`ResourceQuotaClaim`). It runs
-    within the **Datum Management Control Plane (MCP)**, has its own APIServer
-    (**Milo APIServer** in MCP), and contains the `quota-operator` and admission
-    webhooks.
+    Milo MCP, responsible for registering service quota definitions
+    (`ServiceQuotaRegistration`), managing quota limits (`ResourceQuotaGrant`),
+    and quota requests (`ResourceQuotaClaim`). These CRDs and the core quota
+    logic reside in the **`Core Milo APIServer`** instance, which also contains
+    the `quota-operator` and admission webhooks.
 
-Interactions involving `Instance` CRs (or similar resources provided by an
-Owning Service) occur with the Owning Service's APIServer within a PCP.
-Interactions involving `ServiceQuotaRegistration`, `ResourceQuotaClaim`, and
-`ResourceQuotaGrant` CRs occur with the Milo APIServer in the MCP.
+Interactions involving user-facing resources like an `Instance` (or similar
+resources provided by an Owning Service) occur with the respective `Project-X
+Milo APIServer` instance. Interactions involving `ServiceQuotaRegistration`,
+`ResourceQuotaClaim`, and `ResourceQuotaGrant` CRDs occur with the `Core Milo
+APIServer` in the Milo MCP.
 
 #### Service Quota Definition Registration (Prerequisite)
 
-Before any resource quotas can be claimed or enforced, the Owning Service must
-define what resources types are enabled to be quotable.
+Before any resource quotas can be claimed or enforced, the **Service
+Owner/Admin** must define what resource types it offers are enabled to be
+quotable by the central Milo Quota Management system.
 
-1.  **Define & Apply `ServiceQuotaRegistration`**: The **Service Owner** (e.g.,
-    an administrator for `compute.datumapis.com`, representing the service
-    itself, which are deployed within PCPs) applies a `ServiceQuotaRegistration`
-    manifest to the **Milo APIServer (`quota.miloapis.com`) in the MCP**. This
+1.  **Define & Apply `ServiceQuotaRegistration`**: The **Service Owner/Admin** —
+    a persona representing the entity responsible for a specific service that
+    integrates with or runs on the Datum Cloud platform. This could be:
+    *   **An internal Datum Employee team** responsible for developing and
+        maintaining a core Datum Cloud service (e.g., the
+        `compute.datumapis.com` service team).
+    *   **An administrator from an "Alternative Cloud" customer organization**
+    (who are service providers themselves) for the specialized services *they*
+    build and offer to *their* end-users via the Datum platform. This Service
+    Owner/Admin applies a `ServiceQuotaRegistration` manifest to the **`Core
+    Milo APIServer` (`quota.miloapis.com`) in the Milo MCP**. This
     `ServiceQuotaRegistration` declares a resource type (e.g., CPU per instance)
-    offered by their service as manageable by the quota system.
-2.  **Store & Initialize `ServiceQuotaRegistration`**: The **Milo APIServer**
-    stores the `ServiceQuotaRegistration`. Its `status` is initialized.
-3. **`quota-operator` Validates `ServiceQuotaRegistration`**: The
-    `quota-operator`, which watches for `ServiceQuotaRegistration` resources
-    within the Milo APIServer, detects the new or modified
-    `ServiceQuotaRegistration`. It validates the `ServiceQuotaRegistration`'s
-    `spec`.
-4.  **Update `ServiceQuotaRegistration` Status**: Based on above validation.
+    offered by their service as manageable by the quota system. This is a
+    one-time or infrequent setup action per service to make its resources known
+    to the central quota system.
+    # service...or if this refers to the service itself.
+2.  **Store & Initialize `ServiceQuotaRegistration`**: The **`Core Milo
+    APIServer`** stores the `ServiceQuotaRegistration`. Its `status` is
+    initialized.
+3.  **`quota-operator` Validates `ServiceQuotaRegistration`**: The
+    `quota-operator` (part of the Milo Quota Management Service in the MCP),
+    which watches for `ServiceQuotaRegistration` resources. within the `Core
+    Milo APIServer`, detects the new or modified `ServiceQuotaRegistration`. It
+    validates the `ServiceQuotaRegistration`'s `spec`.
+4.  **Update `ServiceQuotaRegistration` Status**: Based on the above validation:
     - **If Valid**: The `quota-operator` patches the
-        `ServiceQuotaRegistration.status` field via the **Milo APIServer**. The
-        owning service's resource type is now actively manageable by the quota
-        system.
+        `ServiceQuotaRegistration.status` field (via the **`Core Milo
+        APIServer`**). The Owning Service's resource type is now actively
+        manageable by the quota system.
     - **If Invalid**: The `quota-operator` patches
-        `ServiceQuotaRegistration.status` (via the **Milo APIServer**) to
+        `ServiceQuotaRegistration.status` (via the **`Core Milo APIServer`**) to
         reflect the failure.
 
 ```mermaid
@@ -1180,380 +1419,509 @@ define what resources types are enabled to be quotable.
 sequenceDiagram
     autonumber
     participant SvcOwner as Service Owner/Admin
-    participant MiloAPIServer as Milo APIServer <br> (quota.miloapis.com, in MCP)
-    participant MiloQOp as Milo quota-operator <br> (in MCP)
-    participant SQRegistration as ServiceQuotaRegistration <br> (CR in Milo APIServer)
+    participant MiloAPICore as Core Milo APIServer <br> (quota.miloapis.com, in Milo MCP)
+    participant MiloQuotaOp as Milo quota-operator <br> (in Milo MCP)
+    participant SQRegCRD as ServiceQuotaRegistration CRD <br> (in Core Milo APIServer)
 
-    SvcOwner->>+MiloAPIServer: Apply `ServiceQuotaRegistration` manifest (e.g., compute-cpu.yaml)
-    MiloAPIServer->>SQRegistration: Store `ServiceQuotaRegistration`
-    note right of SQRegistration: Initial Status: <br> - conditions.Ready: Unknown (Initializing) <br> - conditions.DefinitionValid: Unknown (PendingValidation)
-    MiloAPIServer-->>-SvcOwner: Ack (Manifest Applied)
+    style SvcOwner fill:#f5f5f5,stroke:#333,stroke-width:2px
+    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style MiloQuotaOp fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style SQRegCRD fill:#e3f2fd,stroke:#333,stroke-width:2px
 
-    MiloQOp-->>MiloAPIServer: Watch `ServiceQuotaRegistration` (ADDED/MODIFIED)
-    note left of MiloQOp: Detects new/updated SQRegistration
-    MiloQOp->>SQRegistration: Validate `spec` (fields, structure)
+    SvcOwner->>+MiloAPICore: Apply `ServiceQuotaRegistration` manifest (e.g., compute-cpu.yaml)
+    MiloAPICore->>SQRegCRD: Store `ServiceQuotaRegistration`
+    note right of SQRegCRD: Initial Status: <br> - conditions.Ready: Unknown (Initializing) <br> - conditions.DefinitionValid: Unknown (PendingValidation)
+    MiloAPICore-->>-SvcOwner: Ack (Manifest Applied)
+
+    MiloQuotaOp-->>MiloAPICore: Watch `ServiceQuotaRegistration` (ADDED/MODIFIED)
+    note left of MiloQuotaOp: Detects new/updated SQRegCRD
+    MiloQuotaOp->>SQRegCRD: Validate `spec` (fields, structure)
     alt `ServiceQuotaRegistration.spec` is valid
-        MiloQOp->>MiloAPIServer: `PATCH` `ServiceQuotaRegistration.status`
-        note right of SQRegistration: Updated Status: <br> - conditions.DefinitionValid: True (ValidationSuccessful) <br> - conditions.Ready: True (DefinitionActive)
+        MiloQuotaOp->>MiloAPICore: `PATCH` `ServiceQuotaRegistration.status`
+        note right of SQRegCRD: Updated Status: <br> - conditions.DefinitionValid: True (ValidationSuccessful) <br> - conditions.Ready: True (DefinitionActive)
     else `ServiceQuotaRegistration.spec` is invalid
-        MiloQOp->>MiloAPIServer: `PATCH` `ServiceQuotaRegistration.status`
-        note right of SQRegistration: Updated Status: <br> - conditions.DefinitionValid: False (InvalidDefinition) <br> - conditions.Ready: False (e.g. InvalidSpec)
+        MiloQuotaOp->>MiloAPICore: `PATCH` `ServiceQuotaRegistration.status`
+        note right of SQRegCRD: Updated Status: <br> - conditions.DefinitionValid: False (InvalidDefinition) <br> - conditions.Ready: False (e.g. InvalidSpec)
     end
 ```
 
 #### Defining Resource Quota Limits (`ResourceQuotaGrant` Creation)
 
-After a service's resources are registered via `ServiceQuotaRegistration`, Tenant or Platform Administrators can define specific quota limits for projects or organizations by creating `ResourceQuotaGrant` resources in the Milo APIServer.
+After a service's resources are registered via `ServiceQuotaRegistration` in
+`Core Milo APIServer`, Organization, Project, or Platform Administrators can
+define specific quota limits for projects or organizations by creating
+`ResourceQuotaGrant` resources in the same Milo APIServer as the
+`ServiceQuotaRegistration`.
 
-1.  **Admin Defines & Applies `ResourceQuotaGrant`**: A **Tenant Administrator**
-    (for a specific project/org) or a **Platform Administrator** (for
-    global/default grants) creates a `ResourceQuotaGrant` manifest. This
-    manifest specifies the target project/organization, the `resourceName`
-    (e.g., `compute.datumapis.com/instances/cpu`), and the `limits` including
+1.  **Admin Defines & Applies `ResourceQuotaGrant`**: An **Administrator**
+    (e.g., an Organization Admin for their organization, a Project Admin for
+    their project, or a Platform Administrator for global/default grants)
+    creates a `ResourceQuotaGrant` manifest. This manifest specifies the target
+    project/organization (which maps to a namespace in `Core Milo APIServer`),
+    the `resourceName` (e.g., `compute.datumapis.com/instances/cpu` that was
+    registered via a `ServiceQuotaRegistration`), and the `limits` including
     `buckets` with specific values and selectors (dimensions such as location
-    and instance type). The admin applies this manifest to the **Milo APIServer
-    (`quota.miloapis.com`) in the MCP**.
-2.  **Store & Initialize `ResourceQuotaGrant`**: The **Milo APIServer** stores
-    the new `ResourceQuotaGrant` CR. Its `status` is initialized (e.g.,
+    and instance type). The admin applies this manifest to the **`Core Milo
+    APIServer` (`quota.miloapis.com`) in the Milo MCP**.
+2.  **Store & Initialize `ResourceQuotaGrant`**: The **`Core Milo APIServer`**
+    stores the new `ResourceQuotaGrant` CR. Its `status` is initialized (e.g.,
     `conditions.Ready: Unknown`, `conditions.LimitsValid: Unknown`).
-3.  **`quota-operator` Validates `ResourceQuotaGrant`**: The `quota-operator`, watching `ResourceQuotaGrant` resources, detects the new CR. It validates the `spec.limits` against the corresponding `ServiceQuotaRegistration` (e.g., checking if `resourceName` is registered, if dimensions in selectors are allowed).
-4.  **Update `ResourceQuotaGrant` Status**:
-    - **If Valid**: The `quota-operator` patches the `ResourceQuotaGrant.status` (e.g., `conditions.LimitsValid: True`, `conditions.Ready: True`) via the **Milo APIServer**. The quota limits are now active and enforceable.
-    - **If Invalid**: The `quota-operator` patches `ResourceQuotaGrant.status` (e.g., `conditions.LimitsValid: False`, `conditions.Ready: False` with reasons) via the **Milo APIServer**.
+3.  **`quota-operator` Validates `ResourceQuotaGrant`**: The `quota-operator`
+    (in Milo MCP), watching `ResourceQuotaGrant` resources in the `Core Milo
+    APIServer`, detects the new CR. It validates the `spec.limits` against the
+    corresponding `ServiceQuotaRegistration` (also in `Core Milo APIServer`,
+    e.g., checking if `resourceName` is registered, if dimensions in selectors
+    are allowed).
+4.  **Update `ResourceQuotaGrant` Status**: Based on the validation by the
+    `quota-operator`:
+    - **If Valid**: The `quota-operator` patches the `ResourceQuotaGrant.status`
+      (e.g., `conditions.LimitsValid: True`, `conditions.Ready: True`) via the
+      **`Core Milo APIServer`**. The quota limits are now active and
+      enforceable.
+    - **If Invalid**: The `quota-operator` patches `ResourceQuotaGrant.status`
+      (e.g., `conditions.LimitsValid: False`, `conditions.Ready: False` with
+      reasons) via the **`Core Milo APIServer`**.
 
 ```mermaid
 %% Sequence Diagram - Defining Resource Quota Limits (ResourceQuotaGrant Creation)
 sequenceDiagram
     autonumber
-    participant Admin as Tenant/Platform Admin
-    participant MiloAPIServer as Milo APIServer <br> (quota.miloapis.com, in MCP)
-    participant MiloQOp as Milo quota-operator <br> (in MCP)
-    participant RQGrant as ResourceQuotaGrant <br> (CR in Milo APIServer)
-    participant SQRegistration as ServiceQuotaRegistration <br> (CR in Milo APIServer, for validation lookup)
+    participant AdminUser as Org/Proj/Platform Admin
+    participant MiloAPICore as Core Milo APIServer <br> (quota.miloapis.com, in Milo MCP)
+    participant MiloQuotaOp as Milo quota-operator <br> (in Milo MCP)
+    participant RQGrantCRD as ResourceQuotaGrant CRD <br> (in Core Milo APIServer)
+    participant SQRegCRD as ServiceQuotaRegistration CRD <br> (in Core Milo APIServer, for validation lookup)
 
-    Admin->>+MiloAPIServer: Apply `ResourceQuotaGrant` manifest (e.g., project-x-cpu-limits.yaml)
-    MiloAPIServer->>RQGrant: Store `ResourceQuotaGrant`
-    note right of RQGrant: Initial Status: <br> - conditions.Ready: Unknown <br> - conditions.LimitsValid: Unknown
-    MiloAPIServer-->>-Admin: Ack (Manifest Applied)
+    style AdminUser fill:#f5f5f5,stroke:#333,stroke-width:2px
+    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style MiloQuotaOp fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style RQGrantCRD fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style SQRegCRD fill:#e3f2fd,stroke:#333,stroke-width:2px
 
-    MiloQOp-->>MiloAPIServer: Watch `ResourceQuotaGrant` (ADDED/MODIFIED)
-    note left of MiloQOp: Detects new/updated RQGrant
+    AdminUser->>+MiloAPICore: Apply `ResourceQuotaGrant` manifest (e.g., project-x-cpu-limits.yaml)
+    MiloAPICore->>RQGrantCRD: Store `ResourceQuotaGrant`
+    note right of RQGrantCRD: Initial Status: <br> - conditions.Ready: Unknown <br> - conditions.LimitsValid: Unknown
+    MiloAPICore-->>-AdminUser: Ack (Manifest Applied)
+
+    MiloQuotaOp-->>MiloAPICore: Watch `ResourceQuotaGrant` (ADDED/MODIFIED)
+    note left of MiloQuotaOp: Detects new/updated RQGrantCRD
     
-    MiloQOp->>MiloAPIServer: `GET` relevant `ServiceQuotaRegistration` for RQGrant.spec.limits[*].resourceName
-    MiloAPIServer-->>SQRegistration: Return `ServiceQuotaRegistration`
+    MiloQuotaOp->>MiloAPICore: `GET` relevant `ServiceQuotaRegistration` (SQRegCRD) for RQGrantCRD.spec.limits[*].resourceName
+    MiloAPICore-->>SQRegCRD: Return `ServiceQuotaRegistration` data
     
-    MiloQOp->>RQGrant: Validate `spec.limits` against SQRegistration (resourceName, dimensions, bucket selectors)
+    MiloQuotaOp->>RQGrantCRD: Validate `spec.limits` against SQRegCRD data (resourceName, dimensions, bucket selectors)
     alt `ResourceQuotaGrant.spec.limits` are valid
-        MiloQOp->>MiloAPIServer: `PATCH` `ResourceQuotaGrant.status`
-        note right of RQGrant: Updated Status: <br> - conditions.LimitsValid: True <br> - conditions.Ready: True (GrantActive)
+        MiloQuotaOp->>MiloAPICore: `PATCH` `ResourceQuotaGrant.status` for RQGrantCRD
+        note right of RQGrantCRD: Updated Status: <br> - conditions.LimitsValid: True <br> - conditions.Ready: True (GrantActive)
     else `ResourceQuotaGrant.spec.limits` are invalid
-        MiloQOp->>MiloAPIServer: `PATCH` `ResourceQuotaGrant.status`
-        note right of RQGrant: Updated Status: <br> - conditions.LimitsValid: False (e.g., InvalidDimensionSelector) <br> - conditions.Ready: False
+        MiloQuotaOp->>MiloAPICore: `PATCH` `ResourceQuotaGrant.status` for RQGrantCRD
+        note right of RQGrantCRD: Updated Status: <br> - conditions.LimitsValid: False (e.g., InvalidDimensionSelector) <br> - conditions.Ready: False
     end
 ```
 
 #### Instance Provisioning & Admission Control
 
-Once services are registered as offering quotable resources, users can request
-resources (e.g., an `Instance`) from the Owning Service's APIServer in the PCP.
+Once services are registered (via `ServiceQuotaRegistration` in `Core Milo
+APIServer`) as offering quotable resources, users or CI processes can request
+project-scoped resources (e.g., an `Instance`) from the Owning Service. This
+interaction happens with the project's specific `Project-X Milo APIServer`
+instance.
 
-5.  **Request `Instance` Creation**: An `Admin / CI` process (representing a
-    tenant or an automated system) submits an `Instance` custom resource
-    manifest to the **Owning Service's K8s APIServer (PCP APIServer, e.g., the
-    `compute.datumapis.com` APIServer in a specific project).**
-6.  **Mutating Webhook Intercepts & Modifies**: The **PCP APIServer** sends an
-    `AdmissionReview` request for the `Instance` creation/update/deletion to the
-    **Milo Mutating Webhook service** (which is registered with the PCP
-    APIServer). - It modifies the `Instance` resource by adding a finalizer
-    (e.g., `quota.miloapis.com/instance-protection`) in order to protect the
-        `Instance` from being deleted while the quota claim is being processed.
-        - It constructs and sends a `POST` request to the **Milo APIServer** to
-    create and persist a new `ResourceQuotaClaim` object. - The webhook service
-        returns an `AdmissionReviewResponse` (indicating success and including
-    the mutated `Instance`) to the **PCP APIServer**. The PCP APIServer then
-        continues its admission chain.
-7.  **Validating Admission Webhook**: Following the mutating webhook phase, the
-    **PCP APIServer** sends another `AdmissionReview` request to the **Milo
-    Validating Webhook service** (if registered).
-    - This webhook service performs a "fast-fail" check, potentially using
-        cached data from `ResourceQuotaGrant`s in the Milo APIServer.
+5.  **Request `Instance` Creation**: An `Admin / CI` process submits an
+    `Instance` custom resource manifest to the specific **`Project-X Milo
+    APIServer`** (e.g., the `compute.datumapis.com` API endpoint for that
+    project).
+6.  **Mutating Webhook Intercepts & Modifies**: The **`Project-X Milo
+    APIServer`** sends an `AdmissionReview` request for the `Instance`
+    creation/update/deletion to the **Milo Mutating Webhook service** (which
+    runs in the Milo MCP but is registered as a webhook with the `Project-X Milo
+    APIServer`).
+    - The webhook service may modify the `Instance` resource (e.g., by adding a
+        finalizer e.g. `quota.miloapis.com/instance-protection` to protect the
+        `Instance` from being deleted while its quota claim is processed).
+    - If the Owning Service uses the webhook-driven pattern for claim creation
+        (less common for `Instance`-like resources), the webhook might construct
+        and send a `POST` request to the **`Core Milo APIServer`** to create and
+        persist a new `ResourceQuotaClaim` object. (More commonly, the Owning
+        Service's controller creates the claim later).
+    - The webhook service returns an `AdmissionReviewResponse` (indicating
+        success and including any mutations) to the **`Project-X Milo
+        APIServer`**. The `Project-X Milo APIServer` then continues its
+        admission chain.
+7.  **Validating Admission Webhook (Optional)**: Following the mutating webhook
+    phase, the **`Project-X Milo APIServer`** sends another `AdmissionReview`
+    request to the **Milo Validating Webhook service** (if registered and
+    configured for this resource type).
+    - This webhook service (running in Milo MCP) performs a "fast-fail" check,
+        potentially using cached data from `ResourceQuotaGrant`s in the **`Core
+        Milo APIServer`**.
     - **If Denied by Validating Webhook**: The webhook service rejects the
-        request. The **PCP APIServer** does not persist the `Instance` object.
-        The `ResourceQuotaClaim` (if created) would eventually be updated by the
-        `quota-operator` to `Denied`.
+        request. The **`Project-X Milo APIServer`** does not persist the
+        `Instance` object. A `ResourceQuotaClaim` (if one was prematurely
+        created by a webhook) would eventually be reconciled by the
+        `quota-operator` (likely to `Denied` or cleaned up if the `Instance`
+        doesn't exist).
     - **If Allowed by Validating Webhook**: The webhook service allows the
-        request. If all other admission controllers in the PCP APIServer also
-        allow it, the `Instance` is persisted by the **PCP APIServer**. Actual
-        provisioning is handled later by the Owning Service's controller in the
-        PCP after explicit quota approval from Milo.
+        request. If all other admission controllers in the `Project-X Milo
+        APIServer` also allow it, the `Instance` is persisted by the
+        **`Project-X Milo APIServer`**. Actual provisioning is typically handled
+        later by the Owning Service's controller (in the PCP for that project)
+        after explicit quota approval from the `Core Milo APIServer` (via a
+        `ResourceQuotaClaim`).
 
 ```mermaid
 %% Sequence Diagram - Instance Provisioning & Admission Control
 sequenceDiagram
     autonumber 5
-    participant User as Admin / CI Process
-    participant ProjAPIServer as Project APIServer <br> (PCP, e.g., compute.datumapis.com)
-    participant MiloMutateWH as Milo Mutating Webhook <br> (MCP)
-    participant MiloValidWH as Milo Validating Webhook <br> (MCP, Optional)
-    participant MiloAPIServer as Milo APIServer <br> (MCP, quota.miloapis.com)
-    participant RQC as ResourceQuotaClaim <br> (CR in Milo APIServer)
-    participant InstanceCR as Instance CR <br> (in Project APIServer)
 
-    User->>+ProjAPIServer: Apply `Instance` manifest
+    participant UserCI as Admin / CI Process
+    participant MiloAPIProjectX as Project-X Milo APIServer <br> (e.g., for compute.datumapis.com)
+    participant MiloMutatingWH as Milo Mutating Webhook <br> (in Milo MCP)
+    participant MiloValidatingWH as Milo Validating Webhook <br> (in Milo MCP, Optional)
+    participant MiloAPICore as Core Milo APIServer <br> (quota.miloapis.com, in Milo MCP)
+    participant RQC_CRD as ResourceQuotaClaim CRD <br> (in Core Milo APIServer)
+    participant InstanceCR as Instance CR <br> (in Project-X Milo APIServer)
+
+    style UserCI fill:#f5f5f5,stroke:#333,stroke-width:2px
+    style MiloAPIProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style InstanceCR fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style MiloMutatingWH fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style MiloValidatingWH fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style RQC_CRD fill:#e3f2fd,stroke:#333,stroke-width:2px
+
+    UserCI->>+MiloAPIProjectX: Apply `Instance` manifest
     
-    ProjAPIServer->>+MiloMutateWH: AdmissionReview for `Instance` (CREATE/UPDATE)
-    MiloMutateWH->>MiloAPIServer: `CREATE` `ResourceQuotaClaim`
-    MiloAPIServer->>RQC: Store `ResourceQuotaClaim`
-    note right of RQC: Initial Status: <br> - phase: Pending <br> - conditions.Validated: Unknown <br> - conditions.Granted: False
-    MiloAPIServer-->>MiloMutateWH: Ack (RQC Created)
-    MiloMutateWH-->>-ProjAPIServer: AdmissionReviewResponse (Patch `Instance` with finalizer) 
-    %% ProjAPIServer is now briefly inactive after MiloMutateWH responds
+    MiloAPIProjectX->>+MiloMutatingWH: AdmissionReview for `InstanceCR` (CREATE/UPDATE)
+    MiloMutatingWH-->>-MiloAPIProjectX: AdmissionReviewResponse (e.g., Patch `InstanceCR` with finalizer)
+    %% Note: Claim creation by webhook is less common for Instance-like resources;
+    %% typically done by Owning Service Controller later.
+    %% Example if webhook *did* create claim:
+    %% MiloMutatingWH->>+MiloAPICore: CREATE `ResourceQuotaClaim`
+    %% MiloAPICore->>RQC_CRD: Store `ResourceQuotaClaim`
+    %% MiloAPICore-->>-MiloMutatingWH: Ack (RQC_CRD Created)
     
-    ProjAPIServer->>InstanceCR: Mutate `Instance` (add finalizer) 
+    MiloAPIProjectX->>InstanceCR: Mutate/Store `InstanceCR` (initial state, with finalizer)
     
-    alt Optional Fast-Fail by MiloValidWH
-        ProjAPIServer->>+MiloValidWH: AdmissionReview for `Instance`
-        MiloValidWH-->>-ProjAPIServer: Deny Request (AdmissionReviewResponse {allowed: false})
-        ProjAPIServer-->>-User: Error (e.g., 403 Forbidden - Quota Check Failed by Webhook)
-        note over RQC: RQC might be updated to Denied later by quota-operator if Validating Webhook denies.
-    else MiloValidWH Allows
-        ProjAPIServer->>+MiloValidWH: AdmissionReview for `Instance`
-        MiloValidWH-->>-ProjAPIServer: Allow Request (AdmissionReviewResponse {allowed: true})
-        ProjAPIServer->>InstanceCR: Store `Instance` (with finalizer, if not already stored and only mutated)
-        ProjAPIServer-->>User: Ack (Instance Created/Updated, pending quota)
+    alt Optional Validating Webhook is Configured and Called
+        MiloAPIProjectX->>+MiloValidatingWH: AdmissionReview for `InstanceCR`
+        alt MiloValidatingWH Denies (e.g. Fast-Fail)
+            MiloValidatingWH->>MiloAPICore: (Potentially) GET `ResourceQuotaGrant` for fast check
+            MiloAPICore-->>MiloValidatingWH: Return Grant data (if applicable for check)
+            MiloValidatingWH-->>-MiloAPIProjectX: Deny Request (AdmissionReviewResponse {allowed: false})
+            MiloAPIProjectX-->>-UserCI: Error (e.g., 403 Forbidden - Quota Check Failed by Webhook)
+        else MiloValidatingWH Allows
+            MiloValidatingWH-->>-MiloAPIProjectX: Allow Request (AdmissionReviewResponse {allowed: true})
+            MiloAPIProjectX-->>UserCI: Ack (Instance Created/Updated in `Project-X Milo APIServer`, pending quota from `Core Milo APIServer`)
+        end
+    else Validating Webhook Not Configured or Bypassed (if failurePolicy=Ignore and webhook down)
+        MiloAPIProjectX-->>UserCI: Ack (Instance Created/Updated in `Project-X Milo APIServer`, pending quota from `Core Milo APIServer`)
     end
 ```
 
 #### Quota Reconciliation by `quota-operator`
 
-The `quota-operator` processes the `ResourceQuotaClaim`s stored in the Milo
-APIServer to decide if the requested resources can be granted.
+The `quota-operator` (running in the Milo MCP) processes the
+`ResourceQuotaClaim`s that are stored in the `Core Milo APIServer`. Its primary
+goal is to decide if the requested resources can be granted based on defined
+quotas and actual usage.
 
 9.  **`quota-operator` Detects `ResourceQuotaClaim`**: The `quota-operator`
-    detects the new `ResourceQuotaClaim` via its informer watching the Milo
-    APIServer.
-10. **Validate `ResourceQuotaClaim` Against `ServiceQuotaRegistration`**:
-    - The `quota-operator` fetches the relevant `ServiceQuotaRegistration` from
-        the **Milo APIServer**.
-    - Based on validity, it patches `ResourceQuotaClaim.status` in the **Milo
-        APIServer**. If invalid, reconciliation for this claim stops.
-11. **Retrieve `ResourceQuotaGrant`**: If valid, the `quota-operator` retrieves
-    the `ResourceQuotaGrant` from the **Milo APIServer**.
-12. **Query amberflo for Usage**: The `quota-operator` makes a real-time API
-    call to the `amberflo Usage API` for the resource running in the PCP.
-13. **amberflo Returns Usage**: `amberflo` responds. The `quota-operator`
-    updates `ResourceQuotaClaim.status` in the **Milo APIServer**.
-14. **Evaluate Quota & Update `ResourceQuotaClaim` Status (in MCP)**: The
-    `quota-operator` compares usage against the grant.
-    - **If Within Limit (Granted)**: Patches `ResourceQuotaClaim.status` in the
-        **Milo APIServer** to `Granted`. Optionally updates
-        `ResourceQuotaGrant.status.usage` cache in Milo APIServer.
-    - **If Over Limit (Denied)**: Patches `ResourceQuotaClaim.status` in the
-        **Milo APIServer** to `Denied`.
+    detects a new or updated `ResourceQuotaClaim` via its informer watching the
+    **`Core Milo APIServer`**. This claim would be created by the Owning Service
+    controller (as a result of a user action on a resource like an `Instance` in
+    a `Project-X Milo APIServer` instance).
+10. **Validate `ResourceQuotaClaim` Against `ServiceQuotaRegistration`**: The
+    `quota-operator`:
+    - Fetches the relevant `ServiceQuotaRegistration` (for the resource type
+        named in the claim) from the **`Core Milo APIServer`**.
+    - Validates the claim's specification against this registration.
+    - Based on validity, it patches the `ResourceQuotaClaim.status` in the
+        **`Core Milo APIServer`**. If invalid (e.g., resource not registered,
+        dimensions incorrect), reconciliation for this claim stops, and the
+        claim is marked as `Denied`.
+11. **Retrieve `ResourceQuotaGrant`**: If the claim is valid against a
+    registration, the `quota-operator` retrieves the applicable
+    `ResourceQuotaGrant`(s) for the claim's target project/organization from the
+    **`Core Milo APIServer`**.
+12. **Query Amberflo for Usage**: The `quota-operator` makes a real-time API
+    call to the **`amberflo Usage API`** to get the current usage for the
+    specific resource (identified by the claim's `resourceRef`) and its
+    applicable dimensions (this usage pertains to resources managed within a
+    specific project, i.e., in a `Project-X Milo APIServer` scope).
+13. **Amberflo Returns Usage**: `amberflo` responds with the current usage data.
+    The `quota-operator` updates the `ResourceQuotaClaim.status` (e.g.,
+    `conditions.QuotaChecked: True`) in the **`Core Milo APIServer`**.
+14. **Evaluate Quota & Update `ResourceQuotaClaim` Status**: The
+    `quota-operator` compares the (actual usage from Amberflo + requested amount
+    in claim) against the limit(s) from the relevant `ResourceQuotaGrant`
+    bucket(s) found in step 11. All these CRD interactions occur with the
+    **`Core Milo APIServer`**.
+    - **If Within Limit (Granted)**: The `quota-operator` patches
+        `ResourceQuotaClaim.status` to `Granted`. Optionally, it may update the
+        `ResourceQuotaGrant.status.usage` cache in the `Core Milo APIServer`.
+    - **If Over Limit (Denied)**: The `quota-operator` patches
+        `ResourceQuotaClaim.status` to `Denied` (e.g., with reason
+        `QuotaExceeded`).
 
 ```mermaid
 %% Sequence Diagram - Quota Reconciliation by quota-operator
 sequenceDiagram
     autonumber 9
-    participant MiloQOp as Milo quota-operator <br> (MCP)
-    participant MiloAPIServer as Milo APIServer <br> (MCP, quota.miloapis.com)
-    participant RQC as ResourceQuotaClaim <br> (CR in Milo APIServer)
-    participant SQReg as ServiceQuotaRegistration <br> (CR in Milo APIServer)
-    participant RQGrant as ResourceQuotaGrant <br> (CR in Milo APIServer)
-    participant Amberflo as amberflo Usage API <br> (External)
 
-    MiloQOp-->>MiloAPIServer: Watch `ResourceQuotaClaim` (ADDED/MODIFIED)
-    note left of MiloQOp: Detects new/updated RQC
+    participant MiloQuotaOp as Milo quota-operator <br> (in Milo MCP)
+    participant MiloAPICore as Core Milo APIServer <br> (quota.miloapis.com, in Milo MCP)
+    participant RQC_CRD as ResourceQuotaClaim CRD <br> (in Core Milo APIServer)
+    participant SQReg_CRD as ServiceQuotaRegistration CRD <br> (in Core Milo APIServer)
+    participant RQGrant_CRD as ResourceQuotaGrant CRD <br> (in Core Milo APIServer)
+    participant AmberfloAPI as amberflo Usage API <br> (External)
+
+    style MiloQuotaOp fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style RQC_CRD fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style SQReg_CRD fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style RQGrant_CRD fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style AmberfloAPI fill:#fff3e0,stroke:#333,stroke-width:2px
+
+    MiloQuotaOp-->>MiloAPICore: Watch `ResourceQuotaClaim` (RQC_CRD) (ADDED/MODIFIED)
+    note left of MiloQuotaOp: Detects new/updated RQC_CRD
     
-    MiloQOp->>MiloAPIServer: `GET` relevant `ServiceQuotaRegistration` for RQC.spec.resources
-    MiloAPIServer-->>SQReg: Return `ServiceQuotaRegistration`
-    MiloQOp->>SQReg: Validate RQC spec against SQReg (resourceName, dimensions, etc.)
+    MiloQuotaOp->>MiloAPICore: `GET` relevant `ServiceQuotaRegistration` (SQReg_CRD) for RQC_CRD.spec.resources
+    MiloAPICore-->>SQReg_CRD: Return `ServiceQuotaRegistration` data
+    MiloQuotaOp->>RQC_CRD: Validate RQC_CRD spec against SQReg_CRD data
     
-    alt RQC spec is valid against SQReg
-        MiloQOp->>MiloAPIServer: `PATCH` RQC.status (conditions.Validated: True)
-        note right of RQC: RQC Status Update: <br> conditions.Validated: True
+    alt RQC_CRD spec is valid against SQReg_CRD
+        MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (conditions.Validated: True)
+        note right of RQC_CRD: RQC_CRD Status Updated: <br> conditions.Validated: True
         
-        MiloQOp->>MiloAPIServer: `GET` `ResourceQuotaGrant` for RQC's project/org
-        MiloAPIServer-->>RQGrant: Return `ResourceQuotaGrant`
-        note right of RQGrant: Contains limits, selectors, buckets
+        MiloQuotaOp->>MiloAPICore: `GET` `ResourceQuotaGrant` (RQGrant_CRD) for RQC_CRD's project/org
+        MiloAPICore-->>RQGrant_CRD: Return `ResourceQuotaGrant` data
+        note right of RQGrant_CRD: Contains limits, selectors, buckets
 
-        MiloQOp->>+Amberflo: `GET` current usage (for RQC.spec.resources & dimensions)
-        Amberflo-->>-MiloQOp: Return usage total (e.g., "500 cores")
-        MiloQOp->>MiloAPIServer: `PATCH` RQC.status (conditions.QuotaChecked: True)
-        note right of RQC: RQC Status Update: <br> conditions.QuotaChecked: True (CheckSuccessful)
+        MiloQuotaOp->>+AmberfloAPI: `GET` current usage (for RQC_CRD.spec.resources & dimensions)
+        AmberfloAPI-->>-MiloQuotaOp: Return usage total (e.g., "500 cores")
+        MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (conditions.QuotaChecked: True)
+        note right of RQC_CRD: RQC_CRD Status Updated: <br> conditions.QuotaChecked: True (CheckSuccessful)
 
-        alt Calculated (Current Usage + RQC.spec.resources.quantity) <= RQGrant Limit
-            MiloQOp->>MiloAPIServer: `PATCH` RQC.status (phase: Granted)
-            note right of RQC: RQC Status Update: <br> - phase: Granted <br> - conditions.Granted: True <br> - conditions.Ready: True
-            opt Update RQGrant Cache
-                 MiloQOp->>MiloAPIServer: `PATCH` `ResourceQuotaGrant.status.usage`
-                 note right of RQGrant: RQGrant.status.usage updated (cache)
+        alt (Current Usage from AmberfloAPI + RQC_CRD.spec.resources.quantity) <= RQGrant_CRD Limit
+            MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (phase: Granted)
+            note right of RQC_CRD: RQC_CRD Status Updated: <br> - phase: Granted <br> - conditions.Granted: True <br> - conditions.Ready: True
+            opt Update RQGrant_CRD Cache
+                 MiloQuotaOp->>MiloAPICore: `PATCH` `ResourceQuotaGrant.status.usage` on RQGrant_CRD
+                 note right of RQGrant_CRD: RQGrant_CRD.status.usage updated (cache)
             end
-        else Usage would exceed RQGrant Limit
-            MiloQOp->>MiloAPIServer: `PATCH` RQC.status (phase: Denied, reason: QuotaExceeded)
-            note right of RQC: RQC Status Update: <br> - phase: Denied <br> - conditions.Granted: False <br> - conditions.Ready: True
+        else Usage would exceed RQGrant_CRD Limit
+            MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (phase: Denied, reason: QuotaExceeded)
+            note right of RQC_CRD: RQC_CRD Status Updated: <br> - phase: Denied <br> - conditions.Granted: False <br> - conditions.Ready: True
         end
-    else RQC spec invalid OR SQReg not found
-        MiloQOp->>MiloAPIServer: `PATCH` RQC.status (phase: Denied, reason: ValidationFailed)
-        note right of RQC: RQC Status Update: <br> - phase: Denied <br> - conditions.Validated: False <br> - conditions.Ready: True
+    else RQC_CRD spec invalid OR SQReg_CRD not found
+        MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (phase: Denied, reason: ValidationFailed)
+        note right of RQC_CRD: RQC_CRD Status Updated: <br> - phase: Denied <br> - conditions.Validated: False <br> - conditions.Ready: True
     end
 ```
 
 #### Owning Service Reacts to `ResourceQuotaClaim` Status
 
-The Owning Service controller (running in the PCP) acts based on the
-`ResourceQuotaClaim`'s final status, which it reads from the central Milo
-APIServer in the MCP.
+The Owning Service controller (e.g., `InstanceController` running in a
+`Project-X Milo APIServer`) acts based on the `ResourceQuotaClaim`'s final
+status. It reads this status from the central **`Core Milo APIServer`** in the
+Milo Management Control Plane (MCP).
 
 15. **The Owning Service's `Instance` Controller Watches
     `ResourceQuotaClaim`s**: The **Owning Service's `Instance` Controller**
-    watches the `status` of the `ResourceQuotaClaim` (associated with the
-    `Instance` it manages in its PCP) on the **Milo APIServer**. This is an HTTP
-    `GET`/`WATCH` from the PCP controller to the Milo APIServer.
-16. **Provision or Fail `Instance` (in PCP)**:
+    (running in the `Project-X Milo APIServer` instance) watches the `status` of
+    the `ResourceQuotaClaim` (which is associated with the `Instance` it
+    manages.) on the **`Core Milo APIServer`** via an HTTP `GET`/`WATCH` request
+    from the controller to the `Core Milo APIServer`.
+16. **Provision or Fail `Instance` (in PCP)**: Based on the `ResourceQuotaClaim`
+    status from `Core Milo APIServer`:
     - **If `ResourceQuotaClaim.status.phase == Granted`**:
         - The **`Instance` Controller** removes its finalizer from the
-            `Instance` resource (by patching it via its own PCP APIServer).
+            `Instance` resource (by patching it via its own **`Project-X Milo
+            APIServer`**).
         - It then proceeds to provision the actual infrastructure for the
-            instance within the PCP.
-        - `Instance.status` is updated by the **PCP APIServer**.
+            `Instance` within the scope of its `Project-X Milo APIServer`
+            instance.
+        - The `Instance.status` is updated in the **`Project-X Milo APIServer`**
+          by the controller.
     - **If `ResourceQuotaClaim.status.phase == Denied`**:
-        - The **`Instance` Controller** updates `Instance.status` to `Phase:
-          Failed` and the `Instance` is not provisioned in the PCP.
+        - The **`Instance` Controller** updates the `Instance.status` in its
+            **`Project-X Milo APIServer`** to reflect the failure (e.g.,
+            `status.phase: Failed`, `status.reason: QuotaExceeded`).
+        - The `Instance` is not provisioned in the PCP.
 
 ```mermaid
 %% Sequence Diagram - Owning Service Reacts to ResourceQuotaClaim Status
 sequenceDiagram
     autonumber 15
-    participant InstCtrl as Instance Controller <br> (PCP)
-    participant MiloAPIServer as Milo APIServer <br> (MCP, quota.miloapis.com)
-    participant RQC as ResourceQuotaClaim <br> (CR in Milo APIServer)
-    participant ProjAPIServer as Project APIServer <br> (PCP, e.g., compute.datumapis.com)
-    participant InstanceCR as Instance CR <br> (in Project APIServer)
-    participant BackendInfra as Backend Infrastructure <br> (e.g., VMs, Pods in PCP)
 
-    InstCtrl-->>MiloAPIServer: Watch `ResourceQuotaClaim.status` (for its owned Instance)
-    note left of InstCtrl: Continuously monitors RQC from Milo APIServer
+    participant InstCtrlPCP as Instance Controller <br> (in PCP)
+    participant MiloAPICore as Core Milo APIServer <br> (in MCP, quota.miloapis.com)
+    participant RQC_CRDCore as ResourceQuotaClaim CRD <br> (in Core Milo APIServer)
+    participant MiloAPIProjectX as Project-X Milo APIServer <br> (in PCP, e.g., compute.datumapis.com)
+    participant InstanceCRProjectX as Instance CR <br> (in Project-X Milo APIServer)
+    participant BackendInfraPCP as Backend Infrastructure <br> (in PCP, e.g., VMs, Pods)
+
+    style InstCtrlPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style MiloAPIProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style InstanceCRProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style BackendInfraPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style RQC_CRDCore fill:#e3f2fd,stroke:#333,stroke-width:2px
+
+    InstCtrlPCP-->>MiloAPICore: Watch `ResourceQuotaClaim.status` (RQC_CRDCore for its owned Instance)
+    note left of InstCtrlPCP: Continuously monitors RQC_CRDCore from MiloAPICore
     
-    alt RQC.status.phase == Granted
-        InstCtrl->>+ProjAPIServer: `PATCH` `InstanceCR` (remove quota finalizer)
-        ProjAPIServer-->>-InstCtrl: Ack
-        InstCtrl->>+BackendInfra: Provision workload (pods, VM, etc.)
-        BackendInfra-->>-InstCtrl: Ack (Workload Provisioned)
-        InstCtrl->>+ProjAPIServer: `PATCH` `InstanceCR.status` (e.g., Phase=Running)
-        ProjAPIServer-->>-InstCtrl: Ack
-        note right of InstanceCR: Instance Status: Pending -> Provisioning -> Running
-    else RQC.status.phase == Denied
-        InstCtrl->>+ProjAPIServer: `PATCH` `InstanceCR.status` (e.g., Phase=Failed, Reason=RQC.status.conditions.message)
-        ProjAPIServer-->>-InstCtrl: Ack
-        note right of InstanceCR: Instance Status: Pending -> Failed
+    alt RQC_CRDCore.status.phase == Granted
+        InstCtrlPCP->>+MiloAPIProjectX: `PATCH` `InstanceCRProjectX` (remove quota finalizer)
+        MiloAPIProjectX-->>-InstCtrlPCP: Ack
+        InstCtrlPCP->>+BackendInfraPCP: Provision workload (pods, VM, etc.)
+        BackendInfraPCP-->>-InstCtrlPCP: Ack (Workload Provisioned)
+        InstCtrlPCP->>+MiloAPIProjectX: `PATCH` `InstanceCRProjectX.status` (e.g., Phase=Running)
+        MiloAPIProjectX-->>-InstCtrlPCP: Ack
+        note right of InstanceCRProjectX: Instance Status in `Project-X Milo APIServer`: <br> Pending -> Provisioning -> Running
+    else RQC_CRDCore.status.phase == Denied
+        InstCtrlPCP->>+MiloAPIProjectX: `PATCH` `InstanceCRProjectX.status` (e.g., Phase=Failed, Reason=RQC_CRDCore.status.conditions.message)
+        MiloAPIProjectX-->>-InstCtrlPCP: Ack
+        note right of InstanceCRProjectX: Instance Status in `Project-X Milo APIServer`: <br> Pending -> Failed
     end
 ```
 
 #### Telemetry & Metering Flow (Post-Provisioning if Granted)
 
-When an `Instance` is successfully provisioned, it emits usage metrics to the
-telemetry system. The telemetry system then forwards these metrics to the
-metering engine for recording.
+When an `Instance` is successfully provisioned (meaning its `ResourceQuotaClaim`
+was `Granted` by the `quota-operator` in the `Core Milo APIServer`), the actual
+running resource (e.g., an `Instance` in the `Project-X Milo APIServer`
+instance) begins to emit usage metrics. These metrics are crucial for tracking
+consumption against the allocated quotas.
 
-17. **Emit Usage Event**: The `Instance` emits usage metrics to the telemetry
-    system.
-18. **Telemetry System Forwarding**: The telemetry system forwards these metrics
-    to the metering engine.
-19. **Metering Engine Recording**: The metering engine records the usage
-    metrics.
-20. **Metering Engine Update**: The metering engine updates the
-    `ResourceQuotaGrant` status with the latest usage data.
+17. **Emit Usage Event**: The **Running `Instance`** (actual workload in the
+    PCP, e.g., a Pod/VM) emits usage metrics (e.g., CPU used, data written) to
+    the local **Telemetry Agent** (Vector agent) running within the same PCP.
+18. **Telemetry System Forwarding**: The **Telemetry Agent** in the PCP collects
+    and forwards these usage metrics to the external **Metering Engine (e.g.,
+    amberflo API)**.
+19. **Metering Engine Recording**: The **Metering Engine (amberflo)** receives
+    the usage data and records it in its internal ledger, associating it with
+    the correct project, organization, and resource dimensions.
 
 ```mermaid
 %% Sequence Diagram - Telemetry & Metering Flow (Post-Provisioning if Granted)
 sequenceDiagram
     autonumber 17
-    participant RunningInstance as Running Instance <br> (PCP, e.g., a Pod/VM)
-    participant TelemetryAgent as Telemetry Agent/Collector <br> (PCP, e.g., Vector)
-    participant Amberflo as amberflo Usage API / Ledger <br> (External)
+
+    participant RunningInstancePCP as Running Instance <br> (in PCP, e.g., a Pod/VM)
+    participant TelemetryAgentPCP as Telemetry Agent/Collector <br> (in PCP, e.g., Vector)
+    participant AmberfloAPI as amberflo Usage API / Ledger <br> (External)
+
+    style RunningInstancePCP fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style TelemetryAgentPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style AmberfloAPI fill:#fff3e0,stroke:#333,stroke-width:2px
 
     alt Instance is Running and Emitting Usage
-        RunningInstance->>+TelemetryAgent: Emit usage event (e.g., cpu=8, location=dfw)
-        TelemetryAgent->>+Amberflo: `POST` usage event to /meters API
-        note right of Amberflo: Aggregates usage, <br> updates internal ledger
-        Amberflo-->>-TelemetryAgent: Ack (Usage Recorded)
-        TelemetryAgent-->>-RunningInstance: Ack (or async, depending on agent)
+        RunningInstancePCP->>+TelemetryAgentPCP: Emit usage event (e.g., cpu=8, location=dfw)
+        TelemetryAgentPCP->>+AmberfloAPI: `POST` usage event to /meters API
+        note right of AmberfloAPI: Aggregates usage, <br> updates internal ledger
+        AmberfloAPI-->>-TelemetryAgentPCP: Ack (Usage Recorded)
+        TelemetryAgentPCP-->>-RunningInstancePCP: Ack (or async, depending on agent)
     end
 ```
 
 #### Tear-down & Quota Release (PCP initiates, MCP reflects)
 
-When an `Instance` within a project is requested to be deleted, the following
-steps occur:
+When an `Instance` (or similar project-scoped resource) within a project is
+requested to be deleted, the following steps occur to ensure its quota is
+released in the central Milo Quota Management system (MCP) and the resource is
+properly deprovisioned in its Project Control Plane (PCP).
 
-21. **Delete `Instance` Request**: A user/process requests deletion of the
-    `Instance` from the **Owning Service's K8s APIServer (PCP APIServer)**.
-22. **PCP APIServer Marks for Deletion**: The **PCP APIServer** marks the
-    `Instance` object with a `deletionTimestamp`, indicating that the `Instance`
-    should be deleted.
-23. **`Instance` Controller Finalizer Logic**: The **Owning Service's `Instance`
-    Controller**, detecting the `deletionTimestamp`:
+21. **Delete `Instance` Request**: A **User / CI Process** requests deletion of
+    the `Instance` from the **`Project-X Milo APIServer`** (the Project
+    APIServer for the Owning Service).
+22. **`Project-X Milo APIServer` Marks for Deletion**: The **`Project-X Milo
+    APIServer`** marks the `Instance` object with a `deletionTimestamp`. The
+    resource is not yet deleted due to finalizers.
+23. **`Instance` Controller Finalizer Logic (in PCP)**: The **Owning Service's
+    `Instance` Controller** (running in the PCP), detecting the
+    `deletionTimestamp` on the `InstanceCRProjectX` (and its own finalizer):
     - Initiates the deletion of the associated `ResourceQuotaClaim` by sending a
-        `DELETE` request for that claim to the **Milo APIServer**.
-24. **`quota-operator` Handles `ResourceQuotaClaim` Deletion**:
-    - The `quota-operator` detects the deletion of the `ResourceQuotaClaim` in
-        the Milo APIServer.
-    - *(Optional Cache Update)*: `quota-operator` patches
-        `ResourceQuotaGrant.status.usage` in the Milo APIServer.
-    - The `quota-operator` communicates with amberflo APIs to deallocate the
-      resource.
-25. **Deprovision Infrastructure**: The **Owning Service's `Instance`
-    Controller** within the PCP ensures the actual backend infrastructure for
-    the `Instance` is deprovisioned within the project's specific scope.
-26. **Remove Finalizer**: Once cleanup is done, the **`Instance` Controller**
-    removes its finalizer from the `Instance` resource via its **PCP
-    APIServer**.
-27. **PCP APIServer Deletes `Instance`**: The **PCP APIServer** permanently
-    deletes the `Instance` object.
+        `DELETE` request for that claim to the **`Core Milo APIServer`** in the
+        MCP.
+24. **`quota-operator` Handles `ResourceQuotaClaim` Deletion (in MCP)**:
+    - The **`Milo quota-operator`** detects the deletion of the
+        `ResourceQuotaClaim` in the **`Core Milo APIServer`**.
+    - *(Optional Cache Update)*: The `quota-operator` may patch the
+        `ResourceQuotaGrant.status.usage` in the **`Core Milo APIServer`** to
+        reflect the released amount.
+    - The `quota-operator` ensures the usage is no longer accounted for by the
+        metering system (e.g., by sending an explicit deallocation/zero-usage
+        event to the **`amberflo Usage API`** if the metering API
+        supports/requires it for immediate reflection).
+25. **Deprovision Infrastructure (in PCP)**: The **Owning Service's `Instance`
+    Controller** ensures the actual underlying infrastructure for the `Instance`
+    (e.g., Pods, VMs) is deprovisioned within the project's specific scope.
+26. **Remove Finalizer (in PCP)**: Once all cleanup related to the `Instance`
+    (including ensuring the `ResourceQuotaClaim` in `Core Milo APIServer` is
+    gone or being processed for deletion, and backend infra is gone) is
+    complete, the **`Instance` Controller** removes its finalizer from the
+    `Instance` resource via its **`Project-X Milo APIServer`**.
+27. **`Project-X Milo APIServer` Deletes `Instance`**: With finalizers removed,
+    the **`Project-X Milo APIServer`** permanently deletes the `Instance` object
+    from its storage.
 
 ```mermaid
 %% Sequence Diagram - Tear-down & Quota Release
 sequenceDiagram
     autonumber 21
-    participant User as Admin / CI Process
-    participant ProjAPIServer as Project APIServer <br> (PCP)
-    participant InstanceCR as Instance CR <br> (in Project APIServer)
-    participant InstCtrl as Instance Controller <br> (PCP)
-    participant MiloAPIServer as Milo APIServer <br> (MCP)
-    participant RQC as ResourceQuotaClaim <br> (CR in Milo APIServer)
-    participant MiloQOp as Milo quota-operator <br> (MCP)
-    participant RQGrant as ResourceQuotaGrant <br> (CR in Milo APIServer, for cache)
-    participant Amberflo as amberflo Usage API <br> (External)
-    participant BackendInfra as Backend Infrastructure <br> (PCP)
 
-    User->>+ProjAPIServer: `DELETE` `InstanceCR`
-    ProjAPIServer->>InstanceCR: Mark `InstanceCR` with deletionTimestamp
-    ProjAPIServer-->>-User: Ack (Deletion request accepted)
+    participant UserCI as Admin / CI Process
+    participant MiloAPIProjectX as Project-X Milo APIServer <br> (in PCP)
+    participant InstanceCRProjectX as Instance CR <br> (in Project-X Milo APIServer)
+    participant InstCtrlPCP as Instance Controller <br> (in PCP)
+    participant MiloAPICore as Core Milo APIServer <br> (in MCP)
+    participant RQC_CRDCore as ResourceQuotaClaim CRD <br> (in Core Milo APIServer)
+    participant MiloQuotaOpMCP as Milo quota-operator <br> (in MCP)
+    participant RQGrantCRDCore as ResourceQuotaGrant CRD <br> (in Core Milo APIServer, for cache)
+    participant AmberfloAPI as amberflo Usage API <br> (External)
+    participant BackendInfraPCP as Backend Infrastructure <br> (in PCP)
 
-    InstCtrl-->>InstanceCR: Detect deletionTimestamp & finalizer
-    InstCtrl->>+MiloAPIServer: `DELETE` `ResourceQuotaClaim` (associated with InstanceCR)
-    MiloAPIServer-->>RQC: Mark `ResourceQuotaClaim` for deletion
-    MiloAPIServer-->>-InstCtrl: Ack (RQC deletion initiated)
+    style UserCI fill:#f5f5f5,stroke:#333,stroke-width:2px
+    style MiloAPIProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style InstanceCRProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style InstCtrlPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style BackendInfraPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style RQC_CRDCore fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style MiloQuotaOpMCP fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style RQGrantCRDCore fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style AmberfloAPI fill:#fff3e0,stroke:#333,stroke-width:2px
 
-    MiloQOp-->>MiloAPIServer: Watch `ResourceQuotaClaim` (DELETED)
-    note left of MiloQOp: Detects RQC deletion
-    opt Optional: Update RQGrant Cache
-        MiloQOp->>MiloAPIServer: `PATCH` `ResourceQuotaGrant.status.usage` (-= released amount)
-        note right of RQGrant: RQGrant.status.usage cache updated
+    UserCI->>+MiloAPIProjectX: `DELETE` `InstanceCRProjectX`
+    MiloAPIProjectX->>InstanceCRProjectX: Mark `InstanceCRProjectX` with deletionTimestamp
+    MiloAPIProjectX-->>-UserCI: Ack (Deletion request accepted)
+
+    InstCtrlPCP-->>InstanceCRProjectX: Detect deletionTimestamp & finalizer on `InstanceCRProjectX`
+    InstCtrlPCP->>+MiloAPICore: `DELETE` `ResourceQuotaClaim` (RQC_CRDCore associated with InstanceCRProjectX)
+    MiloAPICore-->>RQC_CRDCore: Mark `ResourceQuotaClaim` (RQC_CRDCore) for deletion
+    MiloAPICore-->>-InstCtrlPCP: Ack (RQC_CRDCore deletion initiated)
+
+    MiloQuotaOpMCP-->>MiloAPICore: Watch `ResourceQuotaClaim` (RQC_CRDCore) (DELETED)
+    note left of MiloQuotaOpMCP: Detects RQC_CRDCore deletion
+    opt Optional: Update RQGrantCRDCore Cache
+        MiloQuotaOpMCP->>MiloAPICore: `PATCH` `ResourceQuotaGrant.status.usage` on RQGrantCRDCore (-= released amount)
+        note right of RQGrantCRDCore: RQGrantCRDCore.status.usage cache updated
     end
-    opt Optional: Explicit Usage Deallocation if required by Metering System
-        MiloQOp->>+Amberflo: `POST` usage adjustment / deallocate
-        Amberflo-->>-MiloQOp: Ack
+    opt Ensure Usage Deallocation in Metering System
+        MiloQuotaOpMCP->>+AmberfloAPI: `POST` usage adjustment / ensure deallocation
+        AmberfloAPI-->>-MiloQuotaOpMCP: Ack
     end
     
-    InstCtrl->>+BackendInfra: Deprovision workload
-    BackendInfra-->>-InstCtrl: Ack (Workload Deprovisioned)
+    InstCtrlPCP->>+BackendInfraPCP: Deprovision workload
+    BackendInfraPCP-->>-InstCtrlPCP: Ack (Workload Deprovisioned)
     
-    InstCtrl->>+ProjAPIServer: `PATCH` `InstanceCR` (remove finalizer)
-    ProjAPIServer-->>InstanceCR: Finalizer removed
-    ProjAPIServer-->>-InstCtrl: Ack
-    note right of InstanceCR: Instance object eventually deleted by garbage collector
+    InstCtrlPCP->>+MiloAPIProjectX: `PATCH` `InstanceCRProjectX` (remove finalizer)
+    MiloAPIProjectX-->>InstanceCRProjectX: Finalizer removed from `InstanceCRProjectX`
+    MiloAPIProjectX-->>-InstCtrlPCP: Ack
+    note right of InstanceCRProjectX: `InstanceCRProjectX` object eventually deleted by garbage collector
 
 ```
 
@@ -1595,7 +1963,8 @@ Pick one of these and delete the rest.
   - Will enabling / disabling the feature require downtime or reprovisioning of
     a node?
 
-#### Does enabling the feature change any default behavior?
+#### Does enabling the feature change any default
+        behavior?
 
 <!--
 Any change of default behavior may be surprising to users or break existing
@@ -1642,7 +2011,9 @@ What signals should users be paying attention to when the feature is young
 that might indicate a serious problem?
 -->
 
-#### Were upgrade and rollback tested? Was the upgrade->downgrade->upgrade path tested?
+#### Were upgrade and rollback tested? Was the upgrade->downgrade->upgrade
+        path
+        tested?
 
 <!--
 Describe manual testing that was done and the outcomes.
@@ -1847,14 +2218,14 @@ Yes, this enhancement introduces three new Custom Resource Definitions (CRDs):
         organization. It is bound to a project or organization, which would map
         to a namespace seen in `metadata.name: proj-abc`, and is scoped to a
         specific resource type and dimensions.
-    -   **Scope:** Namespaced and scoped to a specific resource type and
-        dimensions.
+    -   **Scope:** Namespaced (representing either a Project or an Organization)
+        and scoped to a specific resource type and dimensions.
     -   **Supported number of objects within the Milo APIServer:** Moderate to
-        high. One per project or organization. Scales with the number of
-        tenants. (e.g., hundreds to thousands).
+        high, as multiple `ResourceQuotaGrant`s can be created for a single
+        resource. Scales with the number of projects and organizations. (e.g.,
+        hundreds to thousands).
     -   **Supported number of objects per namespace:** One, as it defines the
-        grant for that specific project/namespace. (e.g., dozens to hundreds per
-        active project).
+        grant for that specific project or organization namespace.
 
 #### Will enabling / using this feature result in any new calls to the cloud provider?
 
