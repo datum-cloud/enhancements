@@ -1423,11 +1423,6 @@ sequenceDiagram
     participant MiloQuotaOp as Milo quota-operator <br> (in Milo MCP)
     participant SQRegCRD as ServiceQuotaRegistration CRD <br> (in Core Milo APIServer)
 
-    style SvcOwner fill:#f5f5f5,stroke:#333,stroke-width:2px
-    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style MiloQuotaOp fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style SQRegCRD fill:#e3f2fd,stroke:#333,stroke-width:2px
-
     SvcOwner->>+MiloAPICore: Apply `ServiceQuotaRegistration` manifest (e.g., compute-cpu.yaml)
     MiloAPICore->>SQRegCRD: Store `ServiceQuotaRegistration`
     note right of SQRegCRD: Initial Status: <br> - conditions.Ready: Unknown (Initializing) <br> - conditions.DefinitionValid: Unknown (PendingValidation)
@@ -1491,12 +1486,6 @@ sequenceDiagram
     participant MiloQuotaOp as Milo quota-operator <br> (in Milo MCP)
     participant RQGrantCRD as ResourceQuotaGrant CRD <br> (in Core Milo APIServer)
     participant SQRegCRD as ServiceQuotaRegistration CRD <br> (in Core Milo APIServer, for validation lookup)
-
-    style AdminUser fill:#f5f5f5,stroke:#333,stroke-width:2px
-    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style MiloQuotaOp fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style RQGrantCRD fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style SQRegCRD fill:#e3f2fd,stroke:#333,stroke-width:2px
 
     AdminUser->>+MiloAPICore: Apply `ResourceQuotaGrant` manifest (e.g., project-x-cpu-limits.yaml)
     MiloAPICore->>RQGrantCRD: Store `ResourceQuotaGrant`
@@ -1582,24 +1571,10 @@ sequenceDiagram
     participant RQC_CRD as ResourceQuotaClaim CRD <br> (in Core Milo APIServer)
     participant InstanceCR as Instance CR <br> (in Project-X Milo APIServer)
 
-    style UserCI fill:#f5f5f5,stroke:#333,stroke-width:2px
-    style MiloAPIProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style InstanceCR fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style MiloMutatingWH fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style MiloValidatingWH fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style RQC_CRD fill:#e3f2fd,stroke:#333,stroke-width:2px
-
     UserCI->>+MiloAPIProjectX: Apply `Instance` manifest
     
     MiloAPIProjectX->>+MiloMutatingWH: AdmissionReview for `InstanceCR` (CREATE/UPDATE)
     MiloMutatingWH-->>-MiloAPIProjectX: AdmissionReviewResponse (e.g., Patch `InstanceCR` with finalizer)
-    %% Note: Claim creation by webhook is less common for Instance-like resources;
-    %% typically done by Owning Service Controller later.
-    %% Example if webhook *did* create claim:
-    %% MiloMutatingWH->>+MiloAPICore: CREATE `ResourceQuotaClaim`
-    %% MiloAPICore->>RQC_CRD: Store `ResourceQuotaClaim`
-    %% MiloAPICore-->>-MiloMutatingWH: Ack (RQC_CRD Created)
     
     MiloAPIProjectX->>InstanceCR: Mutate/Store `InstanceCR` (initial state, with finalizer)
     
@@ -1609,14 +1584,16 @@ sequenceDiagram
             MiloValidatingWH->>MiloAPICore: (Potentially) GET `ResourceQuotaGrant` for fast check
             MiloAPICore-->>MiloValidatingWH: Return Grant data (if applicable for check)
             MiloValidatingWH-->>-MiloAPIProjectX: Deny Request (AdmissionReviewResponse {allowed: false})
-            MiloAPIProjectX-->>-UserCI: Error (e.g., 403 Forbidden - Quota Check Failed by Webhook)
+            MiloAPIProjectX-->>UserCI: Error (e.g., 403 Forbidden - Quota Check Failed by Webhook) # No deactivation for UserCI's arrow here
         else MiloValidatingWH Allows
-            MiloValidatingWH-->>-MiloAPIProjectX: Allow Request (AdmissionReviewResponse {allowed: true})
+            MiloValidatingWH-->>MiloAPIProjectX: Allow Request (AdmissionReviewResponse {allowed: true})
             MiloAPIProjectX-->>UserCI: Ack (Instance Created/Updated in `Project-X Milo APIServer`, pending quota from `Core Milo APIServer`)
         end
     else Validating Webhook Not Configured or Bypassed (if failurePolicy=Ignore and webhook down)
         MiloAPIProjectX-->>UserCI: Ack (Instance Created/Updated in `Project-X Milo APIServer`, pending quota from `Core Milo APIServer`)
     end
+    
+    deactivate MiloAPIProjectX # Explicitly deactivate MiloAPIProjectX at the end of its work triggered by UserCI
 ```
 
 #### Quota Reconciliation by `quota-operator`
@@ -1675,13 +1652,6 @@ sequenceDiagram
     participant SQReg_CRD as ServiceQuotaRegistration CRD <br> (in Core Milo APIServer)
     participant RQGrant_CRD as ResourceQuotaGrant CRD <br> (in Core Milo APIServer)
     participant AmberfloAPI as amberflo Usage API <br> (External)
-
-    style MiloQuotaOp fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style RQC_CRD fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style SQReg_CRD fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style RQGrant_CRD fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style AmberfloAPI fill:#fff3e0,stroke:#333,stroke-width:2px
 
     MiloQuotaOp-->>MiloAPICore: Watch `ResourceQuotaClaim` (RQC_CRD) (ADDED/MODIFIED)
     note left of MiloQuotaOp: Detects new/updated RQC_CRD
@@ -1762,13 +1732,6 @@ sequenceDiagram
     participant InstanceCRProjectX as Instance CR <br> (in Project-X Milo APIServer)
     participant BackendInfraPCP as Backend Infrastructure <br> (in PCP, e.g., VMs, Pods)
 
-    style InstCtrlPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style MiloAPIProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style InstanceCRProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style BackendInfraPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style RQC_CRDCore fill:#e3f2fd,stroke:#333,stroke-width:2px
-
     InstCtrlPCP-->>MiloAPICore: Watch `ResourceQuotaClaim.status` (RQC_CRDCore for its owned Instance)
     note left of InstCtrlPCP: Continuously monitors RQC_CRDCore from MiloAPICore
     
@@ -1813,10 +1776,6 @@ sequenceDiagram
     participant RunningInstancePCP as Running Instance <br> (in PCP, e.g., a Pod/VM)
     participant TelemetryAgentPCP as Telemetry Agent/Collector <br> (in PCP, e.g., Vector)
     participant AmberfloAPI as amberflo Usage API / Ledger <br> (External)
-
-    style RunningInstancePCP fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style TelemetryAgentPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style AmberfloAPI fill:#fff3e0,stroke:#333,stroke-width:2px
 
     alt Instance is Running and Emitting Usage
         RunningInstancePCP->>+TelemetryAgentPCP: Emit usage event (e.g., cpu=8, location=dfw)
@@ -1883,17 +1842,6 @@ sequenceDiagram
     participant RQGrantCRDCore as ResourceQuotaGrant CRD <br> (in Core Milo APIServer, for cache)
     participant AmberfloAPI as amberflo Usage API <br> (External)
     participant BackendInfraPCP as Backend Infrastructure <br> (in PCP)
-
-    style UserCI fill:#f5f5f5,stroke:#333,stroke-width:2px
-    style MiloAPIProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style InstanceCRProjectX fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style InstCtrlPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style BackendInfraPCP fill:#e8f5e9,stroke:#333,stroke-width:2px
-    style MiloAPICore fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style RQC_CRDCore fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style MiloQuotaOpMCP fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style RQGrantCRDCore fill:#e3f2fd,stroke:#333,stroke-width:2px
-    style AmberfloAPI fill:#fff3e0,stroke:#333,stroke-width:2px
 
     UserCI->>+MiloAPIProjectX: `DELETE` `InstanceCRProjectX`
     MiloAPIProjectX->>InstanceCRProjectX: Mark `InstanceCRProjectX` with deletionTimestamp
@@ -1963,8 +1911,7 @@ Pick one of these and delete the rest.
   - Will enabling / disabling the feature require downtime or reprovisioning of
     a node?
 
-#### Does enabling the feature change any default
-        behavior?
+#### Does enabling the feature change any default behavior?
 
 <!--
 Any change of default behavior may be surprising to users or break existing
@@ -2011,9 +1958,7 @@ What signals should users be paying attention to when the feature is young
 that might indicate a serious problem?
 -->
 
-#### Were upgrade and rollback tested? Was the upgrade->downgrade->upgrade
-        path
-        tested?
+#### Were upgrade and rollback tested? Was the upgrade->downgrade->upgrade path tested?
 
 <!--
 Describe manual testing that was done and the outcomes.
