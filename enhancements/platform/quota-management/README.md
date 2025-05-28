@@ -1747,13 +1747,12 @@ sequenceDiagram
 
 When an `Instance` is successfully provisioned (meaning its `ResourceQuotaClaim`
 was `Granted` by the `quota-operator` in the `Core Milo APIServer`), the actual
-running resource (e.g., an `Instance` in the `Project APIServers`
+running resource (e.g., an `Instance` in the `Project APIServer`
 instance) begins to emit usage metrics. These metrics are crucial for tracking
 consumption against the allocated quotas.
 
-17. **Emit Usage Event**: The **Running `Instance`** (actual workload in the
-    PCP, e.g., a Pod/VM) emits usage metrics (e.g., CPU used, data written) to
-    the local **Telemetry Agent** (Vector agent) running within the same PCP.
+17. **Emit Usage Event**: The **Running `Instance`** emits usage metrics (e.g., CPU used, data written) to
+    the local **Telemetry Agent** (Vector agent).
 18. **Telemetry System Forwarding**: The **Telemetry Agent** collects
     and forwards these usage metrics to the external **Metering Engine (e.g.,
     amberflo API)**.
@@ -1784,12 +1783,12 @@ sequenceDiagram
 When an `Instance` (or similar project-scoped resource) within a project is
 requested to be deleted, the following steps occur to ensure its quota is
 released in the central Milo Quota Management system and the resource is
-properly deprovisioned in its `Project APIServers`.
+properly deprovisioned in its `Project APIServer`.
 
 21. **Delete `Instance` Request**: A **User / CI Process** requests deletion of
-    the `Instance` from the **`Project APIServers`** (the Project
+    the `Instance` from the **`Project APIServer`** (the Project
     APIServer for the Owning Service).
-22. **`Project APIServers` Marks for Deletion**: The **`Project-Specific Milo
+22. **`Project APIServer` Marks for Deletion**: The **`Project-Specific Milo
     APIServer`** marks the `Instance` object with a `deletionTimestamp`. The
     resource is not yet deleted due to finalizers.
 23. **`Instance` Controller Finalizer Logic**: The **Owning Service's
@@ -1809,15 +1808,14 @@ properly deprovisioned in its `Project APIServers`.
         supports/requires it for immediate reflection).
 25. **Deprovision Infrastructure**: The **Owning Service's `Instance`
     Controller** ensures the actual underlying infrastructure for the `Instance`
-    (e.g., Pods, VMs) is deprovisioned within the project's specific scope.
+    is deprovisioned within the project's specific scope.
 26. **Remove Finalizer**: Once all cleanup related to the `Instance`
     (including ensuring the `ResourceQuotaClaim` in `Core Milo APIServer` is
     gone or being processed for deletion, and backend infra is gone) is
     complete, the **`Instance` Controller** removes its finalizer from the
-    `Instance` resource via its **`Project APIServers`**.
-27. **`Project APIServers` Deletes `Instance`**: With finalizers removed,
-    the **`Project APIServers`** permanently deletes the `Instance` object
-    from its storage.
+    `Instance` resource via its **`Project APIServer`**.
+27. **`Project APIServer` Deletes `Instance`**: With finalizers removed,
+    the `Instance` object is deleted.
 
 ```mermaid
 %% Sequence Diagram - Tear-down & Quota Release
