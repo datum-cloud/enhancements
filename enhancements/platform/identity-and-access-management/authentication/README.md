@@ -92,6 +92,10 @@ template.
     - [Existing User Migration](#existing-user-migration)
     - [Update Existing Services](#update-existing-services)
 - [Design Details](#design-details)
+  - [Login Flow For A Registrated User](#login-flow-for-a-registrated-user)
+  - [Login Flow For A Non Registrated User](#login-flow-for-a-non-registrated-user)
+  - [Registration Flow](#registration-flow)
+  - [User Management Flow](#user-management-flow)
   - [Service Authentication](#service-authentication)
   - [Resource Storage](#resource-storage)
 - [Implementation History](#implementation-history)
@@ -401,7 +405,7 @@ to trust JWT tokens signed by the new authentication system.
 
 ### Login Flow For A Registrated User
 
-This sequence flow illustrates the authentication process when a user logs in via an external identity provider (e.g. GitHub, Google). 
+This sequence flow illustrates the authentication process when a user logs in via an external identity provider (e.g. GitHub, Google).
 
 > [!NOTE]
 >
@@ -430,6 +434,7 @@ sequenceDiagram
   IdP-->>IAM: Redirects Client To
   IAM-->>Client: Auth Token
 ```
+
 Diagram explanation:
 
 - The user requests authentication and is redirected to the identity provider.
@@ -474,6 +479,7 @@ sequenceDiagram
   IdP-->>IAM: Redirects Client To
   IAM-->>Client: Auth Token
 ```
+
 Diagram explanation:
 
 - The user requests authentication and is redirected to the identity provider.
@@ -533,7 +539,6 @@ This sequence flow illustrates the user management process. User management incl
 > [!NOTE]
 >
 > Fore ease and simplicity, this diagram asumes taht the user and IAM API Server are already authenticated against the Authentication Provider.
-
 > [!WARNING]
 >
 > Some user account changes, such as email address updates, will require more interaction with the user and the IAM System, as email validation and further actions might be needed to complete the process.
@@ -561,7 +566,6 @@ Diagram explanation:
 - The IAM System receives the request and makes the changes to the authentication provider through the IAM API Server.
 
 - The IAM System returns the response to the client.
-
 
 ### Service Authentication
 
