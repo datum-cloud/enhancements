@@ -34,7 +34,7 @@ latest-milestone: "v0.1"
       - [Risk: The potential for actual resource usage being out-of-sync ](#risk-the-potential-for-actual-resource-usage-being-out-of-sync)
         - [Mitigations (High-Level):](#mitigations-high-level-1)
           - [Authoritative Usage Source:](#authoritative-usage-source)
-          - [Webhook `failurePolicy: Ignore`
+          - [Webhook `failurePolicy: Fail`
             Trade-off:](#webhook-failurepolicy-ignore-trade-off)
           - [Post-Outage Reconciliation:](#post-outage-reconciliation)
           - [Robust Telemetry Pipeline:](#robust-telemetry-pipeline)
@@ -160,14 +160,18 @@ latest-milestone: "v0.1"
 *   **[Organization Administrator](#key-components-and-capabilities)**: A customer administrator who manages organization-level settings and quotas (e.g., max projects, total collaborators) within their own Datum Cloud organization.
 *   **[Project Administrator](#key-components-and-capabilities)**: A customer administrator who manages project-level settings and resource consumption quotas (e.g., CPU, memory for a specific project) within their own Datum Cloud project.
 *   **[Owning Service](#sequence-diagram-step-breakdown)**: A Datum Cloud service (e.g., `compute.datumapis.com`) that manages a specific type of resource (e.g., `Instance`) and is responsible for its lifecycle, including integrating with the quota system.
-*   **[`ServiceQuotaRegistration`](#servicequotaregistration)**: A Custom Resource Definition (CRD) in the `Core Milo APIServer` used by a Service Owner/Admin to register a specific resource type as manageable by the quota system, defining its name, unit, and allowed dimensions.
+*   **[`ServiceQuotaRegistration`](#servicequotaregistration)**: A Custom
+    Resource Definition (CRD) in the `Core Milo APIServer` used by Datum
+    employees to
+    register a specific resource type as manageable by the quota system,
+    defining its name, unit, and allowed dimensions.
 *   **[`ResourceQuotaGrant`](#resourcequotagrant)**: A Custom Resource Definition (CRD) in the `Core Milo APIServer`, namespaced to a project or organization, that declares the actual quota limits for a registered resource, often with dimensional bucketing.
 *   **[`ResourceQuotaClaim`](#resourcequotaclaim)**: A Custom Resource
     Definition (CRD) in the `Core Milo APIServer`, namespaced to a project or organization,
     representing an Owning Service's intent to consume a specific quantity of a
     registered resource against a defined quota.
 *   **[`quota-operator`](#quota-operator-controller)**: A controller that reconciles `ResourceQuotaClaim`s by validating them, checking against `ResourceQuotaGrant`s, querying real-time usage from the metering system, and updating claim statuses.
-*   **[Admission Webhooks](#admission-webhooks)**: Webhooks (mutating and _optionally_ validating) registered with `Project APIServers` instances to intercept resource requests, potentially adding finalizers or performing fast-fail quota checks.
+*   **[Admission Webhooks](#admission-webhooks)**: Webhooks (mutating and _optionally_ validating) registered with `Project APIServers` instances to intercept resource requests, potentially adding finalizers and performing fast-fail quota checks.
 *   **[Metering System](#key-components-and-capabilities)**: An external system
     (e.g., amberflo) the `quota-operator` queries to determine the current resource
     usage.
@@ -176,19 +180,15 @@ latest-milestone: "v0.1"
 
 This enhancement proposes the architecture and implementation of a comprehensive
 and centralized quota management system within the Milo platform. This system will
-empower Datum Employees and Datum Cloud administrators to define, manage, and
-enforce resource consumption limits at both the organizational and project
-level.
-
-Datum employees will have the ability to view and modify these quota levels at a
-global level across all organizations and projects, while Datum Cloud
-administrators will be able to view and manage their allocated quotas and
-current resource usage within the Datum Cloud Portal. 
+allow internal administrators the ability to register services and the resources
+that are subject to quota limits, as well as manage those limits. External
+administrators will be able to view their quota limits as well as request
+changes to them, which will be processed by internal administrators.
 
 The system aims to provide predictable capacity management, enable customer tier
 enforcement, offer transparency to customers regarding their resource limits,
 and include enforcement mechanisms to reject claim requests that would exceed
-these limits without blocking resource creation.
+these limits _without blocking resource creation_.
 
 ## Motivation
 
@@ -205,35 +205,30 @@ also ensures:
    regulatory policies.
 
 The safeguards put in place through quota management will enable users to fully
-explore the Datum Cloud and Milo ecosystems and the variety of functionality
-they provide, without the risk of exceeding the thresholds that have been set
-within their organization and projects; leading to unexpected costs incurred by
-the organization.
+explore the Datum Cloud and Milo ecosystems and the variety of valuable functionality
+they provide, without the risk of exceeding the limits that have been set
+within their organization and projects; leading to unexpected costs.
 
 ### Goals
 
 - Provide clear system context and architectural approach to the creation of a
   quota management system within Milo that integrates with Datum Cloud services,
-- Define the APIs that **Datum Cloud services** will use to:
-  - Register quotas for specific services and their resources with optional
-    default limits.
-  - Create and manage quota limits on the resources via dimensions and labels
-    with the ability to override the default limits and less specific limits set
-    as fallbacks.
-  - Create claims that request additional resources, allocations, or
-    deprovisioning.
-- Define the API for **Datum Cloud Organizations** to view and manage their
-  quota limits and the live data showing the current resources consumed against
-  each quota.
-- Define the API for **Datum Employees** to create and manage global quota
-  limits applied to all organizations and projects across the platform.
-- Enable full visibility into the consumption metrics of provisioned workloads
-  running in Datum Cloud in relation to set quota limits.
-- Ensure the system can enforce defined quota limits, for example, by rejecting
-  API requests that would exceed these limits.
+- Define the APIs that internal administrators will use to:
+  - Register quotas for specific services and their resources that external
+    administrators can then use as part of their own quota limits.
+  - Create and manage the actual quota limits on the resources via dimensions and labels
+    with the ability to grant additional quotas to specific projects or
+    organizations.
+  - Automatically generate quota grants for new projects and organizations when
+    they are initialized.
+- Define the API for external administrators to view their quota limits and
+  request changes to them through internal administrators.
+- Ensure the system can enforce defined quota limits without blocking resource
+  creation. For example, by allowing the requested resource to be created in the
+  system (such as an `Instance`), but preventing the actual allocation of
+  resources and usage of the `Instance`until the quota limit is increased via
+  internal administrators.
 - Facilitate predictable capacity management for the platform.
-- Enable enhancement document handoff for implementation of the quota management
-  enhancement within Datum Cloud.
 - Remain service agnostic to not avoid tightly coupling the architecture to a
   specific SaaS vendor (amberflo, OpenMeter, etc)
 
@@ -267,7 +262,7 @@ This enhancement proposes the design, architecture, and implementation of a
 quota management system in Milo. This system will be centralized and designed
 for integration by other Datum Cloud services. It will allow for the management
 of resource quota limits at both organizational and project levels by respective
-administrators and Datum Employees.
+internal and external administrators.
 
 ### Desired Outcome and Definition of Success
 
@@ -285,12 +280,11 @@ There are several key components that will comprise the architecture and
 implementation of the quota management system.
 
 1.  **`ResourceQuotaClaim` Definition:**
-    - **Datum Cloud Services** are the primary actors that create and manage
-      `ResourceQuotaClaim` objects in the `Core Milo APIServer`. When a user
-      action (e.g., creating an `Instance` via the Cloud Portal or API) or an
-      automated process requires resource allocation that is subject to quota,
-      the responsible Datum Cloud Service (Owning Service) will generate a
-      `ResourceQuotaClaim`.
+    - **Datum Cloud Services** are the primary actors that request and manage
+      the lifecycle of `ResourceQuotaClaim` objects storedin the `Core Milo APIServer`.
+      When a user action occurs (e.g., creating an `Instance` via the Cloud
+      Portal or CLI), the responsible Datum Cloud Service will
+      generate a `ResourceQuotaClaim` to request the resource.
     - This claim represents the service's intent to consume a specific quantity
       of a registered resource (e.g., CPU cores, memory) for a particular
       project or organization.
@@ -311,25 +305,26 @@ implementation of the quota management system.
       quotas like CPU, memory, instance count, etc.) on initialization. These
       ensure that safeguards are in place that prevent attempts to claim/create
       resources that exceed the limits set for the organization and project
-      before specific grants are further configured.
-    - **Platform Administrators (Datum Employees)** can define and override
-      default `ResourceQuotaGrant`s for both organization-level quotas (e.g.,
-      max projects per org) and project-level resource consumption quotas (e.g.,
-      CPU limits per project). While the system may automatically configure many
-      default thresholds, Platform Administrators have the flexibility to make
-      adjustments as needed across the platform.
-    - **Organizational Administrators** can view and manage `ResourceQuotaGrant`
+      before specific grants are further added.
+    - **Internal Administrators** can additionally grant additional quotas, that
+      are additive to the existing `ResourceQuotaGrant`s for both
+      organization-level quotas (e.g., max projects per org) and project-level
+      resource consumption quotas (e.g., CPU limits per project). While the
+      system will automatically create initial grants, the internal
+      administrators the the flexibility to make adjustments as needed across
+      the platform.
+    - **Organizational Administrators** can view and indirectly manage `ResourceQuotaGrant`
       objects that pertain to their organization-specific limits, such as the
       maximum number of projects allowed within their organization or the total
       number of collaborators. They do not directly manage grants for
-      project-level resource consumption (e.g., CPU, memory for a specific
-      project).
+      resources (e.g., additional CPU or memory), but instead request additional
+      grants to be added to their existing grants from internal administrators.
     - **Project Administrators** can define and manage `ResourceQuotaGrant`
       objects for their specific projects. These grants control project-level
       resource consumption quotas like CPU, memory, instance counts, gateway
-      counts, etc., and can override any platform-defined default grants for
-      those resources within their project, provided they align with broader
-      platform policies if applicable.
+      counts, etc. Like organizational administrators, they do not directly
+      manage grants for resources, but instead request additional grants to be
+      added to their existing grants from internal administrators.
     - In a future enhancement, the system will be able to support different
       customer tiers and plans that are tied to specific grants, allowing for
       varied limits based on subscription levels (e.g., "Free Tier gets 1
@@ -339,9 +334,9 @@ implementation of the quota management system.
       a given project or organization (e.g., a default grant for CPU and an
       additional grant from a Datum Employee to increase CPU), the
       `quota-operator` must have a defined strategy for aggregating these limits
-      to determine the effective total quota. This typically means summing the
-      limits from all applicable grants. The system should provide clarity on
-      the effective total limit to users and administrators.
+      to determine the effective total quota. This means summing the limits from
+      all applicable grants for the defined resources. The system should provide
+      clarity on the effective total limit to users and administrators.
 
 3.  **`ServiceQuotaRegistration` Definition:**
     - **Service Owner/Admin** can register resources that _enable_ them to be
@@ -363,31 +358,31 @@ implementation of the quota management system.
       a downstream metering engine (e.g. amberflo, which is used as an example
       in this enhancement) to determine if the request should be granted or
       denied.
-    - Requests exceeding the defined limits will be rejected with appropriate
-      error messaging.
+    - Requests exceeding the defined limits will still create the resource in
+      the system, as previously described, however it will not be allocated until
+      the quota limit is increased via internal administrators. This will be
+      done via the `quota-operator` and `Core Milo APIServer`.
     - Denied quotas will be appropriately logged and persisted, creating
       additional observability and an audit trail detailing why specific claim
-      requests were denied.
+      requests were denied. This will also be done via the `quota-operator` and
+      `Core Milo APIServer`.
     - The system will be designed to be resilient to failures of the metering
       engine and the `Core Milo APIServer`, ensuring that the system can
       continue to function even if one of these components is unavailable.
 
 5.  **Quota Visibility:**
-    - Datum Cloud users will be able to view their current quota allocations and
-      their consumption of resources against their self managed and global
-      platform quotas via the Datum Cloud Portal.
-    - Datum Employees (internal administrators) will have the ability to view
-      and modify quota levels for all projects and organizations via the Datum
-      Staff Portal.
+    - External users and administrators will be able to view their current quota
+      limits via the Datum Cloud Portal.
+    - Internal administrators will have the ability to view quota limits for all
+      projects and organizations via the Datum Staff Portal.
 
 6.  **Service Integration:**
-    - The services offered will need a mechanism to register the resources they manage (via
-      `ServiceQuotaRegistration` in the `Core Milo APIServer`) that
-      should be subject to quotas.
+    - Datum Cloud services need the ability to interact with the quota management
+      system in order to 
     - A centralized API, hosted by the `Core Milo APIServer`, will be
-      designed for services to register these quotable resources and
-      subsequently manage their quota limits for projects and organizations via
-      a `ResourceQuotaGrant`.
+      designed that enables both registering these quotable resources and
+      subsequently ad their limits for projects and organizations via
+      `ResourceQuotaGrant`s.
     - The integration of the downstream metering engine and billing processor
       platform will remain service-agnostic to ensure flexibility of
       implementation in the future.
@@ -464,7 +459,7 @@ external and internal standards.
 ##### Mitigations (High-Level):
 -   **Webhook Timeouts & Failure Policy:** Configure admission webhooks (Milo
     Mutating & Validating) with aggressive timeouts. Set their `failurePolicy`
-    to `Ignore`. This ensures that if the Quota Management Service is
+    to `Fail`. This ensures that if the Quota Management Service is
     unreachable or times out, resource creation/modification requests to Owning
     Services can still proceed (albeit without immediate quota enforcement).
     This prioritizes platform availability.
@@ -493,11 +488,6 @@ This could lead to the following non-desired behavior:
 ##### Mitigations (High-Level):
 -   **Authoritative Usage Source:** A single authoritative source of truth for
     resource consumption should be used when evaluating `ResourceQuotaClaim`s.
--   **Webhook `failurePolicy: Ignore` Trade-off:** Acknowledging that setting
-    `failurePolicy: Ignore` for webhooks (to maintain platform availability if
-    Milo is down) can lead to temporary periods where new resources are
-    provisioned without an immediate quota check. This could result in temporary
-    over-allocation.
 -   **Post-Outage Reconciliation:** When the Milo Quota Management service
     recovers (or webhooks are re-enabled/fixed), the `quota-operator` will
     reconcile existing claims and usage. New requests for already over-limit
@@ -536,7 +526,7 @@ any organization-scoped resources.
 The system will expose APIs and interact with Datum Cloud service instances
 (e.g., `compute.datumapis.com`, `network.datumapis.com`, etc.), which manage
 their primary resources (`Instance`, `Gateway`, `Subnet`, etc.) in
-_project-scoped instances_ of the Milo APIServer component **(referred to as
+_project-scoped instances_ of the Milo APIServer. **(referred to as
 `Project APIServers`)**. These Project APIServers
 are the primary entrypoints for users and administrators to interact with their
 project-scoped resources. The `Core Milo APIServer` instance will be responsible
@@ -552,8 +542,7 @@ implementation:
 - `ResourceQuotaClaim`
 - `ResourceQuotaGrant`
 
-These CRDs will be defined and served by the **`Core Milo APIServer`**, a
-central component running within The Core Milo APIServer. The API group for these CRDs will
+These CRDs will be defined and served by the **`Core Milo APIServer`**, and the API group for these CRDs will
 be `quota.miloapis.com`, aligning with existing API group standards; while the
 Go type definitions for these CRDs will be located within the [milo GitHub
 repository](https://github.com/datum-cloud/milo).
@@ -576,7 +565,7 @@ resources like `Instance` are created or modified within that project.
 
 #### `ServiceQuotaRegistration`
 
-The `ServiceQuotaRegistration` CRD allows **Service Owners/Admins** (Datum employees) to define and register the specific
+The `ServiceQuotaRegistration` CRD allows internal administrators the ability to define and register the specific
 resource types (e.g., `compute.datumapis.com/instances/cpu`) they offer as
 quotable. This registration makes these resource types available to have quotas
 applied to them across the platform via `ResourceQuotaGrant`s. The Service
@@ -600,6 +589,10 @@ spec:
   # Service which owns the resource being registered.
   serviceRef:
     name: compute.datumapis.com
+  # The type of resource being registered.
+  # Allocation | Feature | (possibly Rate? | Consumption?)
+  type: Allocation
+
   # Fully qualified name of the resource being managed.
   # This should match the 'name' field in `ResourceQuotaClaim.spec.resources`
   # and also in `ResourceQuotaGrant.spec.limits`.
@@ -608,10 +601,6 @@ spec:
   description: "Number of CPU cores allocated to provisioned instances."
   # The unit of measurement for the resource.
   unit: "cores"
-  # Optional default limit for this resource quota, which can be overridden by
-  # ResourceQuotaGrant buckets.
-  defaultLimit:
-    value: "1000"
   # Allowed demensions that can be used in ResourceQuotaGrant selectors.
   # for the service and resources being registered.
   allowedDimensions:
@@ -634,25 +623,14 @@ Status:
       lastTransitionTime: "2023-01-01T12:00:00Z"
       reason: Initializing
       message: "The definition is being initialized."
-    # Indicates if the structure of the ServiceQuotaRegistration itself is correct.
-    # - Type: DefinitionValid
-    # - Status: "True" | "False" | "Unknown"
-    # - Reason: (e.g., "PendingValidation" | "ValidationSuccessful" | 
-    #   "MissingRequiredField" | "InvalidFormat")
-    # - Message: Human-readable message detailing any validation issues.
-    - type: DefinitionValid
-      status: Unknown
-      lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: PendingValidation
-      message: "Validation of the definition structure is pending."
 ```
 
 
 #### `ResourceQuotaGrant`
 
 The `ResourceQuotaGrant` CRD, hosted by the **`Core Milo APIServer`**, declares
-the resource quota limits for a specific scope. It is a **Namespaced** resource
-within the `Core Milo APIServer`, meaning each grant will reside within a
+the resource quota limits for a specific scope. It is a **Namespaced** resource,
+ meaning each grant will reside within a
 namespace that corresponds to the specific project or organization it governs.
 
 ```yaml
@@ -671,7 +649,8 @@ spec:
     kind: Project
     # Name of the Project/Organization custom resource
     name: proj-abc
-  limits:
+  # The specific resource types that are being managed by the grant.
+  resources:
   # 1. CPU cores allocated per project / location / instance type
   - name: compute.datumapis.com/instances/cpu
     # Defines how this resource's quota can be dimensionalized
@@ -681,23 +660,10 @@ spec:
       - networking.datumapis.com/location
       - compute.datumapis.com/instanceType
     buckets:
-    # Default limit for all locations and instance types across the project,
-    # which overrides the default limit set in the ServiceQuotaRegistration.
-    # This is a global limit, and will apply to all locations, since the
-    # Dimension label is not specified within the bucket selector.
-    - value: "1000"
-      selector: {}
-    # Override for multi-location projects.
-    - value: "300"
-      selector:
-        matchExpressions:
-        - key: networking.datumapis.com/location
-          operator: In
-          values: ["dfw", "lhr", "dls"]
 
-    # Single location and instance type override,
-    # more specific than the global limit and multi-location override.
+    # Single location and instance type
     - value: "40"
+    
       selector:
         matchLabels:
           networking.datumapis.com/location: dfw
@@ -802,10 +768,10 @@ triggers an Owning Service to create a resource (e.g., an `Instance` in a
 specific `Project Milo APIServer`), that Owning Service's controller will then
 create a `ResourceQuotaClaim` in the central **`Core Milo APIServer`** storage
 layer. This CRD contains a reference to the Owning Service resource (e.g. an
-`Instance` CR managed by a `Project Milo APIServer`), as well as the specific
+`Instance` CR), as well as the specific
 resource requests, including name and quantity. It is a **Namespaced** resource
 within the `Core Milo APIServer`, where the namespace corresponds to the
-organization's project.
+organization or project.
 
 ```yaml
 apiGroup: quota.miloapis.com
@@ -836,8 +802,6 @@ spec:
   - name: compute.datumapis.com/instances/count
     quantity: "1"
 Status:
-  # High level summary
-  phase: Pending    
   # List of resources that have been granted for this claim, 
   # using the fully qualified name of the resource.
   grantedResources: []  
@@ -856,17 +820,6 @@ Status:
       lastTransitionTime: "2023-01-01T12:00:00Z"
       reason: Processing
       message: "Claim is currently being processed."
-    # Validated indicates if the claim's spec has passed initial validation.
-    # - Type: Validated
-    # - Status: "True" | "False" | "Unknown"
-    # - Reason: (e.g., "ValidationSuccessful" | "InvalidResourceRef" | "UnknownResourceName")
-    # - Message: Human-readable message detailing the reason for the status.
-    - type: Validated
-      status: Unknown
-      # Indicates time the status last changes e.g. from Unknown to True
-      lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: PendingValidation
-      message: "Claim validation is pending."
     # QuotaChecked indicates if the quota availability has been checked.
     # - Type: QuotaChecked
     # - Status: "True" | "False" | "Unknown"
@@ -894,13 +847,13 @@ Status:
 ### Quota Registration
 
 To enable Datum Cloud services (whose primary resources are managed by
-`Project APIServers` instances) to integrate with the quota management
-system, a dedicated and centralized API, hosted by the **`Core Milo APIServer`**
-in the Management Control Plane, will be provided. This API enables
-service owners/admins to register services and the specific resource types that
-they want to be able to create and manage quotas for. This results in the `Core
-Milo APIServer` being aware of the types of resources that a project or
-organization are allowed to create quotas for via a `ResourceQuotaGrant`.
+`Project APIServer` instances) to integrate with the quota management
+system, the dedicated and centralized **`Core Milo APIServer`**, will be
+leveraged. This API provides the ability for internal administrators to register
+services and the specific resource types that they want to be able to create and
+manage quotas for. This results in the `Core Milo APIServer` being aware of the
+types of resources that a project or organization are allowed to create quotas
+for via a `ResourceQuotaGrant` .
 
 This is achieved through the proposed [`ServiceQuotaRegistration`
 CRD](#ServiceQuotaRegistration) (in the `Core Milo APIServer`), which acts as a
@@ -909,9 +862,9 @@ be managed by the quota system at the project or organization level. This is
 different than the Service Catalog, which will be proposed in a separate
 enhancement.
 
-**Datum CloudServices (via their Service Owners/Admins)** will create new
-instances of `ServiceQuotaRegistration` in the **`Core Milo APIServer`** to
-declare each type of resource they offer that can use quota limits. The
+**Internal Administrators** will create new
+ `ServiceQuotaRegistration` objects in the **`Core Milo APIServer`** to
+declare each type of resource Datum offers that can use quota limits. The
 `quota-operator` can then use these definitions to understand and validate
 requests for setting the explicit limits for each resource type via a
 `ResourceQuotaGrant` (also in `Core Milo APIServer`).
@@ -927,8 +880,7 @@ main application process (e.g., `milo/cmd/apiserver/app/` which forms part of
 the `Core Milo APIServer` system).
 
 Running within The Core Milo APIServer, its primary interactions regarding quota CRDs
-(`ServiceQuotaRegistration`, `ResourceQuotaGrant`, and `ResourceQuotaClaim`)
-will be with the **`Core Milo APIServer`**. It will:
+(`ServiceQuotaRegistration`, `ResourceQuotaGrant`, and `ResourceQuotaClaim`). It will:
 - Watch `ServiceQuotaRegistration`, `ResourceQuotaGrant`, and
   `ResourceQuotaClaim` objects.
 - Ensure accurate data is kept in sync with the downstream metering system
@@ -938,8 +890,7 @@ will be with the **`Core Milo APIServer`**. It will:
 - Enforce per-project or per-organization resource quota limits that are
   declared in `ResourceQuotaGrant` objects.
 
-The reconciliation loop for this controller will contain the following logic,
-again, primarily interacting with the **`Core Milo APIServer`** for quota CRD
+The reconciliation loop for this controller will contain the following logic:
 operations:
 
 1.  **Validates Registration**:
@@ -951,9 +902,8 @@ operations:
       `"ServiceQuotaRegistration not found"`.
 
 2.  **Watches newly created or updated `ResourceQuotaClaim` objects**. These
-    claims are generated by Owning Service controllers when a new resource
-    (e.g., `Instance`, `Router`) is created, scaled, or deleted in a `Project-Specific
-    Milo APIServer` instance.
+    claims are generated by Datum Cloud services when a new resource
+    (e.g., `Instance`, `Router`) is created, scaled, or deleted in a instance.
 
 3.  **Validates the `ResourceQuotaClaim` structure**:
     - Ensures required fields like `resources`, `resourceRef`, and other
@@ -981,13 +931,9 @@ operations:
       with an appropriate `reason`.
 
 5.  **Queries the external usage source (e.g., amberflo)** via API to get the
-    live usage data for the metric and dimension(s) defined in the claim.
+    live usage data for the metric and dimension(s) being requested by the claim.
     - If the API is unavailable, the operator sets the claim `status.phase =
       Denied` with an appropriate `reason`.
-    - This usage (queried from the metering engine) is treated as the
-      *authoritative source of truth for the data*. The
-      `ResourceQuotaGrant.status.usage` field is *not* the authoritative source
-      of truth, since it is a cache and may be stale or partial.
 
 6.  **Evaluates whether the claim would exceed quota**:
     - All below steps are performed within the context of the `Core Milo
@@ -1002,6 +948,8 @@ operations:
         for the denial.
       - Emits an `Event` (associated with the `ResourceQuotaClaim`) and records
         `status.reason` to the claim.
+      - *Still creates the resource in the system, but does not allocate the
+        resources until the quota limit is increased via internal administrators*
 
 7.  **Handles updates to `ResourceQuotaGrant` limits**:
     - When a `ResourceQuotaGrant` is updated (e.g., an admin raises CPU limits),
@@ -1046,7 +994,7 @@ If the `quota-operator` is down, new `ResourceQuotaClaim`s (in the
 **`Core Milo APIServer`**) will stall; however, workloads managed by
 project-scoped Milo APIServer instances (`Project APIServers`) are not
 directly affected by the quota-operator outage itself, and there is no blocking
-of writes to them if webhook `failurePolicy` is set to `Ignore`. Resource
+of writes to them if webhook `failurePolicy` is set to `Failed`. Resource
 creation might proceed without quota checks until the operator recovers.
 - See the [Risks and Mitigations](#risks-and-mitigations) section for more
   details.
@@ -1209,7 +1157,7 @@ and the desired user experience:
         -   The `failurePolicy` for such webhooks should be carefully
             considered. `Ignore` might lead to quota violations if the webhook
             is down, while `Fail` could block resource creation if the quota
-            system is unavailable.
+            system is unavailable. `Fail` is the recommended policy.
 
 Owning Services should choose the integration pattern that best suits their
 resource lifecycle and user experience requirements. For complex resources, the
@@ -1378,15 +1326,11 @@ quotable by the central Milo Quota Management system.
 
 1.  **Define & Apply `ServiceQuotaRegistration`**: The **Service Owner/Admin** —
     a persona representing the entity responsible for a specific service that
-    integrates with or runs on the Datum Cloud platform. This could be:
+    integrates with or runs on the Datum Cloud platform.
     *   **An internal Datum Employee team** responsible for developing and
         maintaining a core Datum Cloud service (e.g., the
-        `compute.datumapis.com` service team).
-    *   **An administrator from an "Alternative Cloud" customer organization**
-    (who are service providers themselves) for the specialized services *they*
-    build and offer to *their* end-users via the Datum platform. This Service
-    Owner/Admin applies a `ServiceQuotaRegistration` manifest to the **`Core
-    Milo APIServer` (`quota.miloapis.com`) in he Core Milo APIServer**. This
+        `compute.datumapis.com` service team). These internal administrators apply a `ServiceQuotaRegistration` manifest to the **`Core
+    Milo APIServer` (`quota.miloapis.com`) This
     `ServiceQuotaRegistration` declares a resource type (e.g., CPU per instance)
     offered by their service as manageable by the quota system. This is a
     one-time or infrequent setup action per service to make its resources known
@@ -1449,7 +1393,7 @@ define specific quota limits for projects or organizations by creating
     project/organization (which maps to a namespace in `Core Milo APIServer`),
     the `resourceName` (e.g., `compute.datumapis.com/instances/cpu` that was
     registered via a `ServiceQuotaRegistration`), and the `limits` including
-    `buckets` with specific values and selectors (dimensions such as location
+    `buckets` with a specific type and specific values and selectors (dimensions such as location
     and instance type). The admin applies this manifest to the **`Core Milo
     APIServer` (`quota.miloapis.com`)**.
 2.  **Store & Initialize `ResourceQuotaGrant`**: The **`Core Milo APIServer`**
@@ -1583,7 +1527,7 @@ sequenceDiagram
             MiloValidatingWH-->>MiloAPIProjectX: Allow Request (AdmissionReviewResponse {allowed: true})
             MiloAPIProjectX-->>UserCI: Ack (Instance Created/Updated in `Project APIServers`, pending quota from `Core Milo APIServer`)
         end
-    else Validating Webhook Not Configured or Bypassed (if failurePolicy=Ignore and webhook down)
+    else Validating Webhook Not Configured or Bypassed (if failurePolicy=Fail and webhook down)
         MiloAPIProjectX-->>UserCI: Ack (Instance Created/Updated in `Project APIServers`, pending quota from `Core Milo APIServer`)
     end
     
@@ -1862,6 +1806,12 @@ sequenceDiagram
     note right of InstanceCRProjectX: `InstanceCRProjectX` object eventually deleted by garbage collector
 
 ```
+---
+
+## Open Questions
+
+1. ...
+2. ...
 
 ---
 
