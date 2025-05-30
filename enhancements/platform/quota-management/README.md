@@ -281,12 +281,12 @@ internal and external administrators.
 ### Desired Outcome and Definition of Success
 
 Once implemented, Datum Cloud services should be able to seamlessly integrate
-with the Milo Quota Management system. Both
-internal and external platform administrators will be able to use the system to
-easily create and manage quotas through highly scalable architecture and
-implementation. The system should properly allocate and and deallocate resources
-when claims are granted, deny claims that exceed set limits wand stay in sync
-with the Internal Milo Metering Service.
+with the Milo Quota Management system. Both internal and external platform
+administrators will be able to use the system to easily create and manage quotas
+through highly scalable architecture and implementation. The system should
+properly allocate and and deallocate resources when claims are granted, deny
+claims that exceed set limits and stay in sync with the Internal Milo Metering
+Service.
 
 ### Key Components and Capabilities
 
@@ -643,9 +643,11 @@ Status:
 #### `ResourceQuotaGrant`
 
 The `ResourceQuotaGrant` CRD, hosted by the **`Core Milo APIServer`**, declares
-the resource quota limits for a specific scope. It is a **Namespaced** resource,
- meaning each grant will reside within a namespace that corresponds to the
-specific project or organization it governs.
+the actual quota limits for a specific scope (e.g., project or organization). It
+is a **Namespaced** resource, meaning each grant will reside within a namespace
+that corresponds to the specific project or organization it governs. Multiple
+`ResourceQuotaGrant` CRs can exist for the same scope (namespace) and resource
+type; their limits are additive to determine the total effective quota.
 
 ```yaml
 apiGroup: quota.miloapis.com
@@ -663,67 +665,56 @@ spec:
     kind: Project
     # Name of the Project/Organization custom resource
     name: proj-abc
-  # The specific resource types that are being managed by the grant.
+  # The specific resource types and their quota limits being managed by this grant.
   resources:
   # 1. CPU cores allocated per project / location / instance type
   - name: compute.datumapis.com/instances/cpu
-    # Defines how this resource's quota can be dimensionalized
-    # to be used in the `selector` field of the buckets.
-    # For a Project-scoped grant, project is implicit.
-    dimensionLabels:
-      - networking.datumapis.com/location
-      - compute.datumapis.com/instanceType
     buckets:
-
     # Single location and instance type
-    - value: "40"
-    
-      selector:
-        matchLabels:
-          networking.datumapis.com/location: dfw
-          compute.datumapis.com/instanceType: datumcloud/d1-standard-2
+    - type: Limit
+      value: "40"
+      # Explicitly define dimension key-value pairs for this bucket
+      dimensionLabels:
+        networking.datumapis.com/location: dfw
+        compute.datumapis.com/instanceType: datumcloud/d1-standard-2
 
   # 2. Memory (GiB) allocated per project / location / instance type
   - name: compute.datumapis.com/instances/memoryAllocated
-    dimensionLabels:
-      - networking.datumapis.com/location
-      - compute.datumapis.com/instanceType
     buckets:
-    - value: "4096"
-      selector: {}
+    - type: Limit
+      value: "4096"
+      # Empty dimensionLabels means it applies globally for this resource in this grant,
+      # or for resources that do not have these specific dimensions.
+      dimensionLabels: {}
 
-    - value: "1024"
-      selector:
-        matchLabels:
-          networking.datumapis.com/location: dfw
+    - type: Limit
+      value: "1024"
+      dimensionLabels:
+        networking.datumapis.com/location: dfw
 
   # 3. Instance count per project / location / instance type
   - name: compute.datumapis.com/instances/count
-    dimensionLabels:
-      - networking.datumapis.com/location
-      - compute.datumapis.com/instanceType
     buckets:
-    - value: "200"
-      selector: {}
-    - value: "20"
-      selector:
-        matchLabels:
-          instanceType: datumcloud/d1-standard-2
-    - value: "5"
-      selector:
-        matchLabels:
-          networking.datumapis.com/location: dfw
-          compute.datumapis.com/instanceType: datumcloud/d1-standard-2
+    - type: Limit
+      value: "200"
+      dimensionLabels: {}
+    - type: Limit
+      value: "20"
+      dimensionLabels:
+        instanceType: datumcloud/d1-standard-2
+    - type: Limit
+      value: "5"
+      dimensionLabels:
+        networking.datumapis.com/location: dfw
+        compute.datumapis.com/instanceType: datumcloud/d1-standard-2
 
   # 4. Gateway count per project
   - name: network.datumapis.com/gateways
-    # For a project-scoped grant on gateways, if location is not a primary dimension for gateways
-    # then dimensionLabels might be empty or just reflect those applicable from ServiceQuotaRegistration.
-    # Assuming for this example, gateways are not further dimensionalized by location *within this grant*.
-    dimensionLabels: []
     buckets:
-    - value: "15"
-      selector: {}
+    - type: Limit
+      value: "15"
+      # Applies to all gateways for this project in this grant
+      dimensionLabels: {}
 
 # Status reflects the validity and applicability of the defined quotas.
 Status:
@@ -732,37 +723,36 @@ Status:
   usage:
   - name: compute.datumapis.com/instances/cpu
     buckets:
-    # Global usage without any selectors
-    - selector: {}
+    # Global usage without any dimensionLabels
+    - dimensionLabels: {}
       used: "500"
-    # Selector-specific usage
-    - selector:
-        matchLabels:
-          networking.datumapis.com/location: dfw
-          compute.datumapis.com/instanceType: datumcloud/d1-standard-2
+    # Dimension-specific usage
+    - dimensionLabels:
+        networking.datumapis.com/location: dfw
+        compute.datumapis.com/instanceType: datumcloud/d1-standard-2
       used: "10"
   # Standard kubernetes approach to represent the state of a resource.
   conditions:
     # Indicates if the grant is correctly configured and actively being used.
     # - Type: Ready
     # - Status: "True" | "False" | "Unknown"
-    # - Reason: (e.g., "GrantActive" | "InvalidLimitsConfiguration" | "NotEnforced")
+    # - Reason: (e.g., "GrantActive" | "InvalidResourcesConfiguration" | "NotEnforced")
     # - Message: Human-readable message detailing the Reason value.
     - type: Ready
       status: Unknown
       lastTransitionTime: "2023-01-01T12:00:00Z"
       reason: Initializing
       message: "ResourceQuotaGrant is being initialized."
-    # Indicates if the spec.limits are well-formed and logically consistent.
-    # - Type: LimitsValid
+    # Indicates if the spec.resources are well-formed and logically consistent.
+    # - Type: ResourcesValid
     # - Status: "True" | "False" | "Unknown"
     # - Reason: (e.g., "ValidationSuccessful" | "InvalidDimensionSelector" | "ResourceNotDefined")
     # - Message: Human-readable message detailing any issues.
-    - type: LimitsValid
+    - type: ResourcesValid
       status: Unknown
       lastTransitionTime: "2023-01-01T12:00:00Z"
       reason: PendingValidation
-      message: "Validation of limits is pending."
+      message: "Validation of resources is pending."
     # Optionally indicates the freshness of cached usage data, if implemented.
     # - Type: UsageSynchronized
     # - Status: "True" | "False" | "Unknown"
@@ -924,24 +914,28 @@ operations:
     - Verifies that the `resourceRef` (which points to a resource managed by a
       `Project APIServer` instance) is a valid reference.
       - **Note**: *The `quota-operator` might not directly access each `Project
-        APIServer` instance to deeply confirm the existence of the
-        `resourceRef` object in real-time for every claim, unless
-        `multicluster-runtime` provides a cached or aggregated view. Validation
-        might initially rely on the structure, information propagated to the
-        claim, or eventual consistency checks.*
+        APIServer` instance to deeply confirm the existence of the `resourceRef`
+        object in real-time for every claim, unless `multicluster-runtime`
+        provides a cached or aggregated view. Validation might initially rely on
+        the structure, information propagated to the claim, or eventual
+        consistency checks.*
     - If validation fails, the operator sets the claim's `status.phase = Denied`
       with an appropriate `reason`.
 
 4.  **Retrieves the corresponding `ResourceQuotaGrant`**:
     - Looks up the `ResourceQuotaGrant` based on the claim's namespace
       (representing the project/org) and the resource details.
-    - Reads the declared `spec.limits` field, which contains the quota limits
-      and bucket selectors.
-    - Applies label/selector logic to find the correct bucket for the claim's
-      dimensions (e.g., `networking.datumapis.com/location=dfw`,
-      `compute.datumapis.com/instanceType=datumcloud/d1-standard-2`).
-    - If no bucket is found, the operator sets the claim `status.phase = Denied`
-      with an appropriate `reason`.
+    - Reads the declared `spec.resources` field, which contains the quota limits
+      and bucket configurations.
+    - Applies matching logic against `bucket.dimensionLabels` to find the
+      correct bucket for the claim's dimensions (e.g., matching the claim's
+      implied or explicit dimensions like
+      `networking.datumapis.com/location=dfw` and
+      `compute.datumapis.com/instanceType=datumcloud/d1-standard-2` against the
+      `dimensionLabels` in each bucket).
+    - If no bucket is found (or no bucket with matching `dimensionLabels`), the
+      operator sets the claim `status.phase = Denied` with an appropriate
+      `reason`.
 
 5.  **Queries the Internal Milo Metering Service** via API to get the live usage
     data for the metric and dimension(s) being requested by the claim.
@@ -1029,11 +1023,10 @@ The logic for these webhooks will reside in the
 main application that provides the central Quota Management service functions.
 
 When a user attempts to create or modify a resource (e.g., an `Instance`) via a
-**`Project APIServer` instance** (triggering an action in an Owning Service
-like the `compute.datumapis.com` service), that `Project-Specific Milo
-APIServer` instance will send an `AdmissionReview` request to the configured
-Milo webhook service endpoint. This aligns with the standard Kubernetes [Dynamic
-Admission
+**`Project APIServer` instance** (triggering an action in an Owning Service like
+the `compute.datumapis.com` service), that `Project-Specific Milo APIServer`
+instance will send an `AdmissionReview` request to the configured Milo webhook
+service endpoint. This aligns with the standard Kubernetes [Dynamic Admission
 Control](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/).
 
 - The **Milo mutating admission webhook**, when configured for an Owning
@@ -1092,8 +1085,9 @@ and the desired user experience:
             type and registered with the `Project APIServer`) may add a
             finalizer to the `Instance` CR as it's being written to that
             `Project APIServer`.
-        3.  The Owning Service's controller (e.g., `InstanceController`) detects the new/modified `Instance` CR. The initial status of this resource would
-            indicate it's awaiting quota allocation (e.g., `status.phase:
+        3.  The Owning Service's controller (e.g., `InstanceController`) detects
+            the new/modified `Instance` CR. The initial status of this resource
+            would indicate it's awaiting quota allocation (e.g., `status.phase:
             PendingQuota`).
         4.  The Owning Service controller then programmatically creates a
             `ResourceQuotaClaim` in the central `Core Milo APIServer`. This
@@ -1464,8 +1458,7 @@ sequenceDiagram
 Once services are registered (via `ServiceQuotaRegistration` in `Core Milo
 APIServer`) as offering quotable resources, users or CI processes can request
 project-scoped resources (e.g., an `Instance`) from the Owning Service. This
-interaction happens with the project's specific `Project APIServer`
-instance.
+interaction happens with the project's specific `Project APIServer` instance.
 
 5.  **Request `Instance` Creation**: An `Admin / CI` process submits an
     `Instance` custom resource manifest to the specific **`Project-Specific Milo
@@ -1486,28 +1479,25 @@ instance.
         Service's controller creates the claim later).
     - The webhook service returns an `AdmissionReviewResponse` (indicating
         success and including any mutations) to the **`Project-Specific Milo
-        APIServer`**. The `Project APIServer` then continues its
-        admission chain.
+        APIServer`**. The `Project APIServer` then continues its admission
+        chain.
 7.  **Validating Admission Webhook (Optional)**: Following the mutating webhook
-    phase, the **`Project APIServer`** sends another `AdmissionReview`
-    request to the **Milo Validating Webhook service** (if registered and
-    configured for this resource type).
-    - This webhook performs a "fast-fail" check,
-        potentially using cached data from `ResourceQuotaGrant`s in the **`Core
-        Milo APIServer`**.
+    phase, the **`Project APIServer`** sends another `AdmissionReview` request
+    to the **Milo Validating Webhook service** (if registered and configured for
+    this resource type).
+    - This webhook performs a "fast-fail" check, potentially using cached data
+        from `ResourceQuotaGrant`s in the **`Core Milo APIServer`**.
     - **If Denied by Validating Webhook**: The webhook service rejects the
-        request. The **`Project APIServer`** does not persist the
-        `Instance` object. A `ResourceQuotaClaim` (if one was prematurely
-        created by a webhook) would eventually be reconciled by the
-        `quota-operator` (likely to `Denied` or cleaned up if the `Instance`
-        doesn't exist).
+        request. The **`Project APIServer`** does not persist the `Instance`
+        object. A `ResourceQuotaClaim` (if one was prematurely created by a
+        webhook) would eventually be reconciled by the `quota-operator` (likely
+        to `Denied` or cleaned up if the `Instance` doesn't exist).
     - **If Allowed by Validating Webhook**: The webhook service allows the
-        request. If all other admission controllers in the `Project-Specific Milo
-        APIServer` also allow it, the `Instance` is persisted by the
-        **`Project APIServer`**. Actual provisioning is typically handled
-        later by the Owning Service's controller
-        after explicit quota approval from the `Core Milo APIServer` (via a
-        `ResourceQuotaClaim`).
+        request. If all other admission controllers in the `Project-Specific
+        Milo APIServer` also allow it, the `Instance` is persisted by the
+        **`Project APIServer`**. Actual provisioning is typically handled later
+        by the Owning Service's controller after explicit quota approval from
+        the `Core Milo APIServer` (via a `ResourceQuotaClaim`).
 
 ```mermaid
 %% Sequence Diagram - Instance Provisioning & Admission Control
@@ -1642,15 +1632,14 @@ sequenceDiagram
 
 #### Owning Service Reacts to `ResourceQuotaClaim` Status
 
-The Owning Service controller acts based on the `ResourceQuotaClaim`'s final status, read from
-the central **`Core Milo APIServer`**.
+The Owning Service controller acts based on the `ResourceQuotaClaim`'s final
+status, read from the central **`Core Milo APIServer`**.
 
 15. **The Owning Service's `Instance` Controller Watches
     `ResourceQuotaClaim`s**: The **Owning Service's `Instance` Controller**
-     watches the `status` of the
-    `ResourceQuotaClaim` (which is associated with the `Instance` it manages.)
-    on the **`Core Milo APIServer`** via an HTTP `GET`/`WATCH` request from the
-    controller to the `Core Milo APIServer`.
+     watches the `status` of the `ResourceQuotaClaim` (which is associated with
+    the `Instance` it manages.) on the **`Core Milo APIServer`** via an HTTP
+    `GET`/`WATCH` request from the controller to the `Core Milo APIServer`.
 16. **Provision or Fail `Instance`**: Based on the `ResourceQuotaClaim` status
     from `Core Milo APIServer`:
     - **If `ResourceQuotaClaim.status.phase == Granted`**:
@@ -1659,11 +1648,11 @@ the central **`Core Milo APIServer`**.
             Milo APIServer`**).
         - It then proceeds to provision the actual infrastructure for the
             `Instance` within the scope of its `Project APIServer` instance.
-        - The `Instance.status` is updated by
-          the controller.
+        - The `Instance.status` is updated by the controller.
     - **If `ResourceQuotaClaim.status.phase == Denied`**:
-        - The **`Instance` Controller** updates the `Instance.status` to reflect the failure (e.g.,
-            `status.phase: Failed`, `status.reason: QuotaExceeded`).
+        - The **`Instance` Controller** updates the `Instance.status` to reflect
+            the failure (e.g., `status.phase: Failed`, `status.reason:
+            QuotaExceeded`).
         - The `Instance` is not provisioned.
 
 ```mermaid
