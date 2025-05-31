@@ -10,6 +10,7 @@ latest-milestone: "v0.1"
 ## Table of Contents
 
 - [Quota Management](#quota-management)
+  - [Glossary of Terminology](#glossary-of-terminology)
   - [Summary](#summary)
   - [Motivation](#motivation)
     - [Goals](#goals)
@@ -27,64 +28,52 @@ latest-milestone: "v0.1"
         administration of resources due to network failure or
         timeouts.](#risk-the-potential-to-block-all-resource-creation-preventing-administration-of-resources-due-to-network-failure-or-timeouts)
         - [Mitigations (High-Level):](#mitigations-high-level)
-          - [Webhook Timeouts & Failure
-            Policy:](#webhook-timeouts--failure-policy)
-          - [`quota-operator` Resilience:](#quota-operator-resilience)
-          - [Monitoring & Alerting:](#monitoring--alerting)
-          - [Emergency Bypass (Break-Glass
-            Procedure):](#emergency-bypass-break-glass-procedure)
-      - [Risk: The potential for actual resource usage being out-of-sync
-        ](#risk-the-potential-for-actual-resource-usage-being-out-of-sync)
+      - [Risk: The potential to use non-live data when evaluating
+        `ResourceQuotaClaim`s](#risk-the-potential-to-use-non-live-data-when-evaluating-resourcequotaclaims)
         - [Mitigations (High-Level):](#mitigations-high-level-1)
-          - [Authoritative Usage Source:](#authoritative-usage-source)
-          - [Webhook `failurePolicy: Fail`
-            Trade-off:](#webhook-failurepolicy-ignore-trade-off)
-          - [Post-Outage Reconciliation:](#post-outage-reconciliation)
-          - [Robust Telemetry Pipeline:](#robust-telemetry-pipeline)
-      - [Risk: Denying resource allocation when there are enough free resources
-        to allow the request the ability to
-        proceed.](#risk-denying-resource-allocation-when-there-are-enough-free-resources-to-allow-the-request-the-ability-to-proceed)
-        - [Mitigations (High-Level):](#mitigations-high-level-2)
-          - [Real-time Usage Queries:](#real-time-usage-queries)
-          - [Cautious Use of Cached Data:](#cautious-use-of-cached-data)
-          - [Metering System Reliability:](#metering-system-reliability)
-          - [Clear Status Reporting:](#clear-status-reporting)
   - [Design Details](#design-details)
     - [Custom Resource Definitions](#custom-resource-definitions)
       - [`ServiceQuotaRegistration`](#servicequotaregistration)
       - [`ResourceQuotaGrant`](#resourcequotagrant)
       - [`ResourceQuotaClaim`](#resourcequotaclaim)
     - [Quota Registration](#quota-registration)
-    - [Quota Operator Controller](#quota-operator-controller)
-    - [Admission Webhooks](#admission-webhooks)
-    - [Architecture Diagrams](#architecture-diagrams)
-      - [C1 Diagram - System Context](#c1-diagram---system-context)
-      - [C2 Diagram - Containers/Components](#c2-diagram---containerscomponents)
-    - [Sequence Diagrams](#sequence-diagrams)
-      - [Sequence Diagram Step Breakdown](#sequence-diagram-step-breakdown)
-        - [Service Quota Definition
-          RegistrationPrerequisite](#service-quota-definition-registration-prerequisite)
-        - [Defining Resource Quota Limits (`ResourceQuotaGrant`
-          Creation)](#defining-resource-quota-limits-resourcequotagrant-creation)
-        - [Instance Provisioning &
-          AdmissionControl](#instance-provisioning--admission-control)
-        - [Quota Reconciliation by
-          `quota-operator`](#quota-reconciliation-by-quota-operator)
-        - [Owning Service Reacts to `ResourceQuotaClaim`
-          `Status`](#owning-service-reacts-to-resourcequotaclaim-status)
-        - [Telemetry & Metering
-          FlowPost-Provisioning](#telemetry--metering-flow-post-provisioning)
-        - [Tear-down & Quota Release](#tear-down--quota-release)
-  - [Production Readiness
-    ReviewQuestionnaire](#production-readiness-review-questionnaire)
+      - [Quota Operator Controller](#quota-operator-controller)
+      - [Admission Webhooks](#admission-webhooks)
+    - [Service Integration Patterns for Quota
+      Management](#service-integration-patterns-for-quota-management)
+    - [System Architecture Diagrams](#system-architecture-diagrams)
+      - [Static Structure: System Context and
+        Components](#static-structure-system-context-and-components)
+        - [C1 Diagram - System Context](#c1-diagram---system-context)
+        - [C2 Diagram -
+          Containers/Components](#c2-diagram---containerscomponents)
+      - [Dynamic Flows: Sequence Diagrams](#dynamic-flows-sequence-diagrams)
+        - [Sequence Diagram Step
+          Breakdown](#sequence-diagram-step-breakdown)
+          - [Service Quota Definition Registration
+            (Prerequisite)](#service-quota-definition-registration-prerequisite)
+          - [Defining Resource Quota Limits (`ResourceQuotaGrant`
+            Creation)](#defining-resource-quota-limits-resourcequotagrant-creation)
+          - [Instance Provisioning & Admission
+            Control](#instance-provisioning--admission-control)
+          - [Quota Reconciliation by
+            `quota-operator`](#quota-reconciliation-by-quota-operator)
+          - [Owning Service Reacts to `ResourceQuotaClaim`
+            Status](#owning-service-reacts-to-resourcequotaclaim-status)
+          - [Telemetry & Metering Flow (Post-Provisioning if
+            Granted)](#telemetry--metering-flow-post-provisioning-if-granted)
+          - [Tear-down & Quota Release](#tear-down--quota-release)
+  - [Open Questions](#open-questions)
+  - [Production Readiness Review
+    Questionnaire](#production-readiness-review-questionnaire)
     - [Feature Enablement and Rollback](#feature-enablement-and-rollback)
       - [How can this feature be enabled / disabled in a live
         cluster?](#how-can-this-feature-be-enabled--disabled-in-a-live-cluster)
       - [Does enabling the feature change any default
         behavior?](#does-enabling-the-feature-change-any-default-behavior)
       - [Can the feature be disabled once it has been enabled (i.e. can we roll
-        back
-        theenablement)?](#can-the-feature-be-disabled-once-it-has-been-enabled-ie-can-we-roll-back-the-enablement)
+        back the
+        enablement)?](#can-the-feature-be-disabled-once-it-has-been-enabled-ie-can-we-roll-back-the-enablement)
       - [What happens if we reenable the feature if it was previously rolled
         back?](#what-happens-if-we-reenable-the-feature-if-it-was-previously-rolled-back)
       - [Are there any tests for feature
@@ -154,9 +143,10 @@ latest-milestone: "v0.1"
     APIServer instance responsible for hosting quota-related CRDs
     (`ServiceQuotaRegistration`, `ResourceQuotaGrant`, `ResourceQuotaClaim`) and
     organization-scoped resources.
-*   **[Project APIServers](#custom-resource-definitions)**: A project-scoped
-    Milo APIServer instance that manages primary resources (e.g., `Instance`,
-    `Subnet`, etc). **[Service
+*   **[Project APIServer](#custom-resource-definitions)**: A project-scoped Milo
+    APIServer instance that manages primary resources (e.g., `Instance`,
+    `Subnet`, etc.). The plural **`Project APIServers`** refers to multiple such
+    instances. **[Service
     Owner/Admin](#service-quota-definition-registrationprerequisite)**: The
     entity responsible for a service that integrates with Datum Cloud. For core
     Datum services, this is an internal Datum Employee or team.
@@ -368,8 +358,8 @@ implementation of the quota management system.
       reconciler. The webhook will be configured on `Project APIServer`
       instances to intercept resource requests originating there. The operator
       will then check these requests against defined quotas.
-    - The system will determine near real-time metric usage via integration with
-      the **Internal Milo Metering Service** to determine if the request should
+    - The system will determine near real-time metric usage by querying raw usage values (e.g., bytes, millicores)
+      via integration with the **Internal Milo Metering Service** to determine if the request should
       be granted or denied.
     - Requests exceeding the defined limits will still create the resource in
       the system, as previously described, however it will not be allocated
@@ -613,8 +603,12 @@ spec:
   resourceName: compute.datumapis.com/instances/cpu
   # Description of the resource.
   description: "Number of CPU cores allocated to provisioned instances."
-  # The unit of measurement for the resource.
-  unit: "cores"
+  # The unit of measurement for the resource (raw unit for accounting).
+  # Examples: "millicores", "bytes", "count"
+  unit: "millicores"
+  # Optional: Hint for UIs on how to display the raw unit.
+  # Examples: "cores" (from millicores), "GiB" (from bytes), "Instances" (from count)
+  displayUnits: "cores"
   # Allowed demensions that can be used in ResourceQuotaGrant selectors.
   # for the service and resources being registered.
   allowedDimensions:
@@ -672,7 +666,8 @@ spec:
     buckets:
     # Single location and instance type
     - type: Limit
-      value: "40"
+      # in milli-cores (40 cores)
+      value: 40000
       # Explicitly define dimension key-value pairs for this bucket
       dimensionLabels:
         networking.datumapis.com/location: dfw
@@ -682,13 +677,15 @@ spec:
   - name: compute.datumapis.com/instances/memoryAllocated
     buckets:
     - type: Limit
-      value: "4096"
+      # In bytes (4096 GiB)
+      value: 4398046511104 
       # Empty dimensionLabels means it applies globally for this resource in this grant,
       # or for resources that do not have these specific dimensions.
       dimensionLabels: {}
 
     - type: Limit
-      value: "1024"
+      # in bytes (1024 GiB)
+      value: 1099511627776
       dimensionLabels:
         networking.datumapis.com/location: dfw
 
@@ -696,14 +693,17 @@ spec:
   - name: compute.datumapis.com/instances/count
     buckets:
     - type: Limit
-      value: "200"
+      # Raw count
+      value: 200 
       dimensionLabels: {}
     - type: Limit
-      value: "20"
+      # Raw count
+      value: 20
       dimensionLabels:
         instanceType: datumcloud/d1-standard-2
     - type: Limit
-      value: "5"
+      # Raw count
+      value: 5 
       dimensionLabels:
         networking.datumapis.com/location: dfw
         compute.datumapis.com/instanceType: datumcloud/d1-standard-2
@@ -712,7 +712,8 @@ spec:
   - name: network.datumapis.com/gateways
     buckets:
     - type: Limit
-      value: "15"
+      # Raw count
+      value: 15 
       # Applies to all gateways for this project in this grant
       dimensionLabels: {}
 
@@ -723,14 +724,12 @@ Status:
   usage:
   - name: compute.datumapis.com/instances/cpu
     buckets:
-    # Global usage without any dimensionLabels
-    - dimensionLabels: {}
-      used: "500"
     # Dimension-specific usage
     - dimensionLabels:
         networking.datumapis.com/location: dfw
         compute.datumapis.com/instanceType: datumcloud/d1-standard-2
-      used: "10"
+      # in milli-cores (10 cores)
+      used: 10000 
   # Standard kubernetes approach to represent the state of a resource.
   conditions:
     # Indicates if the grant is correctly configured and actively being used.
@@ -799,23 +798,27 @@ spec:
   # Resources being requested
   resources:
   - name: compute.datumapis.com/instances/cpu
-    quantity: "8"
+    # in milli-cores
+    quantity: 8000 
   - name: compute.datumapis.com/instances/memoryAllocated
-    quantity: "32"
+    # in bytes (32 * 1024 * 1024 * 1024)
+    quantity: 34359738368 
   - name: compute.datumapis.com/instances/count
-    quantity: "1"
+    # Raw count
+    quantity: 1 
 Status:
-  # List of resources that have been granted for this claim, 
+  # List of resources that have been granted for this claim,
   # using the fully qualified name of the resource.
-  grantedResources: []  
+  grantedResources: []
   observedGeneration: 1
   # Standard kubernetes approach to represent the state of a resource.
   # https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
   conditions:
-    # Ready indicates if the claim has been processed and is in a terminal state.
+    # Ready indicates if the claim has been processed and is in a terminal state
+    # (i.e., Granted condition is True or False).
     # - Type: Ready
-    # - Status: "True" (Granted/Denied) | "False" (Pending) | "Unknown"
-    # - Reason: (e.g., "ClaimGranted" | "ClaimDenied" | "Processing")
+    # - Status: "True" (Claim is resolved: Granted or Denied) | "False" (Pending Processing) | "Unknown"
+    # - Reason: (e.g., "ClaimResolved" | "Processing")
     # - Message: Human-readable message detailing the reason for the status.
     - type: Ready
       status: "False"
@@ -823,10 +826,20 @@ Status:
       lastTransitionTime: "2023-01-01T12:00:00Z"
       reason: Processing
       message: "Claim is currently being processed."
-    # QuotaChecked indicates if the quota availability has been checked.
+    # Validated indicates if the claim's specification has been validated against its ServiceQuotaRegistration.
+    # - Type: Validated
+    # - Status: "True" | "False" | "Unknown"
+    # - Reason: (e.g., "ValidationSuccessful" | "ValidationFailed" | "PendingValidation")
+    # - Message: Human-readable message.
+    - type: Validated
+      status: Unknown
+      lastTransitionTime: "2023-01-01T12:00:00Z"
+      reason: PendingValidation
+      message: "Claim validation against ServiceQuotaRegistration is pending."
+    # QuotaChecked indicates if the quota availability has been checked against live usage.
     # - Type: QuotaChecked
     # - Status: "True" | "False" | "Unknown"
-    # - Reason: (e.g., "PendingQuotaCheck" | "CheckSuccessful" | "MeteringServiceUnavailable" )
+    # - Reason: (e.g., "CheckSuccessful" | "MeteringServiceUnavailable" | "PendingQuotaCheck")
     # - Message: Human-readable message detailing the reason for the status.
     - type: QuotaChecked
       status: Unknown
@@ -834,12 +847,14 @@ Status:
       lastTransitionTime: "2023-01-01T12:00:00Z"
       reason: PendingQuotaCheck
       message: "Quota check is pending."
-    # Granted indicates if the claim was approved.
+    # Granted indicates the final outcome of the claim. This is the primary condition
+    # representing whether the claim was approved or denied.
     # - Type: Granted
-    # - Status: "True" if granted, "False" if denied or pending
-    # - Reason: (e.g., "QuotaAvailable", "QuotaExceeded", "AwaitingDecision")
+    # - Status: "True" (Claim Approved) | "False" (Claim Denied) | "Unknown" (Awaiting Decision)
+    # - Reason: (e.g., "QuotaAvailable", "QuotaExceeded", "ServiceQuotaRegistrationNotFound", "ValidationError", "MeteringSystemUnavailable", "AwaitingDecision")
     # - Message: Human-readable message detailing the reason for the status.
     - type: Granted
+      # Default to False until explicitly Granted or an earlier failure
       status: "False"
       # Indicates time the status last changes e.g. from False to True
       lastTransitionTime: "2023-01-01T12:00:00Z"
@@ -900,9 +915,10 @@ operations:
     - Ensures that the specific requested service resource and dimensions from a
       `ResourceQuotaClaim` have already been registered via a
       `ServiceQuotaRegistration`.
-    - If the registration is not found, the operator sets the claim's
-      `status.phase = Denied` and the `status.reason` to
-      `"ServiceQuotaRegistration not found"`.
+    - If the registration is not found, the operator updates the claim's
+      `status.conditions` with `type: Granted, status: False, reason:
+      "ServiceQuotaRegistrationNotFound"` and `type: Ready, status: True,
+      reason: "ClaimResolved"`.
 
 2.  **Watches newly created or updated `ResourceQuotaClaim` objects**. These
     claims are generated by Datum Cloud services when a new resource (e.g.,
@@ -919,14 +935,16 @@ operations:
         provides a cached or aggregated view. Validation might initially rely on
         the structure, information propagated to the claim, or eventual
         consistency checks.*
-    - If validation fails, the operator sets the claim's `status.phase = Denied`
-      with an appropriate `reason`.
+    - If validation fails, the operator updates the claim's `status.conditions`
+      with `type: Validated, status: False, reason: <SpecificValidationError>`,
+      `type: Granted, status: False, reason: "ValidationError"`, and `type:
+      Ready, status: True, reason: "ClaimResolved"`.
 
 4.  **Retrieves the corresponding `ResourceQuotaGrant`**:
     - Looks up the `ResourceQuotaGrant` based on the claim's namespace
       (representing the project/org) and the resource details.
     - Reads the declared `spec.resources` field, which contains the quota limits
-      and bucket configurations.
+      (as raw integer values) and bucket configurations.
     - Applies matching logic against `bucket.dimensionLabels` to find the
       correct bucket for the claim's dimensions (e.g., matching the claim's
       implied or explicit dimensions like
@@ -934,29 +952,40 @@ operations:
       `compute.datumapis.com/instanceType=datumcloud/d1-standard-2` against the
       `dimensionLabels` in each bucket).
     - If no bucket is found (or no bucket with matching `dimensionLabels`), the
-      operator sets the claim `status.phase = Denied` with an appropriate
-      `reason`.
+      operator updates the claim's `status.conditions` with `type: Granted,
+      status: False, reason: "NoMatchingQuotaBucket"`, and `type: Ready, status:
+      True, reason: "ClaimResolved"`.
 
 5.  **Queries the Internal Milo Metering Service** via API to get the live usage
-    data for the metric and dimension(s) being requested by the claim.
-   - If the API is unavailable, the operator sets the claim `status.phase =
-      Denied` with an appropriate `reason`.
+    data (as a raw integer value, e.g., total bytes used) for the metric (defined by `resourceName`)
+    and dimension(s) being requested by the claim. The unit of this raw value
+    is determined by `ServiceQuotaRegistration.spec.unit`.
+   - If the API is unavailable, the operator updates the claim's
+     `status.conditions` with `type: QuotaChecked, status: False, reason:
+     "MeteringServiceUnavailable"`, `type: Granted, status: False, reason:
+     "MeteringSystemUnavailable"`, and `type: Ready, status: True, reason:
+     "ClaimResolved"`.
 
 6.  **Evaluates whether the claim would exceed quota**:
     - All below steps are performed within the context of the `Core Milo
       APIServer` and its data.
-    - Calculates: `actualUsage + requestedAmount > bucketLimit`.
+    - Calculates: `actualUsage (raw value from metering) + requestedAmount (raw value from claim.spec.resources.quantity) > bucketLimit (raw value from grant.spec.resources.buckets.value)`.
     - If the total would stay within the limit:
       - Optionally updates `ResourceQuotaGrant.status.usage` as the local cache
         of the most recently known usage for each quota bucket.
-      - Sets `ResourceQuotaClaim.status.phase = Granted`.
+      - Sets `ResourceQuotaClaim.status.conditions` with `type: Granted, status:
+        True, reason: "QuotaAvailable"`, `type: QuotaChecked, status: True,
+        reason: "CheckSuccessful"`, and `type: Ready, status: True, reason:
+        "ClaimResolved"`.
     - If the request would exceed the quota:
-      - Sets `ResourceQuotaClaim.status.phase = Denied` and provides a reason
-        for the denial.
+      - Sets `ResourceQuotaClaim.status.conditions` with `type: Granted, status:
+        False, reason: "QuotaExceeded"`, `type: QuotaChecked, status: True,
+        reason: "CheckSuccessful"`, and `type: Ready, status: True, reason:
+        "ClaimResolved"`.
       - Emits an `Event` (associated with the `ResourceQuotaClaim`) and records
-        `status.reason` to the claim.
-      - *Still creates the resource in the system, but does not allocate the
-        resources until the quota limit is increased via internal
+        the reason in the `Granted` condition's message.
+      - *Still creates the resource in the system, but does not allow the
+        resource to be used until the quota limit is increased via internal
         administrators*
 
 7.  **Handles updates to `ResourceQuotaGrant` limits**:
@@ -971,21 +1000,21 @@ operations:
       system.
 
 8.  **Emits final status and metrics**:
-    - Updates `ResourceQuotaClaim.status` with the outcome (`Granted` or
-      `Denied`).
+    - Updates `ResourceQuotaClaim.status.conditions` with the outcome reflected
+      in the `Granted` condition (`status: True` or `status: False`).
     - Emits relevant Prometheus metrics (e.g., `quota_claims_granted_total`,
       `quota_claims_denied_total`) for observability and auditability.
 
 **Optional Caching**
 
-Patching the `ResourceQuotaGrant.status.usage` field (in the `Core Milo
-APIServer`) is **optional**, but recommended as it serves as a low-latency cache
+Patching the `ResourceQuotaGrant.status.usage` field (with raw integer values)
+(in the `Core Milo APIServer`) is **optional**, but recommended as it serves as a low-latency cache
 of the most recently known usage for each quota bucket. This could provide
 several benefits to the system:
 
 - *Fast-rejection* for obvious quota breaking claims without needing to query
-  the **Internal Milo Metering Service** (e.g., requesting to claim 1000 GiB of
-  written data while the quota limit is 100 GiB)
+  the **Internal Milo Metering Service** (e.g., requesting to claim 1,000,000,000,000 bytes
+  while the quota limit is 100,000,000,000 bytes)
 - *Auditability, observability, and transparency* by creating a point-in-time
   snapshot of denied claims which provides denial reasoning and other contextual
   information that can be stored for reference.
@@ -1069,8 +1098,7 @@ Datum Cloud Services can integrate with the Milo Quota Management system using
 primarily two patterns, depending on the nature of the resource being managed
 and the desired user experience:
 
-1.  **Service Controller Driven (Recommended for most infrastructure/managed
-    resources):**
+1.  **Service Controller Driven (Primary Recommended Pattern):**
     -   **Use Case:** Ideal for resources where provisioning might take some
         time, and it's acceptable for the resource to appear in a "Pending" or
         "AllocatingQuota" state while the quota check is in progress. This
@@ -1119,12 +1147,13 @@ and the desired user experience:
         asynchronous processing and robust handling of resource lifecycles via
         controllers and finalizers.
 
-2.  **Validating Webhook Driven (For immediate create/deny resources):**
-    -   **Use Case:** Suitable for resources where a pending state is less
-        desirable and immediate feedback on creation is preferred, or where the
-        resource creation is very lightweight (e.g., creating a `User` in an IAM
-        system, adding a collaborator, creating a `Project` where the count is
-        the primary quota).
+2.  **Validating Webhook Driven (Secondary / Future Consideration):**
+    -   **Use Case:** Potentially suitable for resources where a pending state
+        is less desirable and immediate feedback on creation is preferred, or
+        where the resource creation is very lightweight (e.g., creating a `User`
+        in an IAM system, adding a collaborator, creating a `Project` where the
+        count is the primary quota). This pattern would require careful design
+        to ensure performance and reliability.
     -   **Flow:**
         1.  A user requests the creation of a resource (e.g., `Instance`) from
             the Owning Service.
@@ -1196,7 +1225,7 @@ graph TD
     end
 
     subgraph ExternalSystems["External Systems"]
-        MeteringSystem["Metering System <br> (e.g., amberflo)"]
+        MeteringSystem["Internal Milo Metering System"]
     end
 
     %% User/Admin interactions for resource provisioning and quota viewing
@@ -1266,7 +1295,7 @@ flowchart TD
     APIGateway -- "Routes to Quota/Org Resources & Quota CRDs" --> CoreMiloAPIServer
 
 
-    %% Admission Control Flow
+    %% Admission Control Flow (Controller-Driven: Mutating Webhook for Finalizers)
     ProjectAPIServerInstance -- "(1) AdmissionReview (on Resource CRUD)" --> MiloMutatingWebhook
     MiloMutatingWebhook -- "(2) AdmReviewResponse (e.g., add finalizer)" --> ProjectAPIServerInstance
     ProjectAPIServerInstance -. "(3) Opt. AdmissionReview" .-> MiloValidatingWebhook
@@ -1295,7 +1324,7 @@ The below sequence diagram illustrates the end-to-end flow of quota management,
 from service registration to resource provisioning and eventual teardown.
 
 
-### Sequence Diagram Step Breakdown
+#### Sequence Diagram Step Breakdown
 
 The sequence diagram steps are broken down into multiple sections for narrative
 and ease of understanding:
@@ -1326,7 +1355,7 @@ resources provided by an Owning Service) occur with the respective
 `ServiceQuotaRegistration`, `ResourceQuotaClaim`, and `ResourceQuotaGrant` CRDs
 occur with the `Core Milo APIServer`.
 
-#### Service Quota Definition Registration (Prerequisite)
+##### Service Quota Definition Registration (Prerequisite)
 
 Before any resource quotas can be claimed or enforced, the **Service
 Owner/Admin** must define what resource types it offers are enabled to be
@@ -1386,7 +1415,7 @@ sequenceDiagram
     end
 ```
 
-#### Defining Resource Quota Limits (`ResourceQuotaGrant` Creation)
+##### Defining Resource Quota Limits (`ResourceQuotaGrant` Creation)
 
 After a service's resources are registered via `ServiceQuotaRegistration` in
 `Core Milo APIServer`, Organization, Project, or Platform Administrators can
@@ -1453,7 +1482,7 @@ sequenceDiagram
     end
 ```
 
-#### Instance Provisioning & Admission Control
+##### Instance Provisioning & Admission Control
 
 Once services are registered (via `ServiceQuotaRegistration` in `Core Milo
 APIServer`) as offering quotable resources, users or CI processes can request
@@ -1507,9 +1536,6 @@ sequenceDiagram
     participant UserCI as Admin / CI Process
     participant MiloAPIProjectX as Project APIServer <br> (e.g., for compute.datumapis.com)
     participant MiloMutatingWH as Milo Mutating Webhook <br>
-    participant MiloValidatingWH as Milo Validating Webhook <br> (Optional)
-    participant MiloAPICore as Core Milo APIServer <br> (quota.miloapis.com)
-    participant RQC_CRD as ResourceQuotaClaim CRD <br> (in Core Milo APIServer)
     participant InstanceCR as Instance CR <br> (in Project APIServer)
 
     UserCI->>+MiloAPIProjectX: Apply `Instance` manifest
@@ -1518,26 +1544,12 @@ sequenceDiagram
     MiloMutatingWH-->>-MiloAPIProjectX: AdmissionReviewResponse (e.g., Patch `InstanceCR` with finalizer)
     
     MiloAPIProjectX->>InstanceCR: Mutate/Store `InstanceCR` (initial state, with finalizer)
+    MiloAPIProjectX-->>UserCI: Ack (Instance Created/Updated in `Project APIServer`, pending quota from `Core Milo APIServer`)
     
-    alt Optional Validating Webhook is Configured and Called
-        MiloAPIProjectX->>+MiloValidatingWH: AdmissionReview for `InstanceCR`
-        alt MiloValidatingWH Denies (e.g. Fast-Fail)
-            MiloValidatingWH->>MiloAPICore: (Potentially) GET `ResourceQuotaGrant` for fast check
-            MiloAPICore-->>MiloValidatingWH: Return Grant data (if applicable for check)
-            MiloValidatingWH-->>-MiloAPIProjectX: Deny Request (AdmissionReviewResponse {allowed: false})
-            MiloAPIProjectX-->>UserCI: Error (e.g., 403 Forbidden - Quota Check Failed by Webhook) # No deactivation for UserCI's arrow here
-        else MiloValidatingWH Allows
-            MiloValidatingWH-->>MiloAPIProjectX: Allow Request (AdmissionReviewResponse {allowed: true})
-            MiloAPIProjectX-->>UserCI: Ack (Instance Created/Updated in `Project APIServer`, pending quota from `Core Milo APIServer`)
-        end
-    else Validating Webhook Not Configured or Bypassed (if failurePolicy=Fail and webhook down)
-        MiloAPIProjectX-->>UserCI: Ack (Instance Created/Updated in `Project APIServer`, pending quota from `Core Milo APIServer`)
-    end
-    
-    deactivate MiloAPIProjectX # Explicitly deactivate MiloAPIProjectX at the end of its work triggered by UserCI
+    deactivate MiloAPIProjectX
 ```
 
-#### Quota Reconciliation by `quota-operator`
+##### Quota Reconciliation by `quota-operator`
 
 The `quota-operator` (running) processes the `ResourceQuotaClaim`s that are
 stored in the `Core Milo APIServer`. Its primary goal is to decide if the
@@ -1561,19 +1573,20 @@ requested resources can be granted based on defined quotas and actual usage.
     registration, the `quota-operator` retrieves the applicable
     `ResourceQuotaGrant`(s) for the claim's target project/organization from the
     **`Core Milo APIServer`**.
-12. **Query Amberflo for Usage**: The `quota-operator` makes a real-time API
-    call to the **`amberflo Usage API`** to get the current usage for the
-    specific resource (identified by the claim's `resourceRef`) and its
-    applicable dimensions (this usage pertains to resources managed within a
-    specific project, i.e., in a `Project APIServer` scope).
-13. **Amberflo Returns Usage**: `amberflo` responds with the current usage data.
-    The `quota-operator` updates the `ResourceQuotaClaim.status` (e.g.,
-    `conditions.QuotaChecked: True`) in the **`Core Milo APIServer`**.
+12. **Query Internal Milo Metering Service for Usage**: The `quota-operator`
+    makes a real-time API call to the **`Internal Milo Metering API`** to get
+    the current usage for the specific resource (identified by the claim's
+    `resourceRef`) and its applicable dimensions (this usage pertains to
+    resources managed within a specific project, i.e., in a `Project APIServer`
+    scope).
+13. **Metering Service Returns Usage**: The service responds with the current
+    usage data. The `quota-operator` updates the `ResourceQuotaClaim.status`
+    (e.g., `conditions.QuotaChecked: True`) in the **`Core Milo APIServer`**.
 14. **Evaluate Quota & Update `ResourceQuotaClaim` Status**: The
-    `quota-operator` compares the (actual usage from Amberflo + requested amount
-    in claim) against the limit(s) from the relevant `ResourceQuotaGrant`
-    bucket(s) found in step 11. All these CRD interactions occur with the
-    **`Core Milo APIServer`**.
+    `quota-operator` compares the (actual usage from the Metering Service +
+    requested amount in claim) against the limit(s) from the relevant
+    `ResourceQuotaGrant` bucket(s) found in step 11. All these CRD interactions
+    occur with the **`Core Milo APIServer`**.
     - **If Within Limit (Granted)**: The `quota-operator` patches
         `ResourceQuotaClaim.status` to `Granted`. Optionally, it may update the
         `ResourceQuotaGrant.status.usage` cache in the `Core Milo APIServer`.
@@ -1601,8 +1614,8 @@ sequenceDiagram
     MiloQuotaOp->>RQC_CRD: Validate RQC_CRD spec against SQReg_CRD data
     
     alt RQC_CRD spec is valid against SQReg_CRD
-        MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (conditions.Validated: True)
-        note right of RQC_CRD: RQC_CRD Status Updated: <br> conditions.Validated: True
+        MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status.conditions (type: Validated, status: True)
+        note right of RQC_CRD: RQC_CRD Condition Updated: <br> Validated: True (ValidationSuccessful)
         
         MiloQuotaOp->>MiloAPICore: `GET` `ResourceQuotaGrant` (RQGrant_CRD) for RQC_CRD's project/org
         MiloAPICore-->>RQGrant_CRD: Return `ResourceQuotaGrant` data
@@ -1610,49 +1623,51 @@ sequenceDiagram
 
         MiloQuotaOp->>+InternalMeteringAPI: `GET` current usage (for RQC_CRD.spec.resources & dimensions)
         InternalMeteringAPI-->>-MiloQuotaOp: Return usage total (e.g., "500 cores")
-        MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (conditions.QuotaChecked: True)
-        note right of RQC_CRD: RQC_CRD Status Updated: <br> conditions.QuotaChecked: True (CheckSuccessful)
+        MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status.conditions (type: QuotaChecked, status: True, reason: CheckSuccessful)
+        note right of RQC_CRD: RQC_CRD Condition Updated: <br> QuotaChecked: True (CheckSuccessful)
 
         alt (Current Usage from InternalMeteringAPI + RQC_CRD.spec.resources.quantity) <= RQGrant_CRD Limit
-            MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (phase: Granted)
-            note right of RQC_CRD: RQC_CRD Status Updated: <br> - phase: Granted <br> - conditions.Granted: True <br> - conditions.Ready: True
+            MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status.conditions (type: Granted, status: True, reason: QuotaAvailable; type: Ready, status: True)
+            note right of RQC_CRD: RQC_CRD Conditions Updated: <br> - Granted: True (QuotaAvailable) <br> - Ready: True (ClaimResolved)
             opt Update RQGrant_CRD Cache
                  MiloQuotaOp->>MiloAPICore: `PATCH` `ResourceQuotaGrant.status.usage` on RQGrant_CRD
                  note right of RQGrant_CRD: RQGrant_CRD.status.usage updated (cache)
             end
         else Usage would exceed RQGrant_CRD Limit
-            MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (phase: Denied, reason: QuotaExceeded)
-            note right of RQC_CRD: RQC_CRD Status Updated: <br> - phase: Denied <br> - conditions.Granted: False <br> - conditions.Ready: True
+            MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status.conditions (type: Granted, status: False, reason: QuotaExceeded; type: Ready, status: True)
+            note right of RQC_CRD: RQC_CRD Conditions Updated: <br> - Granted: False (QuotaExceeded) <br> - Ready: True (ClaimResolved)
         end
-    else RQC_CRD spec invalid OR SQReg_CRD not found
-        MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status (phase: Denied, reason: ValidationFailed)
-        note right of RQC_CRD: RQC_CRD Status Updated: <br> - phase: Denied <br> - conditions.Validated: False <br> - conditions.Ready: True
+    else RQC_CRD spec invalid OR SQReg_CRD not found (or other preliminary error)
+        MiloQuotaOp->>MiloAPICore: `PATCH` RQC_CRD.status.conditions (type: Granted, status: False, reason: <SpecificError>; type: Validated, status: False/True; type: Ready, status: True)
+        note right of RQC_CRD: RQC_CRD Conditions Updated: <br> - Granted: False (e.g., ServiceQuotaRegistrationNotFound) <br> - Validated: False (if applicable) <br> - Ready: True (ClaimResolved)
     end
 ```
 
-#### Owning Service Reacts to `ResourceQuotaClaim` Status
+##### Owning Service Reacts to `ResourceQuotaClaim` Status
 
 The Owning Service controller acts based on the `ResourceQuotaClaim`'s final
-status, read from the central **`Core Milo APIServer`**.
+status, read from the central **`Core Milo APIServer`**. It specifically checks
+the `Granted` condition.
 
 15. **The Owning Service's `Instance` Controller Watches
     `ResourceQuotaClaim`s**: The **Owning Service's `Instance` Controller**
-     watches the `status` of the `ResourceQuotaClaim` (which is associated with
-    the `Instance` it manages.) on the **`Core Milo APIServer`** via an HTTP
-    `GET`/`WATCH` request from the controller to the `Core Milo APIServer`.
-16. **Provision or Fail `Instance`**: Based on the `ResourceQuotaClaim` status
-    from `Core Milo APIServer`:
-    - **If `ResourceQuotaClaim.status.phase == Granted`**:
+     watches the `status.conditions` of the `ResourceQuotaClaim` (which is
+    associated with the `Instance` it manages.) on the **`Core Milo APIServer`**
+    via an HTTP `GET`/`WATCH` request from the controller to the `Core Milo
+    APIServer`.
+16. **Provision or Fail `Instance`**: Based on the `ResourceQuotaClaim`'s
+    `Granted` condition from `Core Milo APIServer`:
+    - **If `Granted` condition is `status: True`**:
         - The **`Instance` Controller** removes its finalizer from the
             `Instance` resource (by patching it via its own **`Project-Specific
             Milo APIServer`**).
         - It then proceeds to provision the actual infrastructure for the
             `Instance` within the scope of its `Project APIServer` instance.
         - The `Instance.status` is updated by the controller.
-    - **If `ResourceQuotaClaim.status.phase == Denied`**:
+    - **If `Granted` condition is `status: False`**:
         - The **`Instance` Controller** updates the `Instance.status` to reflect
-            the failure (e.g., `status.phase: Failed`, `status.reason:
-            QuotaExceeded`).
+            the failure (e.g., `status: False`, `status.reason: <Reason from
+            Granted condition>`).
         - The `Instance` is not provisioned.
 
 ```mermaid
@@ -1667,10 +1682,10 @@ sequenceDiagram
     participant InstanceCRProjectX as Instance CR <br> (in Project APIServer)
     participant BackendInfraPCP as Backend Infrastructure <br> (e.g., VMs, Pods)
 
-    InstCtrlPCP-->>MiloAPICore: Watch `ResourceQuotaClaim.status` (RQC_CRDCore for its owned Instance)
-    note left of InstCtrlPCP: Continuously monitors RQC_CRDCore from MiloAPICore
+    InstCtrlPCP-->>MiloAPICore: Watch `ResourceQuotaClaim.status.conditions` (RQC_CRDCore for its owned Instance)
+    note left of InstCtrlPCP: Continuously monitors RQC_CRDCore's conditions from MiloAPICore, looking for type: Granted
     
-    alt RQC_CRDCore.status.phase == Granted
+    alt RQC_CRDCore has condition (type: Granted, status: True)
         InstCtrlPCP->>+MiloAPIProjectX: `PATCH` `InstanceCRProjectX` (remove quota finalizer)
         MiloAPIProjectX-->>-InstCtrlPCP: Ack
         InstCtrlPCP->>+BackendInfraPCP: Provision workload (pods, VM, etc.)
@@ -1678,14 +1693,14 @@ sequenceDiagram
         InstCtrlPCP->>+MiloAPIProjectX: `PATCH` `InstanceCRProjectX.status` (e.g., Phase=Running)
         MiloAPIProjectX-->>-InstCtrlPCP: Ack
         note right of InstanceCRProjectX: Instance Status in `Project APIServer`: <br> Pending -> Provisioning -> Running
-    else RQC_CRDCore.status.phase == Denied
-        InstCtrlPCP->>+MiloAPIProjectX: `PATCH` `InstanceCRProjectX.status` (e.g., Phase=Failed, Reason=RQC_CRDCore.status.conditions.message)
+    else RQC_CRDCore has condition (type: Granted, status: False)
+        InstCtrlPCP->>+MiloAPIProjectX: `PATCH` `InstanceCRProjectX.status` (e.g., Phase=Failed, Reason=Message from RQC_CRDCore Granted condition)
         MiloAPIProjectX-->>-InstCtrlPCP: Ack
         note right of InstanceCRProjectX: Instance Status in `Project APIServer`: <br> Pending -> Failed
     end
 ```
 
-#### Telemetry & Metering Flow (Post-Provisioning if Granted)
+##### Telemetry & Metering Flow (Post-Provisioning if Granted)
 
 When an `Instance` is successfully provisioned (meaning its `ResourceQuotaClaim`
 was `Granted` by the `quota-operator` in the `Core Milo APIServer`), the actual
@@ -1696,11 +1711,10 @@ against the allocated quotas.
 17. **Emit Usage Event**: The **Running `Instance`** emits usage metrics (e.g.,
     CPU used, data written) to the local **Telemetry Agent** (Vector agent).
 18. **Telemetry System Forwarding**: The **Telemetry Agent** collects and
-    forwards these usage metrics to the external **Metering Engine (e.g.,
-    amberflo API)**.
-19. **Metering Engine Recording**: The **Metering Engine (amberflo)** receives
-    the usage data and records it in its internal ledger, associating it with
-    the correct project, organization, and resource dimensions.
+    forwards these usage metrics to the **Internal Milo Metering API**.
+19. **Metering Service Recording**: The **Metering Service** receives the usage
+    data and records it in its internal ledger, associating it with the correct
+    project, organization, and resource dimensions.
 
 ```mermaid
 %% Sequence Diagram - Telemetry & Metering Flow (Post-Provisioning if Granted)
@@ -1720,7 +1734,7 @@ sequenceDiagram
     end
 ```
 
-#### Tear-down & Quota Release
+##### Tear-down & Quota Release
 
 When an `Instance` (or similar project-scoped resource) within a project is
 requested to be deleted, the following steps occur to ensure its quota is
@@ -1746,7 +1760,7 @@ properly deprovisioned in its `Project APIServer`.
         reflect the released amount.
     - The `quota-operator` ensures the usage is no longer accounted for by the
         metering system (e.g., by sending an explicit deallocation/zero-usage
-        event to the **`amberflo Usage API`** if the metering API
+        event to the **`Internal Milo Metering API`** if the metering API
         supports/requires it for immediate reflection).
 25. **Deprovision Infrastructure**: The **Owning Service's `Instance`
     Controller** ensures the actual underlying infrastructure for the `Instance`
