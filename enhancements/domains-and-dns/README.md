@@ -446,9 +446,8 @@ on those domains.
 
 To start, a domain needs to be added to the Inventory. 
 
-Once a domain name is added to the Inventory it is stored as a **Domain** object
-in our Kubernetes API service. An initial representation for a Domain object may
-look like:
+Users will create a Domain resource to add their domain to Datum Cloud using the 
+domain name as the resource name. An example Domain may look like: 
 
 ```yaml
 apiVersion: datumapis.com/v1alpha
