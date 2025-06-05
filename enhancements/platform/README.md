@@ -61,7 +61,7 @@ SIG Architecture for cross-cutting RFCs).
 -->
 
 <!-- omit from toc -->
-# Integration with Datum OS
+# Service Provider Platform (Milo)
 
 <!--
 This is the title of your RFC. Keep it short, simple, and descriptive. A good
@@ -118,9 +118,17 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
-Datum Cloud will integrate with Datum OS to support the standard functions
-needed to operate a Cloud based Service Provider. This document will outline the
-functionality that needs to be available in Datum OS to support Datum Cloud.
+Milo is a "business operating system" for product-led, B2B companies. Think of
+it like a control plane for modern service providers, built on top of a
+comprehensive system of record that ties together key parts of your business.
+
+This enhancement proposal outlines some of the key capabilities that Milo will
+provide to enable service providers to build their own cloud offerings.
+
+> [!NOTE]
+>
+> This enhancement will be broken down into smaller enhancements in the future
+> as we work to implement the capabilities outlined in this proposal.
 
 ## Motivation
 
@@ -129,9 +137,9 @@ This section is for explicitly listing the motivation, goals, and non-goals of
 this RFC.  Describe why the change is important and the benefits to users.
 -->
 
-Datum Cloud will be the first consumer of the Datum OS platform. We want to
-ensure we're investing in the open-source development of Datum OS to expose
-standard capabilities needed to support a cloud based service provider.
+Datum Cloud will be the first consumer of the Milo platform. We want to ensure
+we're investing in the open-source development of Milo to expose standard
+capabilities needed to support a cloud based service provider.
 
 ### Goals
 
@@ -140,7 +148,7 @@ List the specific goals of the RFC. What is it trying to achieve? How will we
 know that this has succeeded?
 -->
 
-- Define the functionality that needs to be developed on Datum OS to support an
+- Define the functionality that needs to be developed on Milo to support an
   integration by Datum Cloud
 - Provide a simple way for organizations to be able to manage they consume from
   services
@@ -154,7 +162,7 @@ and make progress.
 -->
 
 - Define any capabilities provided by Datum Cloud
-- Define implementation details around how Datum OS features are implemented
+- Define implementation details around how Milo features are implemented
 
 ## Proposal
 
@@ -194,20 +202,21 @@ and channel partners that can manage their customers as Organizations.
 
 Datum Cloud must provide customers with an intuitive way to manage the resources
 they consume from service providers. Datum Cloud must support customers as
-simple as an individual utilizing Datum Cloud for their home-lab or as complex as
-a global infrastructure provider with multiple business units that must be
+simple as an individual utilizing Datum Cloud for their home-lab or as complex
+as a global infrastructure provider with multiple business units that must be
 billed in different currencies and maintain tight access control over a user's
 access to resources across the organization.
 
-Datum OS will take inspiration from [Google Cloud Platform's resource
+Milo will take inspiration from [Google Cloud Platform's resource
 hierarchy][gcp-resource-hierarchy] to support managing resources. All customers
 will be represented as an **Organization** resource to act as the root of the
 customer's resource hierarchy. Organizations will be able to organize resources
-they create into a nested hierarchy using **Folders** and **Projects**.
-A **Folder** is a generic organizational resource that can contain other
+they create into a nested hierarchy using **Folders** and **Projects**. A
+**Folder** is a generic organizational resource that can contain other
 **Folders** or **Projects**.
 
-[gcp-resource-hierarchy]: https://cloud.google.com/resource-manager/docs/cloud-platform-resource-hierarchy
+[gcp-resource-hierarchy]:
+    https://cloud.google.com/resource-manager/docs/cloud-platform-resource-hierarchy
 
 ![resource hierarchy](./resource-hierarchy.png)
 
@@ -246,11 +255,11 @@ that role for any resources within the **Project**.
 
 #### Preventing resource deletion
 
-Customers and service providers may need the ability to prevent specific
-actions from being taken on resources created across the platform. Service
-providers may want to prevent their customers from deleting resources they've
-contractually committed to keeping. Customers may want to prevent critical
-production infrastructure from being deleted.
+Customers and service providers may need the ability to prevent specific actions
+from being taken on resources created across the platform. Service providers may
+want to prevent their customers from deleting resources they've contractually
+committed to keeping. Customers may want to prevent critical production
+infrastructure from being deleted.
 
 To support this use-case, the resource manager service will provide a Liens
 resource that can prevent actions from being taken on a resource. Liens will
@@ -358,11 +367,11 @@ consumed by the **Project**.
 
 ### Channel Partners
 
-Datum OS must be able to support an Organization's channel partner strategy for
+Milo must be able to support an Organization's channel partner strategy for
 selling services to consumers. Organizations are going to have different channel
 partner needs based on their go to market strategy.
 
-Datum OS must support the following scenarios:
+Milo must support the following scenarios:
 
 - **Direct to Consumer**: A service provider wants to sell services they product
   to their consumers
@@ -374,9 +383,8 @@ Datum OS must support the following scenarios:
 - **Distribution Partner**: An organization wanting to support a distributor
   bringing additional resellers to the platform to sell the services offered.
 
-Datum OS will create a service dedicated to managing channel partners. This
-service will introduce a **Partner** resource with the **Organization** as it's
-parent.
+Milo will create a service dedicated to managing channel partners. This service
+will introduce a **Partner** resource with the **Organization** as it's parent.
 
 ![Channel partner service resource architecture](./channel-services.png)
 
@@ -400,31 +408,31 @@ A **Partner** may also be granted access to sell products offered by another
 **Partner** on the platform. Access must be granted by the **Organization** that
 manages the **Partner**.
 
-A **Partner** can configure a **Customer** to be billed directly by **Datum OS**
-or may choose to be invoiced for any of it's **Customer**'s usage so it can
-invoice them directly.
+A **Partner** can configure a **Customer** to be billed directly by **Milo** or
+may choose to be invoiced for any of it's **Customer**'s usage so it can invoice
+them directly.
 
 ### Integrated Service Catalog
 
-Datum OS must allow organizations that are selling services to register services
-with Datum OS to configure the features, resources, IAM roles and permissions,
+Milo must allow organizations that are selling services to register services
+with Milo to configure the features, resources, IAM roles and permissions,
 telemetry, and pricing configurations offered by the service. Organizations will
-create a producer project on the Datum OS platform that the service can be
+create a producer project on the Milo platform that the service can be
 registered. For example, Datum Cloud may create a new project called
 `projects/datum-cloud` that it'll use for registering services.
 
-Services **should** integrate with the resource hierarchy provided by Datum OS
-by using a consumer's project as the parent resource for any root resources
+Services **should** integrate with the resource hierarchy provided by Milo by
+using a consumer's project as the parent resource for any root resources
 provided  by the service. See the [design details](#design-details) section for
 a full breakdown of the service registration. Registration of the service will
-result in other services on the Datum OS platform to be configured to support
-the service. For example, the IAM system will be updated with the roles and
+result in other services on the Milo platform to be configured to support the
+service. For example, the IAM system will be updated with the roles and
 permissions provided by the service.
 
-Registering a service will also enable Datum OS to manage an automatically
-generated service catalog for organizations that allow consumers to browse
-services that are available, how to consume and integrate with those services,
-and the pricing details of the service.
+Registering a service will also enable Milo to manage an automatically generated
+service catalog for organizations that allow consumers to browse services that
+are available, how to consume and integrate with those services, and the pricing
+details of the service.
 
 ### User Stories
 
@@ -473,9 +481,9 @@ skuDiscounts:
 
 #### Customer w/ guaranteed capacity
 
-Customer wishes to guarantee capacity of instances in specific markets. In
-order to do so, customer works with Sales or via self-contracting to subscribe
-to the instances she desires as is offered m2m, annual or 3 year commit pricing
+Customer wishes to guarantee capacity of instances in specific markets. In order
+to do so, customer works with Sales or via self-contracting to subscribe to the
+instances she desires as is offered m2m, annual or 3 year commit pricing
 options. Customer contracts for those services and then also leverages usage/on
 demand services for additional capacity, dev test and other scenarios.
 
@@ -579,10 +587,10 @@ proposal will be implemented, this is the place to discuss them.
 
 ### Defining a Service Catalog
 
-Organizations would be able to register services within the Datum OS platform to
+Organizations would be able to register services within the Milo platform to
 represent services they offer to their customers. Below is an example of a
-service being registered with Datum OS that provides compute services (workloads
-and networks) to Datum Cloud customers.
+service being registered with Milo that provides compute services (workloads and
+networks) to Datum Cloud customers.
 
 > NOTE: This example is meant to be fully featured and will depict the long-term
 > vision of functionality that may need to be built. This is not meant to
@@ -590,7 +598,7 @@ and networks) to Datum Cloud customers.
 
 ```yaml
 name: services/compute.datumapis.com
-# Configures which project in Datum OS is producing the service. May be used to
+# Configures which project in Milo is producing the service. May be used to
 # send telemetry data for the service.
 producerProject: projects/datum-cloud
 serviceName: compute.datumapis.com
@@ -736,9 +744,9 @@ telemetry:
   # used for operational purposes or to bill consumers for service usage.
   #
   # TODO: How do we want to represent that these metrics may be pushed to a
-  #       different telemetry backend than Datum OS? Thinking of a use-case
+  #       different telemetry backend than Milo? Thinking of a use-case
   #       where a user wants billing metrics sent to a separate telemetry
-  #       backend but Datum OS will still need to support retrieving the
+  #       backend but Milo will still need to support retrieving the
   #       billing metrics for metering.
   metrics:
   - name: compute.datumapis.com/instances/cpuAllocated
@@ -908,7 +916,7 @@ paymentProfile:
 
 #### Commitments
 
-Customers may want to make contractual commitments for reduced pricing. Datum OS
+Customers may want to make contractual commitments for reduced pricing. Milo
 will support managing **Commitment** resources on **Billing Accounts** to ensure
 **Organizations** are not violating their contractual billing commitments.
 
