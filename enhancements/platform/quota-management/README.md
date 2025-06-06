@@ -1276,11 +1276,11 @@ flowchart TD
 
 
     %% Admission Control Flow
-    OwningServiceAPI -- "1. AdmissionReview (on Resource CRUD)" --> MiloMutatingWebhook
-    MiloMutatingWebhook -- "2. AdmReviewResponse (adds finalizer)" --> OwningServiceAPI
+    OwningServiceAPI -- "(1) AdmissionReview (on Resource CRUD)" --> MiloMutatingWebhook
+    MiloMutatingWebhook -- "(2) AdmReviewResponse (adds finalizer)" --> OwningServiceAPI
 
     %% Owning Service Controller creating claims with Central Quota Service
-    OwningServiceController -- "3. CREATE/WATCH/DELETE <br/> ResourceQuotaClaim" --> QuotaMgmtAPI
+    OwningServiceController -- "(3) CREATE/WATCH/DELETE <br/> ResourceQuotaClaim" --> QuotaMgmtAPI
 ```
 
 
