@@ -1668,11 +1668,6 @@ other components to function correctly:
   subject to quota. The controllers for these services are responsible for
   creating, watching, and deleting `ResourceQuotaClaim` objects in response to
   their own resource lifecycles.
-- **Usage Metering Service:** The `quota-operator` does **not** have a
-  dependency on the `Usage Metering Service` for making quota decisions. Its
-  accounting is self-contained. The `Usage Metering Service` exists for
-  downstream billing and analytics and is not in the critical path for resource
-  provisioning.
 - **PostgreSQL:** All quota-related CRDs (`ServiceQuotaRegistration`,
   `ResourceQuotaGrant`, `ResourceQuotaClaim`, `AggregatedResourceQuotaView`) are
   persisted in the platform's central PostgreSQL data store.
