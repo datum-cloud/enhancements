@@ -35,6 +35,9 @@ latest-milestone: "v0.1"
       - [Risk: Potential for Inaccurate Quota Accounting by
         `quota-operator`](#risk-potential-for-inaccurate-quota-accounting-by-quota-operator)
         - [Mitigations (High-Level):](#mitigations-high-level-2)
+      - [Risk: Quota System Unavailability Blocks Resource
+        Creation](#risk-quota-system-unavailability-blocks-resource-creation)
+        - [Mitigations (High-Level):](#mitigations-high-level-3)
   - [Design Details](#design-details)
     - [Custom Resource Definitions](#custom-resource-definitions)
       - [`ServiceQuotaRegistration`](#servicequotaregistration)
@@ -61,8 +64,6 @@ latest-milestone: "v0.1"
           Creation)](#prerequisite-2-defining-resource-quota-limits-resourcequotagrant-creation)
         - [Core Flow: Resource Provisioning and Quota
           Claim](#core-flow-resource-provisioning-and-quota-claim)
-        - [Ancillary Flow: Telemetry & Metering
-          (Post-Provisioning)](#ancillary-flow-telemetry--metering-post-provisioning)
         - [Ancillary Flow: Tear-down & Quota
           Release](#ancillary-flow-tear-down--quota-release)
   - [Open Questions](#open-questions)
@@ -150,15 +151,14 @@ latest-milestone: "v0.1"
     resources for a project (e.g., `Instance`, `Subnet`, `Project`, etc.).
 *   **Internal Administrator**: Administrators responsible for the overall
     management, operation, and definition of services and quota policies within
-    the Datum Cloud and Milo platforms.
+    the Datum Cloud and Milo platforms (e.g., a Datum employee).
 *   **External Administrator**: A customer representative who manages their
     organization's or project's resources, views their applicable quotas, and
-    can request changes or increases to these quotas via Internal
-    Administrators.
-*   **[Owning Service](#sequence-diagram-step-breakdown)**: A Datum Cloud
-    service (e.g., `compute.datumapis.com`) that manages a specific type of
-    resource (e.g., `Instance`) and is responsible for its lifecycle, including
-    integrating with the quota system.
+    can request changes or increases to these quotas via Internal Administrators
+    (e.g., a customer).
+*   **Owning Service**: A Datum Cloud service (e.g., `compute.datumapis.com`)
+    that manages a specific type of resource (e.g., `Instance`) and is
+    responsible for its lifecycle, including integrating with the quota system.
 *   **[`ServiceQuotaRegistration`](#servicequotaregistration)**: a CRD within
     the Quota Management system, used by internal administrators to register a
     specific resource type from an Owning Service (e.g.,
@@ -187,11 +187,6 @@ latest-milestone: "v0.1"
     admission webhook registered with Owning Service APIs to intercept resource
     requests and add finalizers, supporting the controller-driven quota
     management pattern.
-*   **[Metering System](#key-components-and-capabilities)**: An internal Datum
-    service that receives usage data from the telemetry pipeline. It is
-    responsible for long-term usage data storage for analytics and billing
-    purposes, but it is **not** queried by the `quota-operator` for real-time
-    quota decisions.
 
 ## Summary
 
@@ -241,24 +236,21 @@ been set within their organization and projects; leading to unexpected costs.
     are initialized.
 - Define the API for **External Administrators** to view their quota limits and
   request changes to them through **Internal Administrators**.
-- Ensure the system can enforce defined quota limits without blocking resource
-  creation. For example, by allowing the requested resource to be created in the
-  system (such as an `Instance`), but preventing the actual allocation of
-  resources and usage of the `Instance` until the quota limit is increased via
-  **Internal Administrators**.
+- Enforce quota limits without blocking the initial creation of the resource
+  object in the **control plane**. This allows a resource (e.g., an `Instance`)
+  to be created and be visible to the user immediately, while the actual
+  provisioning of the underlying **data plane** resources are gated by the
+  Owning Service's controller until the quota is successfully claimed.
 - Facilitate predictable capacity management for the platform.
 
 ### Non-Goals
 
-- Provide detailed implementation specifics of how the metering and billing
-  components of the system will work, outside of the acknowledgement of their
-  overall role in system architecture from a quota management perspective. This
-  includes how resource consumption is translated into actual billable units and
-  invoices via the telemetry pipeline.
+- Provide detailed implementation specifics of how the billing components of the
+  system will work.
 - Support customer tier enforcement (e.g., free vs. paid tiers) through
   configurable quotas (which will be implemented as a future enhancement).
 - Define the future Milo Service Catalog and service registration (distinct from
-  the service quota registration for quota management).
+  the service resource-type registration for quota management).
 - Define the exact user interface (UI) mockups or user experience (UX) flows for
   managing or viewing quotas, beyond initial design for the MVP.
 - Define how time-series metrics (e.g. CPU hours, data written, etc) will be
@@ -267,6 +259,10 @@ been set within their organization and projects; leading to unexpected costs.
   inform them that they are approaching the quota threshholds they set for the
   resources. These "early warning" alerts are *not* enforced by the quota
   system, nor a part of this enhancement.
+- Provide a mechanism for **External Administrators** (customers) to define
+  their own "soft limits" for billing alerts or notifications. The limits
+  defined in `ResourceQuotaGrant` are authoritative and can only be set by
+  **Internal Administrators**.
 
 ## Proposal
 
@@ -394,9 +390,9 @@ and its capabilities at a high level for the various personas involved.
 
 #### Story 2
 As an **External Administrator**, I should be able to request a quota increase
-for my organization or project through internal administration channels, so that
-I can control the scope of resource limits that are available to my organization
-and projects.
+for my organization or project through a manual, out-of-band process (e.g., by
+contacting Internal Administrators), so that I can control the scope of resource
+limits that are available to my organization and projects.
 
 #### Story 3
  As an **Internal Administrator**, I should be able to view and manage quota
@@ -423,61 +419,71 @@ Best practices will be enforced by reviewers based on their knowledge of the
 Datum Cloud and Milo ecosystems, including full security compliance and
 alignment with established external and internal standards of Datum platforms.
 
-#### Risk: The potential to block resource creation 
+#### Risk: Quota System Unavailability Blocks Resource Creation
 
-**Consequence**: preventing provisioning of resources due to network failure or
-timeouts when they should be allowed to proceed.
+**Consequence**: If the Quota Management webhook is unavailable, it will block
+the creation and modification of any resource that it is configured to watch.
+This prioritizes system consistency over availability, a trade-off that is
+acceptable for the system.
 
 ##### Mitigations (High-Level):
--   **Established Failure Policy:** The system will be configured with a failure
-    policy that allows for the system to continue operating even if the
-    `quota-operator` is unable to contact the `Core Milo APIServer` or other
-    services. This is done to ensure that the platform is able to continue
-    operating and not block resource creation.
--   **Webhook Timeouts & Failure Policy:** The system will be configured with
-    admission webhooks (specifically, and initially, a mutating admission
-    webhook) with aggressive timeouts and their `failurePolicy` set to `Fail`.
-    This ensures that if the Quota Management Service is unreachable or times
-    out, resource creation/modification requests from users through Owning
-    Services can still proceed (albeit without immediate quota enforcement).
-    This prioritizes platform availability and prevents the blocking of resource
-    creation, which would potentially cause the platform to fail to operate as
-    expected by users.
+-   **High Availability of Webhook:** The primary mitigation is to ensure the
+    Quota Management webhook service is deployed in a highly available
+    configuration (e.g., with multiple replicas) to minimize its downtime.
+-   **Webhook `failurePolicy: Fail`:** The mutating admission webhook will be
+    configured with aggressive timeouts and its `failurePolicy` set to `Fail`.
+    This is a deliberate design choice to prevent system inconsistencies. It
+    ensures that no resource can be created or modified without the webhook
+    first adding its required finalizer. While this means the webhook is a
+    critical-path component, it guarantees that quota accounting cannot be
+    bypassed due to a webhook outage.
 -   **`quota-operator` Resilience:** The `quota-operator` will be designed to be
     resilient. If its connections to necessary components of the system are
     unavailable for any period not resolved through thorough retries and failure
     policies, the operator should clearly indicate this in both in its own
     status *and* logs (providing full transparency), and might temporarily deny
-    new claims, or rely on its last known state of `ResourceQuotaGrant`s and
-    existing `ResourceQuotaClaim`s.
--   **Monitoring & Alerting:** The system will implement comprehensive
-    monitoring and alerting for the Milo Quota Management system and its
-    components.
+    new claims.
+-   **Monitoring & Alerting:** Comprehensive monitoring will be in place to
+    alert operators immediately if the webhook service becomes unhealthy or if
+    its error rate or latency increases, allowing for rapid intervention.
 -   **Emergency Bypass (Break-Glass Procedure):** For extreme, prolonged outages
     of the core quota enforcement workflow, a well-documented, audited, and
     IAM-controlled procedure should allow **Internal Administrators only** to
-    temporarily bypass quota checks (e.g., by temporarily removing or altering
-    webhook configurations). This is a last-resort measure, as it introduces
-    manual intervention and potential for misconfiguration and further issues.
+      temporarily bypass quota checks (e.g., by temporarily removing or altering
+      webhook configurations). This is a last-resort measure.
 
 #### Risk: Inaccurate Quota Accounting by the `quota-operator`
 
-Since the `quota-operator` is responsible for all quota accounting by summing `ResourceQuotaClaim`s and persisting the total in `ResourceQuotaGrant.status.usage`, its accuracy is critical. The telemetry/metering system is **not** in the decision loop.
+Since the `quota-operator` is responsible for all quota accounting by summing
+`ResourceQuotaClaim`s, its accuracy is critical.
 
 **Consequence:** Inaccurate accounting can lead to two failure modes:
-- **Over-allocation**: Allowing resource creation beyond the specified quota limits if the operator undercounts existing claims.
-- **Under-allocation**: Incorrectly denying resource creation when sufficient quota is available if the operator overcounts claims or fails to process released claims.
+- **Over-allocation**: Allowing resource creation beyond the specified quota
+  limits if the operator undercounts existing claims.
+- **Under-allocation**: Incorrectly denying resource creation when sufficient
+  quota is available if the operator overcounts claims or fails to process
+  released claims.
 
 ##### Mitigations (High-Level):
--   **Authoritative State in CRDs**: The state of all granted resources is derived *exclusively* from the sum of `ResourceQuotaClaim` objects present in the cluster. The `quota-operator`'s role is to reconcile this state and persist the aggregated sum into `ResourceQuotaGrant.status.usage`. This `status` sub-field serves as the authoritative, persisted record of accounted usage.
--   **Robust Reconciliation Logic**: The `quota-operator`'s reconciliation logic must be robust, idempotent, and correctly handle all lifecycle events of `ResourceQuotaClaim`s (creation, modification, deletion). This is the most critical part of the system.
--   **Use of Finalizers**: `ResourceQuotaClaim`s will use finalizers. This ensures that a claim object is not fully deleted from `etcd` until the `quota-operator` has successfully processed its deletion and decremented the usage in the corresponding `ResourceQuotaGrant.status.usage` field. This prevents race conditions where a claim is deleted before its allocation is released.
--   **Full Reconciliation on Startup**: Upon startup or recovery from a crash, the `quota-operator` must perform a full reconciliation of all `ResourceQuotaGrant`s. For each grant, it will re-calculate the usage by summing all existing `ResourceQuotaClaim`s in the system and update the `ResourceQuotaGrant.status.usage` field to ensure its internal ledger is consistent with the state of the cluster.
--   **Auditability and Observability**:
-    - The `ResourceQuotaGrant.status.usage` field provides a directly observable reference point for the accounted usage.
-    - The `AggregatedResourceQuotaView` provides a clear, aggregated view for users and administrators.
-    - Metrics will be exposed by the `quota-operator` detailing its reconciliation actions (e.g., claims processed, grants updated) to help diagnose discrepancies.
--   **Clear Status Reporting**: The `ResourceQuotaClaim.status.conditions` will clearly report the outcome. Any denial due to an internal operator error (though expected to be rare) should be distinguishable from a standard `QuotaExceeded` reason, aiding in troubleshooting.
+-   **Authoritative State in CRDs**: The state of all granted resources is
+    derived *exclusively* from the sum of `ResourceQuotaClaim` objects present
+    in the cluster. The `quota-operator`'s role is to reconcile this state.
+-   **Robust Reconciliation Logic**: The `quota-operator`'s reconciliation logic
+    must be robust, idempotent, and correctly handle all lifecycle events of
+    `ResourceQuotaClaim`s (creation, modification, deletion).
+-   **Use of Finalizers**: `ResourceQuotaClaim`s will use finalizers. This
+    ensures that a claim object is not fully deleted from the data store until
+    the `quota-operator` has successfully processed its deletion and released
+    the quota.
+-   **Full Reconciliation on Startup**: Upon startup or recovery, the
+    `quota-operator` must perform a full reconciliation, re-calculating usage by
+    summing all existing `ResourceQuotaClaim`s to ensure its internal ledger is
+    consistent with the state of the cluster.
+-   **Auditability and Observability**: The `AggregatedResourceQuotaView` and
+    metrics exposed by the `quota-operator` provide clear reference points for
+    accounted usage and reconciliation actions.
+-   **Clear Status Reporting**: The `ResourceQuotaClaim.status.conditions` will
+    clearly report the outcome of any claim, aiding in troubleshooting.
 
 ---
 
@@ -548,8 +554,6 @@ metadata:
 spec:
   # Service which owns the resource being registered.
   serviceRef:
-    apiGroup: compute.datumapis.com
-    kind: Service
     name: compute.datumapis.com
     uid: <uid>
   # The type of resource being registered (e.g., Allocation, Feature).
@@ -580,10 +584,10 @@ status:
   observedGeneration: 1
   # Standard kubernetes approach to represent the state of a resource.
   conditions:
-    # Indicates if the definition is valid, accepted, and the resource can be managed.
+    # Indicates if the registration is valid (e.g. owning service exists), accepted, and the resource is now quotable.
     # - Type: Ready
     # - Status: "True" | "False" | "Unknown"
-    # - Reason: (e.g., "DefinitionActive" | "InvalidDefinition" | "Initializing")
+    # - Reason: (e.g., "DefinitionActive" | "InvalidServiceReference" | "Initializing")
     # - Message: Human-readable message detailing status reason
     #   (e.g. "The service's resource is ready to be managed by quotas.")
     - type: Ready
@@ -681,10 +685,10 @@ spec:
 # Status reflects the validity and applicability of the defined quotas.
 status:
   observedGeneration: 1
-  # The `quota-operator` updates this field to reflect the authoritative sum of
-  # all currently granted `ResourceQuotaClaim`s for each bucket. This field
-  # represents the operator's internal accounting ledger and is the source of
-  # truth for usage in quota decisions.
+  # The `quota-operator` updates this field to show how much of this specific
+  # grant's allocation has been consumed or attributed to. It is used for
+  # reporting and auditing, but the authoritative source for a quota decision is
+  # the real-time summation of all relevant ResourceQuotaClaims.
   usage:
   - name: compute.datumapis.com/instances/cpu
     buckets:
@@ -692,8 +696,8 @@ status:
     - dimensionLabels:
         networking.datumapis.com/location: "dfw-region"
         compute.datumapis.com/instance-type: "d1-standard-2"
-      # in units (10 cpus)
-      used: 10
+      used: 10000
+      unit: "millicores"
   # Standard kubernetes approach to represent the state of a resource.
   conditions:
     # Indicates if the grant is correctly configured and actively being used.
@@ -833,15 +837,23 @@ status:
 
 #### `AggregatedResourceQuotaView`
 
-The `AggregatedResourceQuotaView` is a **read-only** CRD that provides a
-consolidated view of the *total effective quota limits* for a specific Owning
-Service resource type (defined by `ServiceQuotaRegistration`) and set of
-specific dimension values within a given namespace. It is dynamically generated
-and updated by the `quota-operator`.
+The `AggregatedResourceQuotaView` is a **read-only view for end-users**,
+designed to provide a consolidated summary of the *total effective quota limits*
+and *usage* for a specific resource and dimension combination within a given
+scope (e.g., project).
 
-This CRD allows users and systems to easily query the *total effective quota*
-without needing to list *all* `ResourceQuotaGrant` objects and perform
-client-side aggregation. It is namespaced to the project or organization.
+**Its purpose is to optimize and simplify client interactions.** Instead of
+requiring clients (like the Cloud Portal UI) to perform expensive and complex
+calculations (listing all grants and all claims and aggregating them), this CRD
+provides a pre-calculated, server-side-aggregated view.
+
+The view itself is **dynamically generated and managed by the
+`quota-operator`**. The operator watches for changes in `ResourceQuotaGrant` and
+`ResourceQuotaClaim` objects and continuously updates the `status` of the
+corresponding `AggregatedResourceQuotaView` to reflect the current total limit
+and usage. Therefore, while end-users should treat it as read-only, the operator
+actively writes to its status field. It is namespaced to the project or
+organization.
 
 ```yaml
 apiGroup: quota.miloapis.com
@@ -979,49 +991,60 @@ The reconciliation loop for this controller will contain the following logic:
     - If validation fails, the operator updates the claim's `status.conditions`
       to reflect the failure reason.
 
-4.  **Retrieves the corresponding `ResourceQuotaGrant`**:
-    - Looks up the `ResourceQuotaGrant`s based on the claim's namespace and
-      resource details.
-    - Reads the declared `spec.resources` field, which contains the quota limits
-      as raw integer values via bucket configurations.
-    - Applies matching logic against `bucket.dimensionLabels` to find the
-      correct bucket for the claim's dimensions (e.g., matching the claim's
-      explicit dimensions against the `dimensionLabels` in each bucket).
-    - If no bucket is found (or no bucket with matching `dimensionLabels`), the
-      operator updates the claim's `status.conditions` to reflect this back to
-      the user, marking the claim as `Denied`.
+4.  **Calculates Total Limit from Additive Grants**:
+    - Based on the incoming claim's namespace, resource, and dimensions, the
+      operator finds **all applicable `ResourceQuotaGrant`s**.
+    - It sums the `value` from all matching buckets in these grants to determine
+      the `TotalLimit`.
 
-5.  **Calculates Current Usage and Evaluates Claim**:
-    - For the given resource/dimension in the incoming claim, the operator finds the matching bucket in the applicable `ResourceQuotaGrant`.
-    - It reads the currently accounted-for usage directly from that `ResourceQuotaGrant.status.usage` field. This field represents the authoritative sum of all previously granted claims.
-    - **It evaluates if the new claim can be satisfied**: `grant.status.usage + newClaim.spec.quantity <= grant.spec.limit`.
-    - The `quota-operator` does **not** query an external metering service. The entire decision is self-contained based on the `ResourceQuotaGrant` and `ResourceQuotaClaim` objects.
+5.  **Calculates Current Usage from Claims and Evaluates**:
+    - The operator finds **all existing `ResourceQuotaClaim`s** in the same
+      namespace that are in a `Granted` state and match the same resource and
+      dimensions.
+    - It sums the `quantity` from all these existing claims to determine the
+      `TotalUsed`.
+    - **IMPORTANT: This live summation of claims is the sole authoritative
+      source of truth for usage.** The operator **never** uses
+      `ResourceQuotaGrant.status.usage` or other status fields for this
+      calculation.
+    - It then evaluates if the new claim can be satisfied: `TotalUsed +
+      newClaim.spec.quantity <= TotalLimit`.
 
 6.  **Updates Claim and Grant Statuses**:
     - If the claim can be satisfied:
-      - It sets `ResourceQuotaClaim.status.conditions` to reflect success (e.g., `type: Granted, status: True, reason: QuotaAvailable`).
-      - It atomically updates the corresponding `ResourceQuotaGrant.status.usage` field, adding the new claim's quantity to the total.
+      - It sets `ResourceQuotaClaim.status.conditions` to reflect success (e.g.,
+        `type: Granted, status: True, reason: QuotaAvailable`).
+      - As a reporting mechanism, it may update the
+        `ResourceQuotaGrant.status.usage` field on one or more of the grants
+        that contributed to the limit.
     - If the claim would exceed the quota:
-      - It sets `ResourceQuotaClaim.status.conditions` to reflect the denial (e.g., `type: Granted, status: False, reason: QuotaExceeded`). The `ResourceQuotaGrant.status.usage` is not changed.
+      - It sets `ResourceQuotaClaim.status.conditions` to reflect the denial
+        (e.g., `type: Granted, status: False, reason: QuotaExceeded`).
     - In both cases, it sets the claim's `Ready` condition to `True`.
 
 
-**`ResourceQuotaGrant.status.usage` - The Authoritative Ledger**
+**`ResourceQuotaGrant.status.usage` - Reporting and Attribution**
 
-The `ResourceQuotaGrant.status.usage` field is the cornerstone of the accounting system. It is not a cache, but the **authoritative ledger** of all allocated quota for a given grant bucket.
+The `ResourceQuotaGrant.status.usage` field's primary role is for reporting and
+attribution, not for making authoritative decisions. To be perfectly clear: when
+a new claim arrives, the operator *does not* look at `status.usage`; it
+recalculates the total usage from scratch by listing all existing claims.
 
-- **Source of Truth**: The `quota-operator` treats this field as the single source of truth for current usage when evaluating new claims.
-- **Persisted State**: By patching this `status` subresource, the `quota-operator` persists its internal accounting directly into `etcd`, ensuring the state is durable and recoverable.
-- **Lifecycle Management**: The operator is responsible for incrementing this value when a claim is `Granted` and decrementing it when a `ResourceQuotaClaim` with a finalizer is deleted. This ensures usage is accurately released.
-- **Auditability**: This field provides a clear, persisted, and directly observable record of the `quota-operator`'s view of allocated quota, which is invaluable for debugging, auditing, and providing visibility to users via tools like the `AggregatedResourceQuotaView`.
+- **Non-Authoritative**: It is not the source of truth for the total usage. The
+  operator relies on summing `ResourceQuotaClaim`s for that.
+- **Observability**: It provides a convenient way to see how much of a
+  *specific* grant has been "allocated" from. The operator might fill grants
+  sequentially, for example.
+- **Auditability**: Along with the claims themselves, it provides a trail for
+  how the total quota pool is being consumed.
 
 **Failure Blast Radius**
 
 If the quota system is down, new `ResourceQuotaClaim` CRs will stall; however,
 workloads managed by Owning Services are not directly affected by the
-quota-operator outage itself, and there is no blocking of writes to them if
-webhook `failurePolicy` is set to `Failed`. Resource creation might proceed
-without quota checks until the operator recovers.
+quota-operator outage itself, and there is no blocking of writes to them since
+the webhook `failurePolicy` will be set to `Failed`. Resource creation might
+proceed without quota checks until the operator recovers.
 - See the [Risks and Mitigations](#risks-and-mitigations) section for more
   details.
 
@@ -1069,44 +1092,43 @@ clear, stateful feedback to the user about quota allocation is important.
 **This is the primary initial pattern that will be used for the quota management
 system. All diagrams and documentation will be based on this pattern.**
 
--   **Use Case:** Ideal for resources where provisioning might take some time,
-    and it's acceptable for the resource to appear in a "Pending" or
-    "AllocatingQuota" state while the quota check is in progress. This pattern
-    aligns with the principle of eventual consistency and clearly separates
-    resource creation *intent* from *actual data plane provisioning*.
+-   **Use Case:** Ideal for infrastructure resources where provisioning may take
+    time. It allows the resource to be created in the **control plane** (i.e.,
+    the user sees it in the portal) while the actual, more expensive **data
+    plane** provisioning is deferred until quota is approved. This provides a
+    superior user experience.
 -   **Flow:**
-    1.  A user requests the creation/modification of a resource (e.g.,
-        `Instance`) from the resources Owning Service.
-    2.  The quota management mutating admission webhook (if configured for this
-        resource type and properly registered) will add a finalizer to the
-        `Instance` CR as it's being processed by the Owning Service's API.
-    3.  The Owning Service's controller (e.g., `InstanceController`) detects the
-        new/modified `Instance` CR. The initial status of this resource would
-        indicate it's awaiting quota allocation.
-    4.  The Owning Service controller then programmatically creates a
+    1.  A user requests the creation of a resource (e.g., `Instance`) from the
+        Owning Service. The resource object is created in the control plane with
+        a status indicating it is pending quota allocation.
+    2.  The quota management mutating webhook adds a finalizer to the `Instance`
+        CR as it's being persisted by the Owning Service's API. This gate
+        prevents the resource from being deleted before its quota is released.
+    3.  The Owning Service's controller (e.g., `InstanceController`) sees the
+        new `Instance` CR. It will not proceed with data plane provisioning
+        while the gate is present and the quota is not yet granted.
+    4.  The Owning Service controller programmatically creates a
         `ResourceQuotaClaim`.
     5.  The Owning Service controller watches the `status` of this
         `ResourceQuotaClaim`.
     6.  If `ResourceQuotaClaim.status.conditions.Granted.status == True`:
         -   The controller proceeds to provision the actual data plane resources
             (e.g., number of CPUs, memory, etc. for the `Instance`).
-        -   It updates the `Instance.status` to reflect successful provisioning.
-        -   The finalizer added by admission webhook remains until the
-            `Instance` is deleted, at which point the Owning Service controller
-            would ensure the corresponding `ResourceQuotaClaim` is also deleted
-            (releasing the quota) before removing the finalizer from the
-            `Instance`.
+        -   It updates the `Instance.status` to reflect successful provisioning
+            (e.g., `Running`).
+        -   The finalizer remains until the `Instance` is deleted.
     7.  If `ResourceQuotaClaim.status.conditions.Granted.status == False` (e.g.,
         due to `QuotaExceeded`):
         -   The controller updates the `Instance.status.conditions` to reflect
-            the failure.
-        -   The resources are still created, however they are not available for
-            allocation until quota limits are raised or quota is released.
--   **Benefits:** Provides a good user experience as the requested resource is
-    immediately visible. The status clearly communicates whether it's pending
-    quota, active, or failed due to quota limits. Allows for asynchronous
-    processing and robust handling of resource lifecycles via controllers and
-    finalizers.
+            the failure (e.g., `QuotaExhausted`).
+        -   The data plane resources are not provisioned. The user can see the
+            resource exists via the Cloud Portal,but is not running due to a
+            clear reason.
+-   **Benefits:** Excellent user experience: The resource appears immediately in
+    the Cloud Portal, providing instant feedback. The resource's status (e.g.,
+    `PendingQuota`, `QuotaExhausted`, `Running`) clearly communicates its state
+    to the user without blocking the initial request. This also allows for
+    robust, asynchronous processing of resource lifecycles.
 
 #### Validating Webhook Driven Pattern
 
@@ -1154,14 +1176,21 @@ supported for the future as an additional integration pattern.**
     -   It's crucial that webhooks are configured correctly. Per Kubernetes best
         practices, validating webhooks run *after* mutating webhooks; therefore
         if this pattern were used alongside the controller-driven pattern's
-        mutating webhook (which adds a finalizer), the execution order would
-        need careful management.
+        mutating admissionwebhook (which adds a finalizer), the execution order
+        would need careful management.
     -   The `failurePolicy` for a validating webhook is critical. `Ignore` could
         lead to quota violations if the webhook is down, while `Fail` could
         block resource creation if the quota system is unavailable. The
         appropriate choice depends on the trade-off between strict enforcement
         and availability, however `Fail` is the recommended policy that will be
         used.
+    -   This pattern introduces consistency challenges. If the webhook performs
+        a synchronous check and "reserves" quota, but the resource creation
+        fails for a different reason after the webhook has returned success, the
+        reserved quota can be orphaned. Solving this would likely require an
+        additional two-phase commit mechanism, such as a "quota binding" object
+        that links the reservation to the final resource, which adds significant
+        complexity.
 
 
 ## System Architecture Diagrams
@@ -1182,31 +1211,25 @@ graph TD
         direction LR
         CloudPortalCLI["Cloud Portal / CLI"]
         StaffPortalCLI["Staff Portal / CLI"]
-        PCPService["Datum Cloud Service <br> (e.g., compute.datumapis.com)"]
+        PCPService["Datum Cloud Service <br/> (e.g., compute.datumapis.com)"]
     end
 
     subgraph MiloCentralServices ["Milo"]
         QuotaSystem["Quota Management System"]
     end
 
-    subgraph ExternalSystems["External Systems"]
-        MeteringSystem["Metering System"]
-    end
-
     %% External Admin interactions
-    ExternalAdmin -- "Views Quotas, Requests Resources" --> CloudPortalCLI
-    CloudPortalCLI -- "Forwards Resource Request" --> PCPService
-    CloudPortalCLI -- "Reads Quota Info" --> QuotaSystem
+    ExternalAdmin -- "Views Quotas, Requests Resources via" --> CloudPortalCLI
+    CloudPortalCLI -- "Forwards Resource Request to" --> PCPService
+    CloudPortalCLI -- "Reads Quota Info from" --> QuotaSystem
 
     %% Internal Admin interactions
-    DatumPlatformAdminEmployee -- "Registers Resources, Defines Grants" --> StaffPortalCLI
-    StaffPortalCLI -- "Manages Registrations & Grants" --> QuotaSystem
+    DatumPlatformAdminEmployee -- "Registers Resources, Defines Grants via" --> StaffPortalCLI
+    StaffPortalCLI -- "Manages Registrations & Grants via" --> QuotaSystem
 
     %% System interactions
-    PCPService -- "Requests Quota Allocation (via ResourceQuotaClaim)" --> QuotaSystem
-    QuotaSystem -- "Returns Quota Decision" --> PCPService
-    PCPService -- "Provisions/Denies Resource" --> CloudPortalCLI
-
+    PCPService -- "Requests Quota Allocation (via ResourceQuotaClaim) from" --> QuotaSystem
+    QuotaSystem -- "Returns Quota Decision to" --> PCPService
 ```
 
 #### C2 Diagram - Containers/Components
@@ -1216,60 +1239,56 @@ graph TD
 flowchart TD
     subgraph UserInterfaces ["User Interfaces / Client Tools"]
         direction LR
-        PortalCLI["Cloud Portal / CLI <br> (external admins)"]
-        DatumAdminTools["Staff Portal / CLI <br> (internal admins)"]
+        PortalCLI["Cloud Portal / CLI <br/> (external admins)"]
+        DatumAdminTools["Staff Portal / CLI <br/> (internal admins)"]
     end
 
     APIGateway["API Gateway"]
 
-    subgraph OwningServiceInfra ["Datum Cloud"]
+    subgraph OwningServiceInfra ["Datum Cloud Service"]
         direction TB
-        OwningServiceAPI["Owning Service API <br> (e.g., for compute.datumapis.com)"]
-        OwningServiceController["Owning Service Controller <br> (e.g., InstanceController)"]
-        ActualResource["Project Resources <br> (e.g., Instances)"]
-        TelemetryPipeline["Telemetry Agent <br> (e.g., Vector)"]
+        OwningServiceAPI["Owning Service API <br/> (e.g., for compute.datumapis.com)"]
+        OwningServiceController["Owning Service Controller <br/> (e.g., InstanceController)"]
 
         OwningServiceAPI --> OwningServiceController
-        OwningServiceController -- "Manages" --> ActualResource
-        ActualResource -- "Emits Usage" --> TelemetryPipeline
     end
 
-    subgraph CentralQuotaInfra ["Milo"]
+    subgraph CentralQuotaInfra ["Milo Quota Management System"]
         direction TB
-        subgraph QuotaSvc ["Quota Management System"]
-            QuotaMgmtAPI["Quota Management APIs <br> (quota.miloapis.com, Quota CRDs & API)"]
-            QuotaOperator["Quota Operator"]
+        subgraph QuotaSvc ["Serving Components"]
+            QuotaMgmtAPI["Quota Management API <br/> (quota.miloapis.com)"]
             MiloMutatingWebhook["Mutating Webhook"]
         end
+        QuotaOperator["Quota Operator <br/> (Controller)"]
+        Database["Data Store <br/> (PostgreSQL)"]
+
+        QuotaMgmtAPI -- "Reads/Writes Quota State to/from" --> Database
+        QuotaOperator -- "LIST/PATCH/WATCH <br/> (reconciliation loop)" --> QuotaMgmtAPI
     end
 
-    subgraph ExternalSystems["External Systems"]
-        direction TB
-        MeteringSystem["Metering System"]
-    end
-
-    TelemetryPipeline -- "Forwards Usage" --> MeteringSystem
 
     %% User/Admin Request Flows via API Gateway
-    PortalCLI -- "User Actions (Resource CRUD, View Quota Limits)" --> APIGateway
-    DatumAdminTools -- "Platform Admin Actions (ServiceQuotaRegistration, ResourceQuotaGrant)" --> APIGateway
+    PortalCLI -- "User Actions (Resource CRUD)" --> APIGateway
+    DatumAdminTools -- "Admin Actions (ServiceQuotaRegistration, ResourceQuotaGrant)" --> APIGateway
 
     APIGateway -- "Routes to Project Resources" --> OwningServiceAPI
-    APIGateway -- "Routes to Quota/Org Resources & Quota CRDs" --> QuotaMgmtAPI
+    APIGateway -- "Routes to Quota CRDs" --> QuotaMgmtAPI
 
 
-    %% Admission Control Flow (Controller-Driven: Mutating Webhook for Finalizers)
-    OwningServiceAPI -- "(1) AdmissionReview (on Resource CRUD)" --> MiloMutatingWebhook
-    MiloMutatingWebhook -- "(2) AdmReviewResponse (e.g., add finalizer)" --> OwningServiceAPI
+    %% Admission Control Flow
+    OwningServiceAPI -- "1. AdmissionReview (on Resource CRUD)" --> MiloMutatingWebhook
+    MiloMutatingWebhook -- "2. AdmReviewResponse (adds finalizer)" --> OwningServiceAPI
 
     %% Owning Service Controller creating claims with Central Quota Service
-    OwningServiceController -- "CREATE/WATCH/DELETE ResourceQuotaClaim" --> QuotaMgmtAPI
+    OwningServiceController -- "3. CREATE/WATCH/DELETE <br/> ResourceQuotaClaim" --> QuotaMgmtAPI
 ```
 
 
 ### Dynamic Flows: Sequence Diagrams
 
-The following sections break down the end-to-end flow of quota management using the **service controller-driven pattern**, as illustrated in the high-level diagram. This is the primary integration pattern for Owning Services.
+The following sections break down the end-to-end flow of quota management using
+the **service controller-driven pattern**, as illustrated in the high-level
+diagram. This is the primary integration pattern for Owning Services.
 
 #### Sequence Diagram Step Breakdown
 
@@ -1278,16 +1297,24 @@ The sequence of operations is broken down into the following distinct phases:
 - **Prerequisite 1: Service Quota Definition Registration**
 - **Prerequisite 2: Defining Resource Quota Limits**
 - **Core Flow: Resource Provisioning and Quota Claim**
-- **Ancillary Flow: Telemetry & Metering**
 - **Ancillary Flow: Tear-down & Quota Release**
 
 ##### Prerequisite 1: Service Quota Definition Registration
 
-Before any resource's quota can be managed, an **Internal Administrator** must first register the resource type with the central quota management system.
+Before any resource's quota can be managed, an **Internal Administrator** must
+first register the resource type with the central quota management system.
 
-1.  **Define & Apply `ServiceQuotaRegistration`**: An **Internal Administrator** responsible for an Owning Service (e.g., the `compute.datumapis.com` service) applies a `ServiceQuotaRegistration` manifest to the quota management system via the Staff Portal or CLI. This manifest declares a specific, fully-qualified resource type (e.g., `compute.datumapis.com/instances/cpu`) as being subject to quota.
-2.  **Store & Validate**: The quota management system stores the `ServiceQuotaRegistration` and the `quota-operator` validates its specification (e.g., ensuring the `resourceName` is valid).
-3.  **Update Status**: The `quota-operator` updates the `status` of the `ServiceQuotaRegistration` to reflect whether it is valid and active.
+1.  **Define & Apply `ServiceQuotaRegistration`**: An **Internal Administrator**
+    responsible for an Owning Service (e.g., the `compute.datumapis.com`
+    service) applies a `ServiceQuotaRegistration` manifest to the quota
+    management system via the Staff Portal or CLI. This manifest declares a
+    specific, fully-qualified resource type (e.g.,
+    `compute.datumapis.com/instances/cpu`) as being subject to quota.
+2.  **Store & Validate**: The quota management system stores the
+    `ServiceQuotaRegistration` and the `quota-operator` validates its
+    specification (e.g., ensuring the `resourceName` is valid).
+3.  **Update Status**: The `quota-operator` updates the `status` of the
+    `ServiceQuotaRegistration` to reflect whether it is valid and active.
 
 ```mermaid
 %% Sequence Diagram - Prerequisite 1: Service Quota Definition Registration
@@ -1295,18 +1322,18 @@ sequenceDiagram
     participant Admin as Internal Administrator
     participant QuotaAPI as Quota Management System API
     participant QuotaOperator as quota-operator
-    participant Etcd as etcd
+    participant DB as PostgreSQL
 
     Admin->>+QuotaAPI: APPLY ServiceQuotaRegistration
-    QuotaAPI->>+Etcd: STORE ServiceQuotaRegistration
-    Etcd-->>-QuotaAPI: ACK
+    QuotaAPI->>+DB: STORE ServiceQuotaRegistration
+    DB-->>-QuotaAPI: ACK
     QuotaAPI-->>-Admin: Success
 
-    QuotaOperator-->>Etcd: WATCH ServiceQuotaRegistration (New/Modified)
+    QuotaOperator-->>DB: WATCH ServiceQuotaRegistration (New/Modified)
     note right of QuotaOperator: Validates spec
     QuotaOperator->>+QuotaAPI: PATCH ServiceQuotaRegistration.status
-    QuotaAPI->>+Etcd: UPDATE ServiceQuotaRegistration.status
-    Etcd-->>-QuotaAPI: ACK
+    QuotaAPI->>+DB: UPDATE ServiceQuotaRegistration.status
+    DB-->>-QuotaAPI: ACK
     QuotaAPI-->>-QuotaOperator: Success
 ```
 
@@ -1333,18 +1360,18 @@ sequenceDiagram
     participant Admin as Internal Administrator
     participant QuotaAPI as Quota Management System API
     participant QuotaOperator as quota-operator
-    participant Etcd as etcd
+    participant DB as PostgreSQL
 
     Admin->>+QuotaAPI: APPLY ResourceQuotaGrant
-    QuotaAPI->>+Etcd: STORE ResourceQuotaGrant
-    Etcd-->>-QuotaAPI: ACK
+    QuotaAPI->>+DB: STORE ResourceQuotaGrant
+    DB-->>-QuotaAPI: ACK
     QuotaAPI-->>-Admin: Success
 
-    QuotaOperator-->>Etcd: WATCH ResourceQuotaGrant (New/Modified)
+    QuotaOperator-->>DB: WATCH ResourceQuotaGrant (New/Modified)
     note right of QuotaOperator: Validates spec against existing ServiceQuotaRegistration
     QuotaOperator->>+QuotaAPI: PATCH ResourceQuotaGrant.status
-    QuotaAPI->>+Etcd: UPDATE ResourceQuotaGrant.status
-    Etcd-->>-QuotaAPI: ACK
+    QuotaAPI->>+DB: UPDATE ResourceQuotaGrant.status
+    DB-->>-QuotaAPI: ACK
     QuotaAPI-->>-QuotaOperator: Success
 ```
 
@@ -1352,94 +1379,63 @@ sequenceDiagram
 
 This is the main runtime flow when a user requests a new resource.
 
-1.  **User Creates Resource**: A user creates a resource managed by an Owning
-    Service, for example, through the Datum Cloud Portal or CLI.
-2.  **Controller Observes and Gates**: The Owning Service's controller (e.g.,
-    `workload-operator`) observes the new `Instance`. It immediately applies a
-    **"quota scheduling gate"** to the `Instance` resource. This gate
-    (implemented as a finalizer or a status condition) prevents the controller
-    from proceeding with actual data plane provisioning until the quota check is
-    complete.
-3.  **Controller Creates `ResourceQuotaClaim`**: The Owning Service controller
-    creates a `ResourceQuotaClaim` manifest. This claim specifies the exact
-    amount of each registered resource type needed for the `Instance` (e.g.,
-    `compute.datumapis.com/instances/cpu: 1`,
-    `compute.datumapis.com/instances/memory-bytes: 2147483648`) and its required
-    dimensions. The controller applies this claim to the quota management
-    system.
-4.  **`quota-operator` Observes Claim**: The `quota-operator` detects the new
-    `ResourceQuotaClaim`.
-5.  **`quota-operator` Reconciles Claim**: The `quota-operator` performs its
-    reconciliation logic:
-    - It validates the claim against the relevant `ServiceQuotaRegistration`.
-    - It retrieves the applicable `ResourceQuotaGrant`(s).
-    - It checks current usage by reading the authoritative value from
-      `ResourceQuotaGrant.status.usage`.
-    - It compares `usage + request` against the `grant limit`.
-6.  **`quota-operator` Updates Claim Status**: The `quota-operator` patches the
+1.  **User Creates Resource**: A user creates a resource (e.g., an `Instance`)
+    via the Owning Service's API. The resource object is immediately created in
+    the **control plane**.
+2.  **Webhook Adds Finalizer**: The API server, upon receiving the request,
+    calls the configured Quota Management mutating webhook. The webhook inspects
+    the `Instance` object and adds a finalizer (e.g., `quota.miloapis.com/gate`)
+    to it. This finalizer acts as the **"quota scheduling gate"**, preventing
+    the resource from being deleted before its quota claim is processed and
+    released.
+3.  **Controller Observes and Creates Claim**: The Owning Service's controller
+    observes the new `Instance` with the finalizer. It sees the resource is in a
+    pending state and will not begin **data plane** provisioning yet. It then
+    creates a `ResourceQuotaClaim` to request the necessary resources.
+4.  **`quota-operator` Observes & Reconciles Claim**: The `quota-operator`
+    detects the new `ResourceQuotaClaim` and performs its reconciliation logic.
+5.  **`quota-operator` Updates Claim Status**: The `quota-operator` patches the
     `ResourceQuotaClaim.status` to `Granted` or `Denied`.
-7.  **Controller Observes `Granted` Status**: The Owning Service controller,
-    which is watching the `ResourceQuotaClaim`, observes the `Granted` status.
-8.  **Controller Removes Gate & Provisions**: The Owning Service controller
-    removes the "quota scheduling gate" from the `Instance` resource. With the
-    gate removed, the controller proceeds with its normal data plane
-    provisioning logic for the `Instance`.
+6.  **Controller Observes Claim Status**: The Owning Service controller, which
+    is watching the `ResourceQuotaClaim`, observes the updated status.
+7.  **Controller Acts on Status**:
+    -   If `Granted`, the controller proceeds with its normal **data plane**
+        provisioning logic for the `Instance` and updates its status to reflect
+        that it is active (e.g., `Running`).
+    -   If `Denied`, the controller updates the `Instance` status to a failure
+        state (e.g., `QuotaExhausted`) and does not provision data plane
+        resources.
 
 ```mermaid
 %% Sequence Diagram - Core Flow: Resource Provisioning and Quota Claim
 sequenceDiagram
     participant User
     participant OwningServiceAPI as Owning Service API
-    participant OwningServiceController as Owning Service Controller <br> (e.g., workload-operator)
+    participant QuotaWebhook as Quota Mutating Webhook
+    participant OwningServiceController as Owning Service Controller <br/> (e.g., workload-operator)
     participant QuotaAPI as Quota Mgmt System API
     participant QuotaOperator as quota-operator
 
     User->>OwningServiceAPI: 1. APPLY Instance
-    OwningServiceAPI-->>OwningServiceController: Watches Instance (New)
-    OwningServiceController->>OwningServiceAPI: 2. PATCH Instance (add "quota scheduling gate")
-    note right of OwningServiceController: Provisioning is now paused
+    OwningServiceAPI->>+QuotaWebhook: 2. AdmissionReview Request
+    QuotaWebhook-->>-OwningServiceAPI: AdmissionReview Response (Instance w/ finalizer)
+
+    OwningServiceAPI-->>OwningServiceController: Watches Instance (New, with finalizer)
+    note right of OwningServiceController: The finalizer gates **data plane** provisioning.
 
     OwningServiceController->>+QuotaAPI: 3. CREATE ResourceQuotaClaim
     QuotaAPI-->>-OwningServiceController: ACK
 
     QuotaOperator-->>QuotaAPI: 4. WATCH ResourceQuotaClaim (New)
-    note left of QuotaOperator: 5. Reconciles claim: <br/>- validates against registration <br/>- finds grant <br/>- checks usage from grant.status.usage
-    QuotaOperator->>+QuotaAPI: 6. PATCH ResourceQuotaClaim.status (to "Granted")
+    note left of QuotaOperator: Reconciles claim: finds grants, sums existing claims, evaluates.
+    QuotaOperator->>+QuotaAPI: 5. PATCH ResourceQuotaClaim.status (to "Granted")
     QuotaAPI-->>-QuotaOperator: ACK
 
-    OwningServiceController-->>QuotaAPI: 7. WATCH ResourceQuotaClaim (Modified)
+    OwningServiceController-->>QuotaAPI: 6. WATCH ResourceQuotaClaim (Modified)
     note right of OwningServiceController: Observes status is "Granted"
 
-    OwningServiceController->>OwningServiceAPI: 8. PATCH Instance (remove "quota scheduling gate")
-    note right of OwningServiceController: Provisioning continues
-```
-
-##### Ancillary Flow: Telemetry & Metering (Post-Provisioning)
-
-Once an `Instance` is active, its usage is reported to ensure accurate,
-up-to-date accounting.
-
-1.  **Resource Emits Usage Data**: The active `Instance` emits usage metrics for
-    its consumed resources (e.g., `compute.datumapis.com/instances/cpu`).
-2.  **Telemetry Pipeline**: A telemetry agent (e.g., Vector) collects and
-    forwards this data to the metering service.
-3.  **Metering Service Stores Usage**: The metering service updates its ledger.
-    This data provides an authoritative source of real-time usage for analytics
-    and billing purposes. This flow is separate from the quota decision loop,
-    which relies on the operator's internal accounting.
-
-```mermaid
-%% Sequence Diagram - Telemetry & Metering Flow (Post-Provisioning if Granted)
-sequenceDiagram
-    participant ActualResource as Actual Owning Service Resource <br> (e.g., Instance)
-    participant TelemetryAgent as Telemetry Agent (Vector)
-    participant MeteringService as Metering System
-
-    note over ActualResource: Once an Instance is active, its usage is reported.
-    ActualResource ->> TelemetryAgent: 1. Resource Emits Usage Data
-    TelemetryAgent ->> MeteringService: 2. Telemetry Pipeline forwards data
-    MeteringService ->> MeteringService: 3. Metering Service Stores Usage
-    note over MeteringService: Usage data is now stored for analytics/billing.
+    OwningServiceController->>OwningServiceAPI: 7. PATCH Instance.status (e.g., to "Provisioning")
+    note right of OwningServiceController: **Data plane** provisioning continues
 ```
 
 ##### Ancillary Flow: Tear-down & Quota Release
@@ -1465,7 +1461,7 @@ When the `Instance` is deleted, its claimed quota must be released.
 sequenceDiagram
     participant User
     participant OwningServiceAPI as Owning Service API
-    participant OwningServiceController as Owning Service Controller <br> (e.g., workload-operator)
+    participant OwningServiceController as Owning Service Controller <br/> (e.g., workload-operator)
     participant QuotaAPI as Quota Mgmt System API
     participant QuotaOperator as quota-operator
 
@@ -1677,31 +1673,36 @@ other components to function correctly:
   accounting is self-contained. The `Usage Metering Service` exists for
   downstream billing and analytics and is not in the critical path for resource
   provisioning.
-- **etcd:** As a Kubernetes-native system, all quota-related CRDs
-  (`ServiceQuotaRegistration`, `ResourceQuotaGrant`, `ResourceQuotaClaim`, etc.)
-  are persisted in the platform's central etcd data store.
+- **PostgreSQL:** All quota-related CRDs (`ServiceQuotaRegistration`,
+  `ResourceQuotaGrant`, `ResourceQuotaClaim`, `AggregatedResourceQuotaView`) are
+  persisted in the platform's central PostgreSQL data store.
 
 ### Scalability
 
 #### Will enabling / using this feature result in any new API calls?
 
-Yes. The feature introduces several new API interactions:
+Yes. The feature introduces several new API interactions. The most significant
+is that for every new resource requiring quota, the `quota-operator` must
+perform a `LIST` operation to calculate usage.
 
 - **Resource Provisioning Flow (per resource):**
-    -   1 `CREATE ResourceQuotaClaim` call from an Owning Service controller to
-        the quota management system.
-    -   Multiple `WATCH` events on that `ResourceQuotaClaim` by both the
-        `quota-operator` and the Owning Service controller.
-    -   1 `PATCH` call from the `quota-operator` to update the
-        `ResourceQuotaClaim` status.
-    -   1 `PATCH` call from the `quota-operator` to update the
-        `ResourceQuotaGrant.status.usage` field.
+    -   1 `CREATE ResourceQuotaClaim` call from an Owning Service controller.
+    -   Inside the `quota-operator`'s reconciliation loop for that claim:
+        -   1 `LIST` call for all `ResourceQuotaGrant`s in the namespace.
+        -   1 `LIST` call for all `ResourceQuotaClaim`s in the namespace to sum
+            usage.
+    -   1 `PATCH` call from the `quota-operator` to update the new
+        `ResourceQuotaClaim`'s status.
+    -   1 `PATCH` call (optional, for reporting) from the `quota-operator` to
+        update a `ResourceQuotaGrant.status.usage` field.
     -   1 `DELETE ResourceQuotaClaim` call from the Owning Service controller
         when the resource is destroyed.
 - **Administrative Actions (infrequent):**
     -   `CREATE`/`UPDATE`/`DELETE` calls for `ServiceQuotaRegistration` and
-        `ResourceQuotaGrant` objects by administrators to define platform-wide
-        quota rules and specific project/organization grants.
+        `ResourceQuotaGrant` objects by administrators to define quota limits
+        and specific project/organization grants. This should typically be
+        automated and not require human interaction, but is listed here for
+        completeness.
 
 #### Will enabling / using this feature result in introducing new API types?
 
@@ -1737,15 +1738,18 @@ Yes, slightly. The time to provision a resource that is subject to quota will
 now include the time taken for the quota reconciliation loop. This includes:
 
 -   Creation of the `ResourceQuotaClaim` by the Owning Service controller.
--   Detection and reconciliation of the claim by the `quota-operator`.
+-   Detection of the claim by the `quota-operator`.
+-   The `LIST` operations for grants and existing claims.
 -   Detection of the `Granted` status by the Owning Service controller.
 
 This entire process adds a small amount of latency to the provisioning workflow.
-However, because this happens asynchronously after the user's initial request
-has been accepted, it does not impact the initial API response time for the
-user. The resource simply remains in a "Pending" or "Provisioning" state for a
-slightly longer duration. The SLO for the `ResourceQuotaClaim` reconciliation
-itself should be aggressive (e.g., p99 < 1 second).
+Because this happens asynchronously after the user's initial request has been
+accepted, it does not impact the initial API response time for the user.
+However, the performance of the `LIST` calls is critical to keeping the overall
+provisioning time low. The SLO for the `ResourceQuotaClaim` reconciliation
+itself should be aggressive (e.g., p99 < 1 second). Caching strategies within
+the operator may be required to meet this SLO in clusters with a very high
+number of claims.
 
 #### Will enabling / using this feature result in non-negligible increase of resource usage in any components?
 
