@@ -188,8 +188,10 @@ latest-milestone: "v0.1"
     requests and add finalizers, supporting the controller-driven quota
     management pattern.
 *   **[Metering System](#key-components-and-capabilities)**: An internal Datum
-    service the `quota-operator` queries to determine the current resource
-    usage.
+    service that receives usage data from the telemetry pipeline. It is
+    responsible for long-term usage data storage for analytics and billing
+    purposes, but it is **not** queried by the `quota-operator` for real-time
+    quota decisions.
 
 ## Summary
 
@@ -458,85 +460,24 @@ timeouts when they should be allowed to proceed.
     webhook configurations). This is a last-resort measure, as it introduces
     manual intervention and potential for misconfiguration and further issues.
 
-#### Risk: The potential to use non-live data when evaluating `ResourceQuotaClaim` against `ResourceQuotaGrant`s
+#### Risk: Inaccurate Quota Accounting by the `quota-operator`
 
-**Consequence**: 
-- The allocation of resources beyond the set quota limits, bypassing the set of
-  limits for the resource type and dimensions.
-- The denial of resource allocation when there are enough free resources to
-  allow the request to proceed.
-- The inability to accurately track the usage of resources and the ability to
-  accurately track the usage of resources.
+Since the `quota-operator` is responsible for all quota accounting by summing `ResourceQuotaClaim`s and persisting the total in `ResourceQuotaGrant.status.usage`, its accuracy is critical. The telemetry/metering system is **not** in the decision loop.
+
+**Consequence:** Inaccurate accounting can lead to two failure modes:
+- **Over-allocation**: Allowing resource creation beyond the specified quota limits if the operator undercounts existing claims.
+- **Under-allocation**: Incorrectly denying resource creation when sufficient quota is available if the operator overcounts claims or fails to process released claims.
 
 ##### Mitigations (High-Level):
--   **Authoritative Usage Source:** A single authoritative source of truth for
-    resource consumption should be used when evaluating `ResourceQuotaClaim`s.
--   **Post-Outage Reconciliation:** When the Milo Quota Management service
-    recovers (or webhooks are re-enabled/fixed), the `quota-operator` will
-    reconcile existing claims and usage. New requests for already over-limit
-    projects/organizations will be denied until usage falls within limits.
-    Alerts can optionally be created and triggered to review significant
-    discrepancies, however this is not in scope for this enhancement.
--   **Robust Telemetry Pipeline:** Ensure the telemetry pipeline sending usage
-    data to the authoritative source of truth is resilient, with appropriate
-    retries, buffering (e.g., in the Vector agent), and error handling to
-    minimize lost or delayed usage data.
--   **Real-time Usage Queries:** The `quota-operator` should *always* attempt to
-    query the authoritative source of truth in real-time for the most up-to-date
-    usage data before making a decision on a `ResourceQuotaClaim`.
--   **Cautious Use of Cached Data:** If the optional caching of usage in
-        `ResourceQuotaGrant.status.usage` is implemented, this data *must* be
-    treated as potentially stale. Decisions based purely on this cache should be
-    extremely limited (e.g., only for clear-cut denials where `requested claim >
-    hard_limit_from_cache`). Logic should *always* favor fresh data.
--   **Metering System Reliability:** The accuracy and timeliness of the metering
-    system itself is crucial and should be configured for high availability and
-    low data latency.
--   **Clear Status Reporting:** If a claim is denied due to inability to contact
-    the metering system (despite retries), the `ResourceQuotaClaim.status`
-    should clearly reflect this reason (e.g., `MeteringSystemUnavailable`),
-    distinguishing it from a denial due to actual quota exhaustion.
-
-#### Risk: Potential for Inaccurate Quota Accounting by `quota-operator` 
-#TODO this is too similar to the previous risk, we should combine them and make
-it more clear.
-
-**Consequence:** Inaccurate accounting of used quota, leading to the following
-behaviour:
-- The allocation of resources beyond the set quota limits if the operator
-  undercounts existing claims.
-- The denial of resource allocation when there are enough free resources if the
-  operator overcounts existing claims or fails to recognize released claims.
-
-##### Mitigations (High-Level):
--   **Robust `quota-operator` Logic:** Ensure the `quota-operator`'s
-    reconciliation logic is robust, idempotent, and correctly handles all states
-    of `ResourceQuotaClaim`s (creation, successful grant, failed grant,
-    deletion). Finalizers on `ResourceQuotaClaim`s can help ensure that the
-    operator processes their deletion and correctly deducts the amount from its
-    internal ledger before the claim object is removed from the system.
--   **Persistent State for Operator (if needed):** While the primary state is
-    derived from CRDs, if the operator maintains any critical internal state or
-    ledger beyond what's directly in `ResourceQuotaGrant.status.usage` (which
-    itself is based on claims), this state must be reliably persisted and
-    recoverable. (Ideally, all necessary state is derived from observed CRDs).
--   **Reconciliation on Startup/Recovery:** Upon startup or recovery from an
-    outage, the `quota-operator` should perform a *full reconciliation* of all
-    existing `ResourceQuotaGrant` and `ResourceQuotaClaim` objects to rebuild an
-    accurate state of current allocations.
--   **Auditability and Observability:** Provide metrics and potentially logs
-    from the `quota-operator` detailing how it calculates usage for a given
-    grant (e.g., number of active claims it's summing). This can help in
-    diagnosing discrepancies.
--   **`ResourceQuotaGrant.status.usage` as a Reference:** The
-    `ResourceQuotaGrant.status.usage` field, updated by the `quota-operator`
-    based on granted claims, serves as a reference point for the accounted
-    usage. Monitoring this field can provide insights.
--   **Clear Status Reporting in `ResourceQuotaClaim`:** The
-    `ResourceQuotaClaim.status` should clearly reflect the reason for any
-    denial. If a denial is due to an internal error or inconsistency, although
-    expectedly rare, should be distinguishable from a standard `QuotaExceeded`
-    reason.
+-   **Authoritative State in CRDs**: The state of all granted resources is derived *exclusively* from the sum of `ResourceQuotaClaim` objects present in the cluster. The `quota-operator`'s role is to reconcile this state and persist the aggregated sum into `ResourceQuotaGrant.status.usage`. This `status` sub-field serves as the authoritative, persisted record of accounted usage.
+-   **Robust Reconciliation Logic**: The `quota-operator`'s reconciliation logic must be robust, idempotent, and correctly handle all lifecycle events of `ResourceQuotaClaim`s (creation, modification, deletion). This is the most critical part of the system.
+-   **Use of Finalizers**: `ResourceQuotaClaim`s will use finalizers. This ensures that a claim object is not fully deleted from `etcd` until the `quota-operator` has successfully processed its deletion and decremented the usage in the corresponding `ResourceQuotaGrant.status.usage` field. This prevents race conditions where a claim is deleted before its allocation is released.
+-   **Full Reconciliation on Startup**: Upon startup or recovery from a crash, the `quota-operator` must perform a full reconciliation of all `ResourceQuotaGrant`s. For each grant, it will re-calculate the usage by summing all existing `ResourceQuotaClaim`s in the system and update the `ResourceQuotaGrant.status.usage` field to ensure its internal ledger is consistent with the state of the cluster.
+-   **Auditability and Observability**:
+    - The `ResourceQuotaGrant.status.usage` field provides a directly observable reference point for the accounted usage.
+    - The `AggregatedResourceQuotaView` provides a clear, aggregated view for users and administrators.
+    - Metrics will be exposed by the `quota-operator` detailing its reconciliation actions (e.g., claims processed, grants updated) to help diagnose discrepancies.
+-   **Clear Status Reporting**: The `ResourceQuotaClaim.status.conditions` will clearly report the outcome. Any denial due to an internal operator error (though expected to be rare) should be distinguishable from a standard `QuotaExceeded` reason, aiding in troubleshooting.
 
 ---
 
@@ -605,6 +546,12 @@ metadata:
   # <service-name>-<parent-resource-name>-<resource-name>-registration
   name: compute-instances-cpu-registration
 spec:
+  # Service which owns the resource being registered.
+  serviceRef:
+    apiGroup: compute.datumapis.com
+    kind: Service
+    name: compute.datumapis.com
+    uid: <uid>
   # The type of resource being registered (e.g., Allocation, Feature).
   # This helps categorize the resource type.
   type: Allocation
@@ -734,9 +681,10 @@ spec:
 # Status reflects the validity and applicability of the defined quotas.
 status:
   observedGeneration: 1
-  # Optional: The `quota-operator` updates this field to reflect the sum of
-  # all currently granted `ResourceQuotaClaim`s for each bucket, referencing
-  # the Owning Service resource types.
+  # The `quota-operator` updates this field to reflect the authoritative sum of
+  # all currently granted `ResourceQuotaClaim`s for each bucket. This field
+  # represents the operator's internal accounting ledger and is the source of
+  # truth for usage in quota decisions.
   usage:
   - name: compute.datumapis.com/instances/cpu
     buckets:
@@ -768,15 +716,15 @@ status:
       lastTransitionTime: "2023-01-01T12:00:00Z"
       reason: PendingValidation
       message: "Validation of resources is pending."
-    # Optionally indicates the freshness of cached usage data, if implemented.
-    # - Type: UsageSynchronized
+    # Indicates whether the usage field is up-to-date with the sum of existing claims.
+    # - Type: UsageCorrectlyAccounted
     # - Status: "True" | "False" | "Unknown"
-    # - Reason: (e.g., "SyncSuccessful" | "SyncFailed" | "StaleData" | "CachingDisabled")
-    - type: UsageAccountedInternally
+    # - Reason: (e.g., "AccountingSuccessful" | "ReconciliationNeeded")
+    - type: UsageCorrectlyAccounted
       status: Unknown
       lastTransitionTime: "2023-01-01T12:00:00Z"
       reason: PendingCalculation
-      message: "Internal usage accounting is pending."
+      message: "Usage accounting is pending."
 ```
 
 #### `ResourceQuotaClaim`
@@ -857,10 +805,10 @@ status:
       lastTransitionTime: "2023-01-01T12:00:00Z"
       reason: ClaimResolved
       message: "Claim is resolved."
-    # QuotaChecked indicates if the quota availability has been checked against live usage.
+    # QuotaChecked indicates if the quota availability check has been completed.
     # - Type: QuotaChecked
     # - Status: "True" | "False" | "Unknown"
-    # - Reason: (e.g., "CheckSuccessful" | "MeteringServiceUnavailable" | "PendingQuotaCheck")
+    # - Reason: (e.g., "CheckSuccessful" | "GrantNotFound" | "PendingQuotaCheck")
     # - Message: Human-readable message detailing the reason for the status.
     - type: QuotaChecked
       status: True
@@ -872,7 +820,7 @@ status:
     # representing whether the claim was approved or denied.
     # - Type: Granted
     # - Status: "True" (Claim Approved) | "False" (Claim Denied) | "Unknown" (Awaiting Decision)
-    # - Reason: (e.g., "QuotaAvailable", "QuotaExceeded", "ServiceQuotaRegistrationNotFound", "ValidationError", "MeteringSystemUnavailable", "AwaitingDecision")
+    # - Reason: (e.g., "QuotaAvailable", "QuotaExceeded", "ServiceQuotaRegistrationNotFound", "ValidationError", "GrantEvaluationError", "AwaitingDecision")
     # - Message: Human-readable message detailing the reason for the status.
     - type: Granted
       # Default to False until explicitly Granted or Denied
@@ -1043,48 +991,29 @@ The reconciliation loop for this controller will contain the following logic:
       operator updates the claim's `status.conditions` to reflect this back to
       the user, marking the claim as `Denied`.
 
-5.  **Calculates Aggregated Current Usage from Existing Claims**:
-    - For the given `ResourceQuotaGrant` and the specific resource/dimensions of
-      the incoming `ResourceQuotaClaim`, the `quota-operator` sums the
-      `quantity` from all other existing `ResourceQuotaClaim`s that are in a
-      `Granted` state for that same resource/dimension combination within the
-      same namespace. This sum represents the currently accounted-for usage.
-      - The operator updates the `ResourceQuotaClaim.status.conditions` to
-        reflect the current aggregated usage.
+5.  **Calculates Current Usage and Evaluates Claim**:
+    - For the given resource/dimension in the incoming claim, the operator finds the matching bucket in the applicable `ResourceQuotaGrant`.
+    - It reads the currently accounted-for usage directly from that `ResourceQuotaGrant.status.usage` field. This field represents the authoritative sum of all previously granted claims.
+    - **It evaluates if the new claim can be satisfied**: `grant.status.usage + newClaim.spec.quantity <= grant.spec.limit`.
+    - The `quota-operator` does **not** query an external metering service. The entire decision is self-contained based on the `ResourceQuotaGrant` and `ResourceQuotaClaim` objects.
 
-6.  **Evaluates whether the new claim would exceed quota**:
-    - Calculates: `currentAccountedUsage (from step 5) + requestedAmount (raw
-      value from new claim.spec.resources.quantity) > bucketLimit (raw value
-      from grant.spec.resources.buckets.value)`.
-    - If the total would stay within the limit:
-      - Sets `ResourceQuotaClaim.status.conditions` to reflect the success
-        (e.g., `type: Granted, status: True, reason: QuotaAvailable`).
-      - Updates `ResourceQuotaGrant.status.usage` with the new total
-        `currentAccountedUsage + requestedAmount`.
-    - If the request would exceed the quota:
-      - Sets `ResourceQuotaClaim.status.conditions` with the appropriate status
-        and reason (e.g., `type: Granted, status: False, reason:
-        QuotaExceeded`).
-    - In both cases, sets `type: Ready, status: True, reason: ClaimResolved`.
+6.  **Updates Claim and Grant Statuses**:
+    - If the claim can be satisfied:
+      - It sets `ResourceQuotaClaim.status.conditions` to reflect success (e.g., `type: Granted, status: True, reason: QuotaAvailable`).
+      - It atomically updates the corresponding `ResourceQuotaGrant.status.usage` field, adding the new claim's quantity to the total.
+    - If the claim would exceed the quota:
+      - It sets `ResourceQuotaClaim.status.conditions` to reflect the denial (e.g., `type: Granted, status: False, reason: QuotaExceeded`). The `ResourceQuotaGrant.status.usage` is not changed.
+    - In both cases, it sets the claim's `Ready` condition to `True`.
 
 
-**`ResourceQuotaGrant.status.usage` - Internal Accounting**
+**`ResourceQuotaGrant.status.usage` - The Authoritative Ledger**
 
-Patching the `ResourceQuotaGrant.status.usage` field (with raw integer values)
-is a key function of the `quota-operator`. It reflects the operator's own
-internal accounting of all granted `ResourceQuotaClaim`s for each quota bucket.
-This provides several benefits:
+The `ResourceQuotaGrant.status.usage` field is the cornerstone of the accounting system. It is not a cache, but the **authoritative ledger** of all allocated quota for a given grant bucket.
 
-- *Auditability, observability, and transparency* by creating a clear, persisted
-  record of the `quota-operator`'s view of allocated quota. This can be
-  invaluable for debugging and understanding quota decisions.
-- *Stateful Reference:* Provides a reference point for the total accounted usage
-  that can be observed by administrators and other systems.
-
-This `status.usage` field is the source of truth for quota consumption as far as
-the Quota Management system is concerned. It is not a cache of an external
-system but rather a direct representation of the `quota-operator`'s internal
-ledger based on `ResourceQuotaClaim` lifecycles.
+- **Source of Truth**: The `quota-operator` treats this field as the single source of truth for current usage when evaluating new claims.
+- **Persisted State**: By patching this `status` subresource, the `quota-operator` persists its internal accounting directly into `etcd`, ensuring the state is durable and recoverable.
+- **Lifecycle Management**: The operator is responsible for incrementing this value when a claim is `Granted` and decrementing it when a `ResourceQuotaClaim` with a finalizer is deleted. This ensures usage is accurately released.
+- **Auditability**: This field provides a clear, persisted, and directly observable record of the `quota-operator`'s view of allocated quota, which is invaluable for debugging, auditing, and providing visibility to users via tools like the `AggregatedResourceQuotaView`.
 
 **Failure Blast Radius**
 
@@ -1259,8 +1188,6 @@ graph TD
     subgraph MiloCentralServices ["Milo"]
         QuotaSystem["Quota Management System"]
     end
-
-    QuotaSystem -- "Interacts With" --> ExternalSystems
 
     subgraph ExternalSystems["External Systems"]
         MeteringSystem["Metering System"]
@@ -1446,8 +1373,8 @@ This is the main runtime flow when a user requests a new resource.
     reconciliation logic:
     - It validates the claim against the relevant `ServiceQuotaRegistration`.
     - It retrieves the applicable `ResourceQuotaGrant`(s).
-    - It checks current usage (by summing existing granted claims or querying
-      the metering system).
+    - It checks current usage by reading the authoritative value from
+      `ResourceQuotaGrant.status.usage`.
     - It compares `usage + request` against the `grant limit`.
 6.  **`quota-operator` Updates Claim Status**: The `quota-operator` patches the
     `ResourceQuotaClaim.status` to `Granted` or `Denied`.
@@ -1476,7 +1403,7 @@ sequenceDiagram
     QuotaAPI-->>-OwningServiceController: ACK
 
     QuotaOperator-->>QuotaAPI: 4. WATCH ResourceQuotaClaim (New)
-    note left of QuotaOperator: 5. Reconciles claim: <br/>- validates against registration <br/>- checks grant <br/>- checks usage
+    note left of QuotaOperator: 5. Reconciles claim: <br/>- validates against registration <br/>- finds grant <br/>- checks usage from grant.status.usage
     QuotaOperator->>+QuotaAPI: 6. PATCH ResourceQuotaClaim.status (to "Granted")
     QuotaAPI-->>-QuotaOperator: ACK
 
@@ -1497,9 +1424,9 @@ up-to-date accounting.
 2.  **Telemetry Pipeline**: A telemetry agent (e.g., Vector) collects and
     forwards this data to the metering service.
 3.  **Metering Service Stores Usage**: The metering service updates its ledger.
-    This data provides an authoritative source of real-time usage that the
-    `quota-operator` can optionally use for reconciliation, supplementing its
-    own accounting of granted claims.
+    This data provides an authoritative source of real-time usage for analytics
+    and billing purposes. This flow is separate from the quota decision loop,
+    which relies on the operator's internal accounting.
 
 ```mermaid
 %% Sequence Diagram - Telemetry & Metering Flow (Post-Provisioning if Granted)
@@ -1512,7 +1439,7 @@ sequenceDiagram
     ActualResource ->> TelemetryAgent: 1. Resource Emits Usage Data
     TelemetryAgent ->> MeteringService: 2. Telemetry Pipeline forwards data
     MeteringService ->> MeteringService: 3. Metering Service Stores Usage
-    note over MeteringService: Usage data is now available for `quota-operator` to use.
+    note over MeteringService: Usage data is now stored for analytics/billing.
 ```
 
 ##### Ancillary Flow: Tear-down & Quota Release
@@ -1745,14 +1672,11 @@ other components to function correctly:
   subject to quota. The controllers for these services are responsible for
   creating, watching, and deleting `ResourceQuotaClaim` objects in response to
   their own resource lifecycles.
-- **Usage Metering Service:** To make accurate decisions, the `quota-operator`
-  relies on a platform-wide `Usage Metering Service`. This service is the
-  authoritative source for real-time consumption data for resources. While the
-  `quota-operator` can function by accounting for its own granted claims,
-  integrating with a live metering service ensures that quota checks are based
-  on the most accurate usage data possible. The implementation and high
-  availability of the metering service are handled outside of this quota
-  management proposal.
+- **Usage Metering Service:** The `quota-operator` does **not** have a
+  dependency on the `Usage Metering Service` for making quota decisions. Its
+  accounting is self-contained. The `Usage Metering Service` exists for
+  downstream billing and analytics and is not in the critical path for resource
+  provisioning.
 - **etcd:** As a Kubernetes-native system, all quota-related CRDs
   (`ServiceQuotaRegistration`, `ResourceQuotaGrant`, `ResourceQuotaClaim`, etc.)
   are persisted in the platform's central etcd data store.
@@ -1770,16 +1694,10 @@ Yes. The feature introduces several new API interactions:
         `quota-operator` and the Owning Service controller.
     -   1 `PATCH` call from the `quota-operator` to update the
         `ResourceQuotaClaim` status.
-    -   1 `PATCH` call (optional) from the `quota-operator` to update the
+    -   1 `PATCH` call from the `quota-operator` to update the
         `ResourceQuotaGrant.status.usage` field.
     -   1 `DELETE ResourceQuotaClaim` call from the Owning Service controller
         when the resource is destroyed.
-- **Internal API Calls (to Usage Metering Service):**
-    -   The `quota-operator` will make 1 API call to the `Usage Metering
-        Service` for each `ResourceQuotaClaim` it reconciles to fetch the latest
-        usage data for the specific resource and its dimensions. The performance
-        and scalability of this interaction depend on the metering service's
-        implementation.
 - **Administrative Actions (infrequent):**
     -   `CREATE`/`UPDATE`/`DELETE` calls for `ServiceQuotaRegistration` and
         `ResourceQuotaGrant` objects by administrators to define platform-wide
@@ -1820,7 +1738,6 @@ now include the time taken for the quota reconciliation loop. This includes:
 
 -   Creation of the `ResourceQuotaClaim` by the Owning Service controller.
 -   Detection and reconciliation of the claim by the `quota-operator`.
--   The round-trip call to the `Usage Metering Service`.
 -   Detection of the `Granted` status by the Owning Service controller.
 
 This entire process adds a small amount of latency to the provisioning workflow.
