@@ -555,24 +555,24 @@ spec:
   # Service which owns the resource being registered.
   serviceRef:
     name: compute.datumapis.com
-    uid: <uid>
   # The type of resource being registered (e.g., Allocation, Feature).
   # This helps categorize the resource type.
   type: Allocation
-
   # Fully qualified name of the resource type being registered, as defined by the Owning Service.
   # This is the identifier used in `ResourceClaim.spec.resources`
   # and `ResourceGrant.spec.resources`.
   resourceName: compute.datumapis.com/instances/cpu
   # Description of the resource type.
   description: "Number of allocatable CPU cores for compute instances."
-  # The unit of measurement for the resource (raw unit for accounting).
+  # The unit of measurement for the resource.
   # Examples: "millicores", "bytes", etc,
-  # TODO: remove casue we will al ready know these by resource name.
-  unit: "millicores"
-  # Optional: Hint for UIs on how to convert the raw unit for display.
+  baseUnit: "millicores"
+  # Optional: Hint for UIs on how to convert the base unit for display.
   # Examples: "cores" (from millicores or units), "GiB" (from bytes).
-  displayUnits: "cpu"
+  displayUnit: "cpu"
+  # Defines how to convert between the base unit and the display unit.
+  # e.g. unit * unitConversationFactor = display unit
+  unitConversionFactor: 0.001
   # Dimensions that can be used in ResourceGrant selectors
   # for this resource type. These are typically fully qualified attribute names
   # from the Owning Service's domain.
