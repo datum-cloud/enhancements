@@ -472,7 +472,7 @@ Since the `quota-operator` is responsible for all quota accounting by summing
     must be robust, idempotent, and correctly handle all lifecycle events of
     `ResourceClaim`s (creation, modification, deletion).
 -   **Use of Finalizers**: `ResourceClaim`s will use finalizers. This
-    ensures that a claim object is not fully deleted from the data store until
+    ensures that a claim object is not fully deleted from the APIServer until
     the `quota-operator` has successfully processed its deletion and released
     the quota.
 -   **Full Reconciliation on Startup**: Upon startup or recovery, the
@@ -1251,9 +1251,9 @@ flowchart TD
             MiloMutatingWebhook["Mutating Webhook"]
         end
         QuotaOperator["Quota Operator <br/> (Controller)"]
-        Database["Data Store <br/> (PostgreSQL)"]
+        APIServer["APIServer"]
 
-        QuotaMgmtAPI -- "Reads/Writes Quota State to/from" --> Database
+        QuotaMgmtAPI -- "Reads/Writes Quota State to/from" --> APIServer
         QuotaOperator -- "LIST/PATCH/WATCH <br/> (reconciliation loop)" --> QuotaMgmtAPI
     end
 
@@ -1313,18 +1313,18 @@ sequenceDiagram
     participant Admin as Internal Administrator
     participant QuotaAPI as Quota Management System API
     participant QuotaOperator as quota-operator
-    participant DB as PostgreSQL
+    participant APIServer as APIServer
 
     Admin->>+QuotaAPI: APPLY ResourceRegistration
-    QuotaAPI->>+DB: STORE ResourceRegistration
-    DB-->>-QuotaAPI: ACK
+    QuotaAPI->>+APIServer: STORE ResourceRegistration
+    APIServer-->>-QuotaAPI: ACK
     QuotaAPI-->>-Admin: Success
 
-    QuotaOperator-->>DB: WATCH ResourceRegistration (New/Modified)
+    QuotaOperator-->>APIServer: WATCH ResourceRegistration (New/Modified)
     note right of QuotaOperator: Validates spec
     QuotaOperator->>+QuotaAPI: PATCH ResourceRegistration.status
-    QuotaAPI->>+DB: UPDATE ResourceRegistration.status
-    DB-->>-QuotaAPI: ACK
+    QuotaAPI->>+APIServer: UPDATE ResourceRegistration.status
+    APIServer-->>-QuotaAPI: ACK
     QuotaAPI-->>-QuotaOperator: Success
 ```
 
@@ -1351,18 +1351,18 @@ sequenceDiagram
     participant Admin as Internal Administrator
     participant QuotaAPI as Quota Management System API
     participant QuotaOperator as quota-operator
-    participant DB as PostgreSQL
+    participant APIServer as APIServer
 
     Admin->>+QuotaAPI: APPLY ResourceGrant
-    QuotaAPI->>+DB: STORE ResourceGrant
-    DB-->>-QuotaAPI: ACK
+    QuotaAPI->>+APIServer: STORE ResourceGrant
+    APIServer-->>-QuotaAPI: ACK
     QuotaAPI-->>-Admin: Success
 
-    QuotaOperator-->>DB: WATCH ResourceGrant (New/Modified)
+    QuotaOperator-->>APIServer: WATCH ResourceGrant (New/Modified)
     note right of QuotaOperator: Validates spec against existing ResourceRegistration
     QuotaOperator->>+QuotaAPI: PATCH ResourceGrant.status
-    QuotaAPI->>+DB: UPDATE ResourceGrant.status
-    DB-->>-QuotaAPI: ACK
+    QuotaAPI->>+APIServer: UPDATE ResourceGrant.status
+    APIServer-->>-QuotaAPI: ACK
     QuotaAPI-->>-QuotaOperator: Success
 ```
 
@@ -1654,14 +1654,11 @@ implementation difficulties, etc.).
 Yes. The Quota Management system is a central service but relies on several
 other components to function correctly:
 
-- **Owning Services:** The system is inherently dependent on the various Owning
-  Services (e.g., the service for `compute.datumapis.com`) that manage resources
+- **Owning Services and APIs:** The system is inherently dependent on the various Owning
+  Services and their APIs (e.g., the service API endpoint for `compute.datumapis.com`) that manage resources
   subject to quota. The controllers for these services are responsible for
   creating, watching, and deleting `ResourceClaim` objects in response to
-  their own resource lifecycles.
-- **PostgreSQL:** All quota-related CRDs (`ResourceRegistration`,
-  `ResourceGrant`, `ResourceClaim`, `ResourceClaimAggregate`) are
-  persisted in the platform's central PostgreSQL data store.
+  their resource lifecycles.
 
 ### Scalability
 
