@@ -179,13 +179,12 @@ latest-milestone: "v0.1"
     quota limits for a specific Owning Service resource type and set of
     dimensions within a given namespace. It is dynamically generated and updated
     by the `quota-operator`.
-*   **[`quota-operator`](#quota-operator-controller)**: A controller that
-    reconciles `ResourceClaim`s by validating them, checking against
-    `ResourceGrant`s, and updating claim statuses based on its own
-    accounting of granted and released claims.
+*   **[`quota-operator`](#quota-operator-controller)**: A set of controllers that
+    reconcile the current state of quota entities against the
+    state requested through incoming API requests.
 *   **[Admission Webhooks](#admission-webhooks)**: Initially, a single mutating
-    admission webhook registered with Owning Service APIs to intercept resource
-    requests and add finalizers, supporting the controller-driven quota
+    admission webhook registered with Owning Service APIs to intercept and
+    examine resource requests supporting the controller-driven quota
     management pattern.
 
 ## Summary
@@ -633,7 +632,6 @@ spec:
     # A bucket represents a specific combination of dimensions and a limit.
     buckets:
     # Grant for a specific combination of dimensions
-    - type: Limit
       value: 40000
       # Explicitly define dimension key-value pairs for this bucket,
       # using dimension keys registered in ResourceRegistration.
@@ -644,13 +642,11 @@ spec:
   # 2. Grant for compute instance memory allocation
   - name: compute.datumapis.com/instances/memoryAllocated
     buckets:
-    - type: Limit
       value: 4398046511104
       # Empty dimensionLabels means it applies globally for this resource type
       # in this grant, or for claims that do not specify these dimensions.
       dimensionLabels: {}
 
-    - type: Limit
       value: 1099511627776
       dimensionLabels:
         networking.datumapis.com/location: "dfw-region"
@@ -658,11 +654,9 @@ spec:
   # 3. Grant for compute instance count
   - name: compute.datumapis.com/instances/count
     buckets:
-    - type: Limit
       value: 20
       dimensionLabels:
         compute.datumapis.com/instance-type: "d1-standard-2"
-    - type: Limit
       value: 5
       dimensionLabels:
         networking.datumapis.com/location: "dfw-region"
@@ -671,7 +665,6 @@ spec:
   # 4. Grant for network gateway count
   - name: networking.datumapis.com/subnets/count
     buckets:
-    - type: Limit
       value: 15
       # Applies to all subnets of this type for the project in this grant
       dimensionLabels: {}
@@ -1041,35 +1034,8 @@ proceed without quota checks until the operator recovers.
 
 #### Admission Webhooks
 
-A *stateless mutating admission webhook* will be created as part of the Quota
-Management service. **This webhook will be registered with the various **Owning
-Service APIs** that manage quotable resources. This registration will be
-facilitated by `multi-cluster-runtime`.
+// TODO 
 
-When a user attempts to create or modify a resource (e.g., an `Instance`) via an
-**Owning Service API** (triggering an action in the Owning Service), the
-underlying infrastructure for that API will send an `AdmissionReview` request to
-the configured quota management webhook service endpoint. This aligns with the
-standard Kubernetes [Dynamic Admission
-Control](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/)
-pattern.
-
-- The **mutating admission webhook**, when configured for an Owning Service's
-  resource type:
-    - Has the primary role of inspecting the incoming resource and adding a
-      finalizer to the resource via the `AdmissionReviewResponse`. This
-      finalizer prevents the premature deletion of the resource while its quota
-      is being processed or needs to be released.
-    - It **does not** create the `ResourceClaim` itself, as claim creation
-      is the responsibility of the Owning Service's controller which manages the
-      lifecycle of the claim.
-- The central Quota Management service will be responsible for managing the
-  lifecycle of the mutating webhook service.
-
-This setup allows the Quota Management system to reliably participate in the
-lifecycle of resources managed by Owning Services by ensuring resources aren't
-deleted mid-quota-operation via finalizers. The Owning Services only need to
-have the mutating admission webhook registered with their respective APIs.
 
 ### Service Integration Patterns for Quota Management
 
@@ -1090,25 +1056,20 @@ system. All diagrams and documentation will be based on this pattern.**
     superior user experience.
 -   **Flow:**
     1.  A user requests the creation of a resource (e.g., `Instance`) from the
-        Owning Service. The resource object is created in the control plane with
+        Owning Service API. The entity is created in the control plane with
         a status indicating it is pending quota allocation.
-    2.  The quota management mutating webhook adds a finalizer to the `Instance`
-        CR as it's being persisted by the Owning Service's API. This gate
-        prevents the resource from being deleted before its quota is released.
-    3.  The Owning Service's controller (e.g., `InstanceController`) sees the
+    2.  The Owning Service's controller (e.g., `InstanceController`) sees the
         new `Instance` CR. It will not proceed with data plane provisioning
         while the gate is present and the quota is not yet granted.
-    4.  The Owning Service controller programmatically creates a
+    3.  The Owning Service controller programmatically creates a
         `ResourceClaim`.
-    5.  The Owning Service controller watches the `status` of this
+    4.  The Owning Service controller watches the `status` of this
         `ResourceClaim`.
-    6.  If `ResourceClaim.status.conditions.Granted.status == True`:
-        -   The controller proceeds to provision the actual data plane resources
-            (e.g., number of CPUs, memory, etc. for the `Instance`).
+    5.  If `ResourceClaim.status.conditions.Granted.status == True`:
+        -   The controller proceeds to provision the `Instance` in the data plane.
         -   It updates the `Instance.status` to reflect successful provisioning
             (e.g., `Running`).
-        -   The finalizer remains until the `Instance` is deleted.
-    7.  If `ResourceClaim.status.conditions.Granted.status == False` (e.g.,
+    6.  If `ResourceClaim.status.conditions.Granted.status == False` (e.g.,
         due to `QuotaExceeded`):
         -   The controller updates the `Instance.status.conditions` to reflect
             the failure (e.g., `QuotaExhausted`).
@@ -1167,7 +1128,7 @@ supported for the future as an additional integration pattern.**
     -   It's crucial that webhooks are configured correctly. Per Kubernetes best
         practices, validating webhooks run *after* mutating webhooks; therefore
         if this pattern were used alongside the controller-driven pattern's
-        mutating admissionwebhook (which adds a finalizer), the execution order
+        mutating admission webhook, the execution order
         would need careful management.
     -   The `failurePolicy` for a validating webhook is critical. `Ignore` could
         lead to quota violations if the webhook is down, while `Fail` could
@@ -1238,8 +1199,8 @@ flowchart TD
 
     subgraph OwningServiceInfra ["Datum Cloud Service"]
         direction TB
-        OwningServiceAPI["Owning Service API <br/> (e.g., for compute.datumapis.com)"]
-        OwningServiceController["Owning Service Controller <br/> (e.g., InstanceController)"]
+        OwningServiceAPI["Specific Owning Service API"]
+        OwningServiceController["Specific Owning Service Controller"]
 
         OwningServiceAPI --> OwningServiceController
     end
@@ -1247,7 +1208,7 @@ flowchart TD
     subgraph CentralQuotaInfra ["Milo Quota Management System"]
         direction TB
         subgraph QuotaSvc ["Serving Components"]
-            QuotaMgmtAPI["Quota Management API <br/> (quota.miloapis.com)"]
+            QuotaMgmtAPI["Specific Quota Management API"]
             MiloMutatingWebhook["Mutating Webhook"]
         end
         QuotaOperator["Quota Operator <br/> (Controller)"]
@@ -1268,7 +1229,7 @@ flowchart TD
 
     %% Admission Control Flow
     OwningServiceAPI -- "(1) AdmissionReview (on Resource CRUD)" --> MiloMutatingWebhook
-    MiloMutatingWebhook -- "(2) AdmReviewResponse (adds finalizer)" --> OwningServiceAPI
+    MiloMutatingWebhook -- "(2) AdmissionReviewResponse" --> OwningServiceAPI
 
     %% Owning Service Controller creating claims with Central Quota Service
     OwningServiceController -- "(3) CREATE/WATCH/DELETE <br/> ResourceClaim" --> QuotaMgmtAPI
