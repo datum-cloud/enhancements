@@ -602,16 +602,16 @@ status:
 #### `ResourceGrant`
 
 The `ResourceGrant` CRD declares the actual quota limits for a specific
-scope, referencing the Owning Service resource types defined by
-`ResourceRegistration`. It is a **Namespaced** resource, meaning each grant
+scope, referencing the Owning Service resource types defined by a
+`ResourceRegistration`. It is a **namespaced** resource, meaning each grant
 will reside within a namespace that corresponds to the specific project or
 organization it governs. Multiple `ResourceGrant` CRs can exist for the
-same scope and Owning Service resource type, as their limits are *additive* to
-determine the total effective quota.
+same resource type and scope, as their limits are *aggregated* to
+determine the total allowances.
 
 ```yaml
 apiGroup: quota.miloapis.com
-kind: ResourceGrant #TODO ResourceQuotaAllowances?
+kind: ResourceGrant
 metadata:
   name: <my-resource-quota-grant>
   # Namespace of the project/organization this grant applies to
@@ -634,7 +634,6 @@ spec:
     buckets:
     # Grant for a specific combination of dimensions
     - type: Limit
-      unit: "millicores"
       value: 40000
       # Explicitly define dimension key-value pairs for this bucket,
       # using dimension keys registered in ResourceRegistration.
@@ -646,16 +645,12 @@ spec:
   - name: compute.datumapis.com/instances/memoryAllocated
     buckets:
     - type: Limit
-      unit: "bytes"
-      # In bytes (4096 GiB)
       value: 4398046511104
       # Empty dimensionLabels means it applies globally for this resource type
       # in this grant, or for claims that do not specify these dimensions.
       dimensionLabels: {}
 
     - type: Limit
-      unit: "bytes"
-      # in bytes (1024 GiB)
       value: 1099511627776
       dimensionLabels:
         networking.datumapis.com/location: "dfw-region"
@@ -664,12 +659,10 @@ spec:
   - name: compute.datumapis.com/instances/count
     buckets:
     - type: Limit
-      unit: "instances"
       value: 20
       dimensionLabels:
         compute.datumapis.com/instance-type: "d1-standard-2"
     - type: Limit
-      unit: "instances"
       value: 5
       dimensionLabels:
         networking.datumapis.com/location: "dfw-region"
@@ -679,7 +672,6 @@ spec:
   - name: networking.datumapis.com/subnets/count
     buckets:
     - type: Limit
-      unit: "subnets"
       value: 15
       # Applies to all subnets of this type for the project in this grant
       dimensionLabels: {}
@@ -699,7 +691,6 @@ status:
         networking.datumapis.com/location: "dfw-region"
         compute.datumapis.com/instance-type: "d1-standard-2"
       used: 10000
-      unit: "millicores"
   # Standard kubernetes approach to represent the state of a resource.
   conditions:
     # Indicates if the grant is correctly configured and actively being used.
@@ -736,13 +727,13 @@ status:
 #### `ResourceClaim`
 
 The `ResourceClaim` CRD represents the *intent* of an Owning Service to
-request/consume resources against a defined quota limit, using the Owning
-Service resource types defined by `ResourceRegistration`. When a user action
-triggers an Owning Service to create a resource (e.g., an `Instance` via its
-specific Owning Service API), that Owning Service's controller will then create
+request changes in the quantity (e.g. total number of `Instance` resources within a `Project`) or the
+actual usage (e,g. cpu usage for an `Instance`) for a resource type and scope.
+When a user action triggers an Owning Service to create or modify a resource,
+the Owning Service's respective controller will then create
 a `ResourceClaim` CR. This CR contains a reference to the Owning Service
-resource, as well as the quantity of the resource being requested. It is a
-**Namespaced** resource, where the namespace corresponds to the organization or
+resource, as well as the quantity/usage amount of the resource being requested. 
+This is a **namespaced** resource as well, where the namespace corresponds to an organization or
 project.
 
 ```yaml
@@ -769,7 +760,6 @@ spec:
   # needs (e.g., a 'd1-standard-2' instance in 'dfw') to these registered types and dimensions.
   resources:
   - name: compute.datumapis.com/instances/cpu
-    unit: "millicores"
     value: 8000
     # Owning Service maps its specific dimensions (e.g., region, instance type)
     # to the dimension keys defined in ResourceRegistration for this resource type.
@@ -785,7 +775,6 @@ spec:
       compute.datumapis.com/instance-type: "d1-standard-2"
 
   - name: compute.datumapis.com/instances/count
-    unit: "instances"
     value: 1
     dimensionValues:
       networking.datumapis.com/location: "dfw-region"
