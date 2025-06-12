@@ -976,10 +976,10 @@ and edge nodes. Future work for us to consider:
 
 - How does traffic arrive at a Galactic VPC from a Datum Gateway (Anycast Envoy
   Proxy)?
-  How can traffic egress from a Galactic VPC to the Internet (e.g. Datum CGNAT)?
-  How can traffic ingress/egress from other application providers (e.g. AWS
+- How can traffic egress from a Galactic VPC to the Internet (e.g. Datum CGNAT)?
+- How can traffic ingress/egress from other application providers (e.g. AWS
   PrivateLink)?
-  How can traffic ingress/egress from other physical networks via cross
+- How can traffic ingress/egress from other physical networks via cross
   connects, IXPs, NNIs, or Network as a Service Providers?
 
 
