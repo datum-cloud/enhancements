@@ -83,11 +83,13 @@ template.
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
-  - [System Architecture](#system-architecture)
-  - [Multi-Tenant Architecture](#multi-tenant-architecture)
-  - [Network Services](#network-services)
-  - [Path Computation and SLA Management](#path-computation-and-sla-management)
+  - [Galactic VPC Network Services](#galactic-vpc-network-services)
   - [Observability and Monitoring](#observability-and-monitoring)
+  - [High Level System Architecture](#high-level-system-architecture)
+  - [Multi-Tenant Architecture](#multi-tenant-architecture)
+  - [Underlay Topology Discovery via Active Probing](#underlay-topology-discovery-via-active-probing)
+  - [Customer Route Learning and Forwarding (BGP Integration)](#customer-route-learning-and-forwarding-bgp-integration)
+  - [Overlay Network Programming a.k.a Path Computation](#overlay-network-programming-aka-path-computation)
 - [Production Readiness Review Questionnaire](#production-readiness-review-questionnaire)
   - [Feature Enablement and Rollback](#feature-enablement-and-rollback)
   - [Rollout, Upgrade and Rollback Planning](#rollout-upgrade-and-rollback-planning)
@@ -95,6 +97,7 @@ template.
   - [Dependencies](#dependencies)
   - [Scalability](#scalability)
   - [Troubleshooting](#troubleshooting)
+- [Architecture Design Records (ADRs)](#architecture-design-records-adrs)
 - [Implementation History](#implementation-history)
 - [Drawbacks](#drawbacks)
 - [Alternatives](#alternatives)
@@ -133,13 +136,13 @@ Galactic VPC transforms the telco world from a fixed, opaque network into a prog
   Route traffic based on business needs: performance, compliance, or cost.
 
 - **SLA-Based Productization**  
-  Offer differentiated tiers like “low latency,” “zero loss,” or “geo-fenced” connectivity.
+  Offer differentiated tiers like "low latency," "zero loss," or "geo-fenced" connectivity.
 
 - **Multi-Cloud Reliability**  
   Optimize east-west and hybrid-cloud paths in real time.
 
 Why Developers Love It: For developers and infrastructure engineers, Galactic
-VPC behaves like “network as code”:
+VPC behaves like "network as code":
 
 - **Real-Time Network Observability**  
   Query latency, loss, and throughput metrics via API.
@@ -341,7 +344,7 @@ Galatic VPC includes built-in observability features to ensure that developers, 
 
 - **SLA Monitoring**  
   - Automatic detection of SLA violations
-  - Root-cause hints (e.g., “loss >1% on segment Core 3 → Core 7”)
+  - Root-cause hints (e.g., "loss >1% on segment Core 3 → Core 7")
   - Alert hooks via webhook or API
 
 - **Graph Views and Visualizations**  
@@ -553,7 +556,7 @@ The system builds a real-time model of network performance through active synthe
 
 To support dynamic route discovery from tenant networks, Galactic VPC uses BGP at the edge to learn and advertise customer L3 routes. This mechanism is used solely for reachability exchange—**not** for determining forwarding paths.
 
-Each tenant’s edge routers runs BGP on interfaces connected to the customer’s network:
+Each tenant's edge routers runs BGP on interfaces connected to the customer's network:
 
 - Establishes BGP peering sessions with customer routers
 - Learns customer prefixes (e.g., `10.0.0.0/24`)
