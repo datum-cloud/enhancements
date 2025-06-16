@@ -310,7 +310,8 @@ The quota management system delivers the following core capabilities:
 
 ### Key Components
 
-The quota management system is built on three core architectural components that work together to provide centralized quota enforcement.
+The quota management system is built on three core architectural components that
+work together to provide centralized quota enforcement.
 
 *Note: Detailed specifications for each component, including complete CRD
 schemas, controller reconciliation logic, and architectural patterns are
@@ -344,16 +345,23 @@ leveraging five core CRDs that define the data model for quota management:
 
 #### Quota Operator
 
-The `quota-operator` serves as the central orchestration engine, implemented as a multi-controller system where each controller manages specific CRD lifecycles while coordinating through standard Kubernetes watch patterns:
+The `quota-operator` serves as the central orchestration engine, implemented as
+a multi-controller system where each controller manages specific CRD lifecycles
+while coordinating through standard Kubernetes watch patterns:
 
-- **ResourceRegistration Controller** - Maintains the catalog of quotable resource types
+- **ResourceRegistration Controller** - Maintains the catalog of quotable
+  resource types
 - **ResourceGrant Controller** - Manages administrative quota limit definitions
-- **ResourceClaim Controller** - Makes quota grant/deny decisions for incoming requests
-- **EffectiveResourceGrant Controller** - Provides aggregated views and manages fine-grained usage accounting
+- **ResourceClaim Controller** - Makes quota grant/deny decisions for incoming
+  requests
+- **EffectiveResourceGrant Controller** - Provides aggregated views and manages
+  fine-grained usage accounting
 
 #### Admission Webhooks
 
-Validation and mutation webhooks ensure data integrity by handling CRD validation and automatic finalizer injection at admission time, allowing controllers to focus on business logic rather than validation concerns.
+Validation and mutation webhooks ensure data integrity by handling CRD
+validation and automatic finalizer injection at admission time, allowing
+controllers to focus on business logic rather than validation concerns.
 
 ### User Stories
 
@@ -400,27 +408,31 @@ alignment with established external and internal standards of Datum platforms.
 
 #### Risk: Quota System Unavailability Blocks Resource Creation
 
-**Consequence**: If either the validating or mutating admission webhooks are unavailable, they will block
-the creation and modification of any resource that they are configured to watch.
-This prioritizes system consistency over availability, a trade-off that is
-acceptable for the system to maintain quota integrity.
+**Consequence**: If either the validating or mutating admission webhooks are
+unavailable, they will block the creation and modification of any resource that
+they are configured to watch. This prioritizes system consistency over
+availability, a trade-off that is acceptable for the system to maintain quota
+integrity.
 
 ##### Mitigations (High-Level):
 -   **High Availability of Webhooks:** The primary mitigation is to ensure the
     Quota Management webhook service is deployed in a highly available
     configuration (e.g., with multiple replicas) to minimize its downtime.
--   **Webhook `failurePolicy: Fail`:** Both the validating and mutating admission webhooks will be
-    configured with aggressive timeouts and their `failurePolicy` set to `Fail`.
-    This is a deliberate design choice to prevent system inconsistencies and provides:
-    - **Financial protection** - Prevents unexpected resource costs during outages
+-   **Webhook `failurePolicy: Fail`:** Both the validating and mutating
+    admission webhooks will be configured with aggressive timeouts and their
+    `failurePolicy` set to `Fail`. This is a deliberate design choice to prevent
+    system inconsistencies and provides:
+    - **Financial protection** - Prevents unexpected resource costs during
+      outages
     - **Compliance requirements** - Ensures quota limits are never violated
-    - **Predictable behavior** - No "sometimes enforced, sometimes not" scenarios
+    - **Predictable behavior** - No "sometimes enforced, sometimes not"
+      scenarios
     - **Clear failure signals** - Makes quota system health visible to operators
     
-    This ensures that no quota-managed resource can be created or modified without proper
-    validation and finalizer injection. While this means the webhooks are
-    critical-path components, it guarantees that quota accounting cannot be
-    bypassed due to webhook outages.
+    This ensures that no quota-managed resource can be created or modified
+    without proper validation and finalizer injection. While this means the
+    webhooks are critical-path components, it guarantees that quota accounting
+    cannot be bypassed due to webhook outages.
 -   **`quota-operator` Resilience:** The `quota-operator` will be designed to be
     resilient. If its connections to necessary components of the system are
     unavailable for any period not resolved through thorough retries and failure
@@ -428,8 +440,8 @@ acceptable for the system to maintain quota integrity.
     status *and* logs (providing full transparency), and might temporarily deny
     new claims.
 -   **Monitoring & Alerting:** Comprehensive monitoring will be in place to
-    alert operators immediately if either webhook service becomes unhealthy or if
-    their error rate or latency increases, allowing for rapid intervention.
+    alert operators immediately if either webhook service becomes unhealthy or
+    if their error rate or latency increases, allowing for rapid intervention.
 -   **Emergency Bypass (Break-Glass Procedure):** For extreme, prolonged outages
     of the core quota enforcement workflow, a well-documented, audited, and
     IAM-controlled procedure should allow **Internal Administrators only** to
@@ -441,7 +453,9 @@ acceptable for the system to maintain quota integrity.
 ## Design Details
 
 The quota management system will be deployed as a series of components that form
-a centralized service. This section provides detailed specifications for each component and describes key architectural patterns that enable cross-namespace quota enforcement and service integration.
+a centralized service. This section provides detailed specifications for each
+component and describes key architectural patterns that enable cross-namespace
+quota enforcement and service integration.
 
 ### Architectural Patterns
 
@@ -928,8 +942,9 @@ architected as a collection of specialized controllers, each owning and managing
 a specific CRD type while coordinating through standard Kubernetes watch
 patterns.
 
-**Deployment Architecture**: The `quota-operator` runs as part of Milo's main application process
-(`milo/cmd/apiserver/app/`) and provides the following system-wide capabilities:
+**Deployment Architecture**: The `quota-operator` runs as part of Milo's main
+application process (`milo/cmd/apiserver/app/`) and provides the following
+system-wide capabilities:
 
 - **Quota Enforcement**: Convert incoming `ResourceClaim` intents into actual
   quota grants or denials
@@ -939,13 +954,13 @@ patterns.
   `ResourceGrant`s for UI consumption
 - **Registration Management**: Maintain the catalog of quotable resource types
 
-**Controller Coordination**: Each controller follows the standard Kubernetes controller
-pattern with watch loops, reconciliation logic, and status reporting. The
-controllers coordinate by watching each other's managed resources but maintain
-clear ownership boundaries to avoid conflicts.
+**Controller Coordination**: Each controller follows the standard Kubernetes
+controller pattern with watch loops, reconciliation logic, and status reporting.
+The controllers coordinate by watching each other's managed resources but
+maintain clear ownership boundaries to avoid conflicts.
 
-**Validation Strategy**: All validation is handled by admission webhooks, not controller
-reconciliation logic. Controllers assume they are working with valid,
+**Validation Strategy**: All validation is handled by admission webhooks, not
+controller reconciliation logic. Controllers assume they are working with valid,
 pre-validated resources.
 
 #### ResourceRegistration Controller
@@ -1096,10 +1111,10 @@ project boundaries, minimizing watch overhead and query complexity.
 ### Admission Webhooks
 
 The quota management system uses admission webhooks to handle validation and
-mutation of **quota management CRDs**, ensuring that invalid quota resources are rejected at
-admission time rather than during controller reconciliation. This approach
-follows Kubernetes best practices and prevents controllers from needing to
-handle validation concerns.
+mutation of **quota management CRDs**, ensuring that invalid quota resources are
+rejected at admission time rather than during controller reconciliation. This
+approach follows Kubernetes best practices and prevents controllers from needing
+to handle validation concerns.
 
 **Validating Webhook Responsibilities**:
 - **ResourceRegistration validation**: Ensures `serviceRef` references valid
@@ -1361,10 +1376,10 @@ implementation difficulties, etc.).
 Yes. The Quota Management system is a central service but relies on several
 other components to function correctly:
 
-- **Owning Services:** The system is inherently dependent on the
-  various Owning Services that manage resources subject to quota. The
-  controllers for these services are responsible for creating, watching, and
-  deleting `ResourceClaim` objects in response to their resource lifecycles.
+- **Owning Services:** The system is inherently dependent on the various Owning
+  Services that manage resources subject to quota. The controllers for these
+  services are responsible for creating, watching, and deleting `ResourceClaim`
+  objects in response to their resource lifecycles.
 
 ### Scalability
 
