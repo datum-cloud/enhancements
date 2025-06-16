@@ -30,24 +30,22 @@ latest-milestone: "v0.1"
     - [Risks and Mitigations](#risks-and-mitigations)
       - [Risk: Quota System Unavailability Blocks Resource
         Creation](#risk-quota-system-unavailability-blocks-resource-creation)
-      - [Risk: Inaccurate Quota Accounting by the
-        `quota-operator`](#risk-inaccurate-quota-accounting-by-the-quota-operator)
   - [Design Details](#design-details)
+    - [Architectural Patterns](#architectural-patterns)
+      - [Cross-Namespace Quota Enforcement](#cross-namespace-quota-enforcement)
+      - [Service Integration Patterns](#service-integration-patterns)
     - [Custom Resource Definitions](#custom-resource-definitions)
       - [`ResourceRegistration`](#resourceregistration)
       - [`ResourceGrant`](#resourcegrant)
       - [`ResourceClaim`](#resourceclaim)
       - [`EffectiveResourceGrant`](#effectiveresourcegrant)
       - [`AllowanceBucket`](#allowancebucket)
-    - [Quota Operator](#quota-operator)
+    - [Quota Operator Implementation](#quota-operator-implementation)
       - [ResourceRegistration Controller](#resourceregistration-controller)
       - [ResourceGrant Controller](#resourcegrant-controller)
       - [ResourceClaim Controller](#resourceclaim-controller)
       - [EffectiveResourceGrant Controller](#effectiveresourcegrant-controller)
     - [Admission Webhooks](#admission-webhooks)
-    - [Service Integration Patterns for Quota
-      Management](#service-integration-patterns-for-quota-management)
-      - [Service Controller Driven Pattern](#service-controller-driven-pattern)
   - [System Architecture Diagrams](#system-architecture-diagrams)
     - [Static Structure: System Context and
       Components](#static-structure-system-context-and-components)
@@ -312,30 +310,17 @@ The quota management system delivers the following core capabilities:
 
 ### Key Components
 
-The system will implement quota management using the [Kubernetes operator
+The quota management system is built on three core architectural components that work together to provide centralized quota enforcement.
+
+*Note: Detailed specifications for each component, including complete CRD
+schemas, controller reconciliation logic, and architectural patterns are
+provided in the [Design Details](##design-details) section.*
+
+#### Custom Resource Definitions (CRDs)
+
+The system implements quota management using the [Kubernetes operator
 pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/),
-leveraging five core CRDs and their respective controllers. The below
-descriptions are aimed to be concise, with comprehensive details provided within
-their specific sections further in the document.
-
-#### Cross-Namespace Quota Enforcement
-
-The quota system solves [Kubernetes
-ResourceQuota's](https://kubernetes.io/docs/concepts/policy/resource-quotas/)
-namespace limitation through a **project-scoped quota model**:
-
-- **Project-level ResourceGrants** reside in the project's primary namespace
-  (e.g., `proj-abc`) and define quota limits for the entire project
-- **ResourceClaims** can be created in any namespace within the project (e.g.,
-  `proj-abc-1`, `proj-abc-2`, `proj-abc-staging`)
-- **Quota evaluation** aggregates usage across all namespaces belonging to the
-  project, enforcing limits at the project level rather than per-namespace
-- **Organization-level ResourceGrants** handle high-level organizational limits
-  (max projects, max users) but do not aggregate resource quotas across projects
-
-This enables true multi-tenant quota management where logical business
-boundaries (projects/organizations) control resource allocation rather than
-infrastructure boundaries (namespaces).
+leveraging five core CRDs that define the data model for quota management:
 
 - **`ResourceRegistration`** - Defines quotable resource types (e.g.,
   `compute.datumapis.com/instances/cpu`) and optional dimensional constraints
@@ -357,51 +342,18 @@ infrastructure boundaries (namespaces).
   `DFW` location with a `d1-standard-2` instance type"), serving as the
   authoritative source of truth for usage accounting
 
-The `quota-operator` orchestrates the system through a set of dedicated
-controllers, which coordinate with each other through standard Kubernetes watch
-patterns:
+#### Quota Operator
 
-- **ResourceRegistration Controller** 
-  - Manages `ResourceRegistration` custom resources, making the resource type
-    known to the quota system.
-- **ResourceGrant Controller** - Manages `ResourceGrant` custom resources that
-  administrators create to set quota limits.
-- **ResourceClaim Controller**
-  - Manages `ResourceClaim` custom resources, making quota grant decisions.
-  - Reads from `AllowanceBucket` custom resources to determine current usage
-    when evaluating new claims
-- **EffectiveResourceGrant Controller** 
-  - Manages `EffectiveResourceGrant` custom resources that provide high-level
-    aggregated quota views for UI consumption
-  - **High-Level View Management**: Creates and maintains
-    `EffectiveResourceGrant` resources that provide broad aggregated quota views
-    (e.g., "total CPU limit for a project")
-  - **Fine-Grained Tracking Ownership**: Owns and manages `AllowanceBucket`
-    resources for detailed usage accounting (e.g."CPU allocated for projects in
-    the `DFW` location with a `d1-standard-2` instance-type")
-  - **Usage Accounting**: Updates `AllowanceBucket.status.allocated` when
-    `ResourceClaim`s are granted or released
-  - **Limit Aggregation**: Calculates effective quota limits from multiple
-    additive `ResourceGrant`s
-  - **Lifecycle Management**: Creates, updates, and removes both view types
-    based on active resource + dimension combinations
+The `quota-operator` serves as the central orchestration engine, implemented as a multi-controller system where each controller manages specific CRD lifecycles while coordinating through standard Kubernetes watch patterns:
 
-*Note: The actual resource types being registered (e.g.,
-`compute.datumapis.com/Instance`) are owned and managed by their respective
-Owning Services, not the quota management system.*
+- **ResourceRegistration Controller** - Maintains the catalog of quotable resource types
+- **ResourceGrant Controller** - Manages administrative quota limit definitions
+- **ResourceClaim Controller** - Makes quota grant/deny decisions for incoming requests
+- **EffectiveResourceGrant Controller** - Provides aggregated views and manages fine-grained usage accounting
 
-*Additionally, CRD validation is handled by admission webhooks rather than
-controller reconciliation logic.*
+#### Admission Webhooks
 
-**Note**: The mutating webhook does not add finalizers to Owning Service
-resources (e.g., `Instance`). Instead, the Owning Service controllers create
-`ResourceClaim` objects, and the quota system's mutating webhook adds finalizers
-to those claims to ensure proper quota accounting during claim lifecycle
-management.
-
-This separation ensures controllers can focus on business logic and
-reconciliation while maintaining data integrity through admission-time
-validation.
+Validation and mutation webhooks ensure data integrity by handling CRD validation and automatic finalizer injection at admission time, allowing controllers to focus on business logic rather than validation concerns.
 
 ### User Stories
 
@@ -448,7 +400,7 @@ alignment with established external and internal standards of Datum platforms.
 
 #### Risk: Quota System Unavailability Blocks Resource Creation
 
-**Consequence**: If the Quota Management webhook is unavailable, it will block
+**Consequence**: If the mutating admission webhook is unavailable, it will block
 the creation and modification of any resource that it is configured to watch.
 This prioritizes system consistency over availability, a trade-off that is
 acceptable for the system.
@@ -479,45 +431,69 @@ acceptable for the system.
       temporarily bypass quota checks (e.g., by temporarily removing or altering
       webhook configurations). This is a last-resort measure.
 
-#### Risk: Inaccurate Quota Accounting by the `quota-operator`
-
-Since the `quota-operator` is responsible for all quota accounting by summing
-`ResourceClaim`s, its accuracy is critical.
-
-**Consequence:** Inaccurate accounting can lead to two failure modes:
-- **Over-allocation**: Allowing resource creation beyond the specified quota
-  limits if the operator undercounts existing claims.
-- **Under-allocation**: Incorrectly denying resource creation when sufficient
-  quota is available if the operator overcounts claims or fails to process
-  released claims.
-
-##### Mitigations (High-Level):
--   **Authoritative State in CRDs**: The state of all granted resources is
-    derived *exclusively* from the sum of `ResourceClaim` objects present in the
-    cluster. The `quota-operator`'s role is to reconcile this state.
--   **Robust Reconciliation Logic**: The `quota-operator`'s reconciliation logic
-    must be robust, idempotent, and correctly handle all lifecycle events of
-    `ResourceClaim`s (creation, modification, deletion).
--   **Use of Finalizers**: `ResourceClaim`s will use finalizers. This ensures
-    that a claim object is not fully deleted from the APIServer until the
-    `quota-operator` has successfully processed its deletion and released the
-    quota.
--   **Full Reconciliation on Startup**: Upon startup or recovery, the
-    `quota-operator` must perform a full reconciliation, re-calculating usage by
-    summing all existing `ResourceClaim`s to ensure its internal ledger is
-    consistent with the state of the cluster.
--   **Auditability and Observability**: The `EffectiveResourceGrant` and metrics
-    exposed by the `quota-operator` provide clear reference points for accounted
-    usage and reconciliation actions.
--   **Clear Status Reporting**: The `ResourceClaim.status.conditions` will
-    clearly report the outcome of any claim, aiding in troubleshooting.
-
 ---
 
 ## Design Details
 
 The quota management system will be deployed as a series of components that form
-a centralized service.
+a centralized service. This section provides detailed specifications for each component and describes key architectural patterns that enable cross-namespace quota enforcement and service integration.
+
+### Architectural Patterns
+
+#### Cross-Namespace Quota Enforcement
+
+The quota system solves [Kubernetes
+ResourceQuota's](https://kubernetes.io/docs/concepts/policy/resource-quotas/)
+namespace limitation through a **project-scoped quota model**:
+
+- **Project-level ResourceGrants** reside in the project's primary namespace
+  (e.g., `proj-abc`) and define quota limits for the entire project
+- **ResourceClaims** can be created in any namespace within the project (e.g.,
+  `proj-abc-1`, `proj-abc-2`, `proj-abc-staging`)
+- **Quota evaluation** aggregates usage across all namespaces belonging to the
+  project, enforcing limits at the project level rather than per-namespace
+- **Organization-level ResourceGrants** handle high-level organizational limits
+  (max projects, max users) but do not aggregate resource quotas across projects
+
+This enables true multi-tenant quota management where logical business
+boundaries (projects/organizations) control resource allocation rather than
+infrastructure boundaries (namespaces).
+
+#### Service Integration Patterns
+
+Datum Cloud Services integrate with the quota management system using the
+**service controller driven pattern**, described below:
+
+**Service Controller Driven Pattern**
+
+-   **Flow:**
+    1.  A user requests the creation of a resource (e.g., `Instance`) through
+        the Datum Cloud Portal, which communicates with the Owning Service API.
+        The entity is created in the control plane with a status indicating it
+        is pending quota allocation.
+    2.  The Owning Service's controller (e.g., `InstanceController`) sees the
+        new `Instance` CR. It will not proceed with data plane provisioning
+        while the quota is not yet granted.
+    3.  The Owning Service controller creates a `ResourceClaim`.
+    4.  The Owning Service controller watches the `status` of the created
+        `ResourceClaim` as quota decisions are made.
+    5.  If `ResourceClaim.status.conditions.Granted.status == True`:
+        -   The controller proceeds to provision the `Instance` in the data
+            plane.
+        -   It updates the `Instance.status` to reflect successful provisioning
+            (e.g., `Running`).
+    6.  If `ResourceClaim.status.conditions.Granted.status == False` (e.g., due
+        to `QuotaExceeded`):
+        -   The controller updates the `Instance.status.conditions` to reflect
+            the failure (e.g., `QuotaExhausted`).
+        -   The data plane resources are not provisioned. The user can see the
+            resource exists via the Cloud Portal, but is not running due to a
+            clear reason.
+-   **Benefits:** Better user experience: The resource appears immediately in
+    the Cloud Portal, providing instant feedback. The resource's status (e.g.,
+    `PendingQuota`, `QuotaExhausted`, `Running`) clearly communicates its state
+    to the user without blocking the initial request. This also allows for
+    robust, asynchronous processing of resource lifecycles.
 
 ### Custom Resource Definitions
 
@@ -938,7 +914,7 @@ status:
       observedGeneration: 1
 ```
 
-### Quota Operator
+### Quota Operator Implementation
 
 The `quota-operator` is a multi-controller operator that serves as the core
 orchestration component of the Quota Management service. Rather than
@@ -947,7 +923,7 @@ architected as a collection of specialized controllers, each owning and managing
 a specific CRD type while coordinating through standard Kubernetes watch
 patterns.
 
-The `quota-operator` runs as part of Milo's main application process
+**Deployment Architecture**: The `quota-operator` runs as part of Milo's main application process
 (`milo/cmd/apiserver/app/`) and provides the following system-wide capabilities:
 
 - **Quota Enforcement**: Convert incoming `ResourceClaim` intents into actual
@@ -958,12 +934,12 @@ The `quota-operator` runs as part of Milo's main application process
   `ResourceGrant`s for UI consumption
 - **Registration Management**: Maintain the catalog of quotable resource types
 
-Each controller within the operator follows the standard Kubernetes controller
+**Controller Coordination**: Each controller follows the standard Kubernetes controller
 pattern with watch loops, reconciliation logic, and status reporting. The
 controllers coordinate by watching each other's managed resources but maintain
 clear ownership boundaries to avoid conflicts.
 
-**Note**: All validation is handled by admission webhooks, not controller
+**Validation Strategy**: All validation is handled by admission webhooks, not controller
 reconciliation logic. Controllers assume they are working with valid,
 pre-validated resources.
 
@@ -1112,21 +1088,10 @@ and resource labels (e.g., `resourceName`, `scope`) for efficient
 cross-namespace discovery of `ResourceClaim`s and `AllowanceBucket`s within
 project boundaries, minimizing watch overhead and query complexity.
 
-**Failure Blast Radius**
-
-If the quota system is down, new `ResourceClaim` CRs will stall; however,
-workloads managed by Owning Services are not directly affected by the
-quota-operator outage itself. The webhook `failurePolicy` is set to `Fail`,
-which means `ResourceClaim` creation will be **blocked** until the webhook
-recovers, ensuring quota accounting integrity and preventing quota bypass.
-- See the [Risks and Mitigations](#risks-and-mitigations) section for more
-  details.
-
 ### Admission Webhooks
 
 The quota management system uses admission webhooks to handle validation and
-mutation of **quota management CRDs** (`ResourceRegistration`, `ResourceGrant`,
-`ResourceClaim`), ensuring that invalid quota resources are rejected at
+mutation of **quota management CRDs**, ensuring that invalid quota resources are rejected at
 admission time rather than during controller reconciliation. This approach
 follows Kubernetes best practices and prevents controllers from needing to
 handle validation concerns.
@@ -1160,41 +1125,11 @@ This separation ensures controllers can focus on business logic and
 reconciliation while maintaining data integrity through admission-time
 validation.
 
-### Service Integration Patterns for Quota Management
-
-Datum Cloud Services will integrate with the quota management system using the
-controller-driven pattern, described below.
-
-#### Service Controller Driven Pattern
-
--   **Flow:**
-    1.  A user requests the creation of a resource (e.g., `Instance`) through
-        the Datum Cloud Portal, which communicates with the Owning Service API.
-        The entity is created in the control plane with a status indicating it
-        is pending quota allocation.
-    2.  The Owning Service's controller (e.g., `InstanceController`) sees the
-        new `Instance` CR. It will not proceed with data plane provisioning
-        while the quota is not yet granted.
-    3.  The Owning Service controller creates a `ResourceClaim`.
-    4.  The Owning Service controller watches the `status` of the created
-        `ResourceClaim` as quota decisions are made.
-    5.  If `ResourceClaim.status.conditions.Granted.status == True`:
-        -   The controller proceeds to provision the `Instance` in the data
-            plane.
-        -   It updates the `Instance.status` to reflect successful provisioning
-            (e.g., `Running`).
-    6.  If `ResourceClaim.status.conditions.Granted.status == False` (e.g., due
-        to `QuotaExceeded`):
-        -   The controller updates the `Instance.status.conditions` to reflect
-            the failure (e.g., `QuotaExhausted`).
-        -   The data plane resources are not provisioned. The user can see the
-            resource exists via the Cloud Portal, but is not running due to a
-            clear reason.
--   **Benefits:** Better user experience: The resource appears immediately in
-    the Cloud Portal, providing instant feedback. The resource's status (e.g.,
-    `PendingQuota`, `QuotaExhausted`, `Running`) clearly communicates its state
-    to the user without blocking the initial request. This also allows for
-    robust, asynchronous processing of resource lifecycles.
+**Note**: The mutating webhook does not add finalizers to Owning Service
+resources (e.g., `Instance`). Instead, the Owning Service controllers create
+`ResourceClaim` objects, and the quota system's mutating webhook adds finalizers
+to those claims to ensure proper quota accounting during claim lifecycle
+management.
 
 ## System Architecture Diagrams
 
