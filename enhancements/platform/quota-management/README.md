@@ -1413,10 +1413,13 @@ Yes, it will increase the number of API objects in the system.
 -   **Count:** For every user-facing resource that is subject to quota (e.g., an
     `Instance`), a corresponding `ResourceClaim` object will be created. This
     will lead to a 1:1 increase in the number of objects for each quotable
-    resource created.
--   **Size:** The feature adds a finalizer (e.g., the "quota scheduling gate")
-    to user-facing resources that are managed by this system, which marginally
-    increases their size.
+    resource created. Additionally, the system creates `EffectiveResourceGrant`
+    and `AllowanceBucket` objects for quota tracking, though these are shared
+    across multiple resources and dimensions.
+-   **Size:** The feature adds a finalizer to `ResourceClaim` objects (not to
+    user-facing resources directly) to ensure proper quota cleanup, which
+    marginally increases their size. User-facing resources themselves are not
+    modified with additional finalizers.
 
 #### Will enabling / using this feature result in increasing time taken by any operations covered by existing SLIs/SLOs?
 
@@ -1424,38 +1427,42 @@ Yes, slightly. The time to provision a resource that is subject to quota will
 now include the time taken for the quota reconciliation loop. This includes:
 
 -   Creation of the `ResourceClaim` by the Owning Service controller.
--   Detection of the claim by the `quota-operator`.
--   The `LIST` operations for grants and existing claims.
+-   Processing by the admission webhooks (validation and finalizer injection).
+-   Detection of the claim by the `ResourceClaim Controller` in the quota-operator.
+-   Quota evaluation against `ResourceGrant`s and current usage in `AllowanceBucket`s.
 -   Detection of the `Granted` status by the Owning Service controller.
 
 This entire process adds a small amount of latency to the provisioning workflow.
 Because this happens asynchronously after the user's initial request has been
 accepted, it does not impact the initial API response time for the user.
-However, the performance of the `LIST` calls is critical to keeping the overall
-provisioning time low. The SLO for the `ResourceClaim` reconciliation itself
-should be aggressive (e.g., p99 < 1 second). Caching strategies within the
-operator may be required to meet this SLO in clusters with a very high number of
-claims.
+However, the performance of quota evaluation and status updates is critical to
+keeping the overall provisioning time low. The SLO for the `ResourceClaim`
+reconciliation itself should be aggressive (e.g., p99 < 1 second).
 
 #### Will enabling / using this feature result in non-negligible increase of resource usage in any components?
 
-<!--
-Things to keep in mind include: additional in-memory state, additional
-non-trivial computations, excessive access to disks (including increased log
-volume), significant amount of data sent and/or received over network, etc.
-This through this both in small and large cases, again with respect to the
-[supported limits].
+Yes, moderate increases in several areas:
 
-[supported limits]: https://git.k8s.io/community//sig-scalability/configs-and-limits/thresholds.md
--->
+- **Memory Usage**: The quota-operator maintains in-memory state for watching
+  multiple CRD types (`ResourceGrant`s, `ResourceClaim`s, `EffectiveResourceGrant`s,
+  `AllowanceBucket`s) and their relationships. Memory usage scales with the
+  number of projects, resource types, and active claims.
+
+- **API Server Load**: Additional CRD objects and controller reconciliation
+  loops increase API server requests. The system uses efficient querying with
+  label selectors and namespace scoping to minimize impact.
+
+- **Network Traffic**: Cross-namespace quota evaluation requires additional API
+  calls to resolve project/organization ownership of claimed resources.
+
+- **Computational Overhead**: Quota calculations involve aggregating multiple
+  `ResourceGrant`s and evaluating dimension selectors, though this is optimized
+  through pre-calculated `AllowanceBucket` usage tracking.
 
 #### Can enabling / using this feature result in resource exhaustion of some node resources (PIDs, sockets, inodes, etc.)?
 
 <!--
 Focus not just on happy cases, but primarily on more pathological cases.
-
-Are there any tests that were run/should be run to understand performance
-characteristics better and validate the declared limits?
 -->
 
 ### Troubleshooting
