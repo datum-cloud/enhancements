@@ -400,22 +400,27 @@ alignment with established external and internal standards of Datum platforms.
 
 #### Risk: Quota System Unavailability Blocks Resource Creation
 
-**Consequence**: If the mutating admission webhook is unavailable, it will block
-the creation and modification of any resource that it is configured to watch.
+**Consequence**: If either the validating or mutating admission webhooks are unavailable, they will block
+the creation and modification of any resource that they are configured to watch.
 This prioritizes system consistency over availability, a trade-off that is
-acceptable for the system.
+acceptable for the system to maintain quota integrity.
 
 ##### Mitigations (High-Level):
--   **High Availability of Webhook:** The primary mitigation is to ensure the
+-   **High Availability of Webhooks:** The primary mitigation is to ensure the
     Quota Management webhook service is deployed in a highly available
     configuration (e.g., with multiple replicas) to minimize its downtime.
--   **Webhook `failurePolicy: Fail`:** The mutating admission webhook will be
-    configured with aggressive timeouts and its `failurePolicy` set to `Fail`.
-    This is a deliberate design choice to prevent system inconsistencies. It
-    ensures that no resource can be created or modified without the webhook
-    first adding its required finalizer. While this means the webhook is a
-    critical-path component, it guarantees that quota accounting cannot be
-    bypassed due to a webhook outage.
+-   **Webhook `failurePolicy: Fail`:** Both the validating and mutating admission webhooks will be
+    configured with aggressive timeouts and their `failurePolicy` set to `Fail`.
+    This is a deliberate design choice to prevent system inconsistencies and provides:
+    - **Financial protection** - Prevents unexpected resource costs during outages
+    - **Compliance requirements** - Ensures quota limits are never violated
+    - **Predictable behavior** - No "sometimes enforced, sometimes not" scenarios
+    - **Clear failure signals** - Makes quota system health visible to operators
+    
+    This ensures that no quota-managed resource can be created or modified without proper
+    validation and finalizer injection. While this means the webhooks are
+    critical-path components, it guarantees that quota accounting cannot be
+    bypassed due to webhook outages.
 -   **`quota-operator` Resilience:** The `quota-operator` will be designed to be
     resilient. If its connections to necessary components of the system are
     unavailable for any period not resolved through thorough retries and failure
@@ -423,8 +428,8 @@ acceptable for the system.
     status *and* logs (providing full transparency), and might temporarily deny
     new claims.
 -   **Monitoring & Alerting:** Comprehensive monitoring will be in place to
-    alert operators immediately if the webhook service becomes unhealthy or if
-    its error rate or latency increases, allowing for rapid intervention.
+    alert operators immediately if either webhook service becomes unhealthy or if
+    their error rate or latency increases, allowing for rapid intervention.
 -   **Emergency Bypass (Break-Glass Procedure):** For extreme, prolonged outages
     of the core quota enforcement workflow, a well-documented, audited, and
     IAM-controlled procedure should allow **Internal Administrators only** to
@@ -1125,11 +1130,10 @@ This separation ensures controllers can focus on business logic and
 reconciliation while maintaining data integrity through admission-time
 validation.
 
-**Note**: The mutating webhook does not add finalizers to Owning Service
-resources (e.g., `Instance`). Instead, the Owning Service controllers create
-`ResourceClaim` objects, and the quota system's mutating webhook adds finalizers
-to those claims to ensure proper quota accounting during claim lifecycle
-management.
+**Failure Policy**: Both validating and mutating webhooks are configured with
+`failurePolicy: Fail` to ensure system consistency over availability. This
+prevents quota enforcement bypass during webhook outages while requiring high
+availability deployment configurations.
 
 ## System Architecture Diagrams
 
