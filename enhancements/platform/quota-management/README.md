@@ -302,58 +302,38 @@ The quota management system delivers the following core capabilities:
 
 ### Key Components
 
-The quota management system is built on three core architectural components that
-work together to provide centralized quota enforcement.
+The quota management system is built on three core architectural components:
 
-*Note: Detailed specifications for each component, including complete CRD
-schemas, controller reconciliation logic, and architectural patterns are
-provided in the [Design Details](##design-details) section.*
+1. **Custom Resource Definitions (CRDs)** - Defines the data model for quota
+   management and the APIs exposed to interact with these models
+2. **Quota Operator** - Orchestrates quota management through a set of dedicated
+   controllers based on the proposed CRDs
+3. **Admission Webhooks** - Provides validating and mutating webhooks that
+   ensure data integrity
 
-#### Custom Resource Definitions (CRDs)
+*Detailed specifications for each component are provided in the [Design
+Details](##design-details) section.*
 
-The system implements quota management using the [Kubernetes operator
-pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/),
-leveraging five core CRDs that define the data model for quota management:
+### Implementation Phases
 
-- **`ResourceRegistration`** - Defines quotable resource types (e.g.,
-  `compute.datumapis.com/instances/cpu`) and optional dimensional constraints
-  (e.g., `location` and `instance-type`).
+To deliver a functional MVP while maintaining long-term architectural vision and
+backwards compatibility, the quota management system will be implemented in
+phases:
 
-- **`ResourceGrant`** - Created by administrators to set quota limits; each
-  grant contributes allowances toward the total effective quota limit and
-  multiple grants are *additive* in nature.
+**Phase 1 (Initial MVP):**
+- Complete CRD definitions and basic quota enforcement
+- Simple resource-level quota tracking without dimensional constraints
+- Accurate usage accounting with basic resource name matching
+- Core controller logic for resource registration, grant management and claim
+  evaluation
 
-- **`ResourceClaim`** - Created by Owning Services to request the usage of quota
-  from the available allowances
+**Phase 2 (Future Enhancement):**
+- Full dimensional constraint support in controller business logic
+- Advanced selector logic for quotas with more complex dimensions
+- Enhanced UI features for quota visualization at specific dimensional levels
 
-- **`EffectiveResourceGrant`** - High-level aggregated views of total effective
-  quota limits for broad resource categories (e.g., "total CPU limit for
-  project"), optimized for Cloud and Staff Portal UIs
-
-- **`AllowanceBucket`** - Fine-grained tracking of allocated quota for specific
-  resource + dimension combinations (e.g., "CPU allocated for projects in the
-  `DFW` location with a `d1-standard-2` instance type"), serving as the
-  authoritative source of truth for usage accounting
-
-#### Quota Operator
-
-The `quota-operator` serves as the central orchestration engine, implemented as
-a multi-controller system where each controller manages specific CRD lifecycles
-while coordinating through standard Kubernetes watch patterns:
-
-- **ResourceRegistration Controller** - Maintains the catalog of quotable
-  resource types
-- **ResourceGrant Controller** - Manages administrative quota limit definitions
-- **ResourceClaim Controller** - Makes quota grant/deny decisions for incoming
-  requests
-- **EffectiveResourceGrant Controller** - Provides aggregated views and manages
-  fine-grained usage accounting
-
-#### Admission Webhooks
-
-Validation and mutation webhooks ensure data integrity by handling CRD
-validation and automatic finalizer injection at admission time, allowing
-controllers to focus on business logic rather than validation concerns.
+This phased approach ensures rapid delivery of core quota functionality while
+using forward thinking architectural planning for future iterations.
 
 ### User Stories
 
@@ -1503,6 +1483,14 @@ Major milestones might include:
 - the version where the Enhancement graduated to general availability
 - when the Enhancement was retired or superseded
 -->
+
+**Phased Implementation Decision**: Based on delivery requirements for the
+initial release, the implementation has been planned in two main phases. Phase 1
+focuses on core quota enforcement capabilities, deferring most dimensional
+constraint logic to Phase 2. This approach balances thoroughness in
+architectural design while ensuring delivery for launch. All CRD definitions
+include dimensional support to ensure forward compatibility, but controller
+business logic will be reduced.
 
 ## Drawbacks
 
