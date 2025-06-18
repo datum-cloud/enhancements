@@ -408,65 +408,79 @@ acceptable for the system to maintain quota integrity and enforcement.
 
 The quota management system will be deployed as a series of components that form
 a centralized service. This section provides detailed specifications for each
-component and describes key architectural patterns that enable cross-namespace
-quota enforcement and service integration.
+component and describes the key architectural patterns that enable
+cross-namespace quota enforcement and service integration.
 
 ### Architectural Patterns
 
 #### Cross-Namespace Quota Enforcement
 
-The quota system solves [Kubernetes
-ResourceQuota's](https://kubernetes.io/docs/concepts/policy/resource-quotas/)
-namespace limitation through a **project-scoped quota model**:
+The quota system solves the namespace-level limitations of [Kubernetes
+ResourceQuotas](https://kubernetes.io/docs/concepts/policy/resource-quotas/)
+through a **project or organization scoped quota model**:
 
-- **Project-level ResourceGrants** reside in the project's primary namespace
-  (e.g., `proj-abc`) and define quota limits for the entire project
-- **ResourceClaims** can be created in any namespace within the project (e.g.,
-  `proj-abc-1`, `proj-abc-2`, `proj-abc-staging`)
+- **Project-level `ResourceGrant`s** reside in project namespaces and enable the
+ definition of quota limits for the entire project across all namespaces
+- **`ResourceClaim`s** can be created in any namespace within the project for a
+  more specific scope
 - **Quota evaluation** aggregates usage across all namespaces belonging to the
   project, enforcing limits at the project level rather than per-namespace
-- **Organization-level ResourceGrants** handle high-level organizational limits
-  (max projects, max users) but do not aggregate resource quotas across projects
+- **Organization-level `ResourceGrant`s** handle high-level organizational
+  limits (e.g., max projects and max collaborators per organization) but do not
+  aggregate quotas across projects (e.g., total CPU cores for *all* projects
+  within an organization).
 
-This enables true multi-tenant quota management where logical business
-boundaries (projects/organizations) control resource allocation rather than
-infrastructure boundaries (namespaces).
+This enables multi-tenant quota management where logical *business boundaries*
+(projects/organizations) control resource allocation rather than infrastructure
+boundaries (Kubernetes namespaces).
 
-#### Service Integration Patterns
+#### Quota Enforcement
 
-Datum Cloud Services integrate with the quota management system using the
-**service controller driven pattern**, described below:
+The quota management system uses two specific enforcement patterns, depending on
+the `type` defined in the `ResourceRegistration` spec tied to the claim
+(`Allocation` or `Provisioning`).
 
-**Service Controller Driven Pattern**
+**Provisioning-Based Enforcement (Synchronous Claim Decision with Immediate
+Enforcement)**
 
--   **Flow:**
-    1.  A user requests the creation of a resource (e.g., `Instance`) through
-        the Datum Cloud Portal, which communicates with the Owning Service API.
-        The entity is created in the control plane with a status indicating it
-        is pending quota allocation.
-    2.  The Owning Service's controller (e.g., `InstanceController`) sees the
-        new `Instance` CR. It will not proceed with data plane provisioning
-        while the quota is not yet granted.
-    3.  The Owning Service controller creates a `ResourceClaim`.
-    4.  The Owning Service controller watches the `status` of the created
-        `ResourceClaim` as quota decisions are made.
-    5.  If `ResourceClaim.status.conditions.Granted.status == True`:
-        -   The controller proceeds to provision the `Instance` in the data
-            plane.
-        -   It updates the `Instance.status` to reflect successful provisioning
-            (e.g., `Running`).
-    6.  If `ResourceClaim.status.conditions.Granted.status == False` (e.g., due
-        to `QuotaExceeded`):
-        -   The controller updates the `Instance.status.conditions` to reflect
-            the failure (e.g., `QuotaExhausted`).
-        -   The data plane resources are not provisioned. The user can see the
-            resource exists via the Cloud Portal, but is not running due to a
-            clear reason.
--   **Benefits:** Better user experience: The resource appears immediately in
-    the Cloud Portal, providing instant feedback. The resource's status (e.g.,
-    `PendingQuota`, `QuotaExhausted`, `Running`) clearly communicates its state
-    to the user without blocking the initial request. This also allows for
-    robust, asynchronous processing of resource lifecycles.
+For provisioning-based claims, a synchronous enforcement mechanism is used. For
+example, attempting to claim one additional `Instance` within a project,
+increasing the project's `Instance` *count* by one. 
+
+1. **Initial Trigger Event**: User requests resource creation from the Owning
+   Service
+2. **Control Plane Acceptance**: Object is created immediately in the control
+   plane via the Owning Service controller, representing optimistic creation of
+   the object
+3. **Quota Claim**: Owning Service controller observes the new object and
+   creates a new `ResourceClaim` via the quota management system
+4. **Claim Evaluation**: The `ResourceClaim` controller evaluates the claim
+   against available quota
+5. **Immediate Claim Decision**: If the claim would exceed quota limits, it is
+   immediately denied and the result returned to the Owning Service. If it would
+   *not* exceed those limits, it is immediately granted.
+6. **Provisioning**: Once the terminal status of the claim is set, the Owning
+   Service controller can proceed with downstream data plane provisioning of the
+   resource
+
+**Allocation-Based Enforcement (Asynchronous Claim Decision with Deferred
+Enforcement)**
+
+For allocation-based claims, an asynchronous enforcement mechanism is used. For
+example, attempting to claim an additional 500 GiB for a specific `Instance` or
+instance-type.
+
+1. **Initial Trigger Event**: User requests additional allocation from the
+   Owning Service
+2. **Quota Claim**: Owning Service controller observes the newly created object
+   and creates a new `ResourceClaim` via the quota management system
+3. **Claim Evaluation**: The `ResourceClaim` controller evaluates the claim
+   against available quota
+4. **Deferred Claim Decision**: Claim remains in a "pending" state until the it
+   reaches a terminal state (granted or denied)
+5. **Allocation**: Once the status of the claim transitions to a terminal state,
+   the Owning Service controller watching the claim proceedes with downstream
+   allocation
 
 ### Custom Resource Definitions
 
