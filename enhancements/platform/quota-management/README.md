@@ -337,10 +337,10 @@ using forward thinking architectural planning for future iterations.
 
 ### User Stories
 
-To provide concrete examples of how the system will be used, beyond previously
-discussed benefits, the following user stories are proposed. These stories are
-not exhaustive, but are intended to provide a clear understanding of the system
-and its capabilities at a high level for the various personas involved.
+To provide concrete examples of how the system will be used, the following user
+stories are proposed. These stories are non-exhaustive, but are intended to
+provide a clear understanding of the system and its capabilities at a high level
+for the various personas involved.
 
 #### Story 1: Quota Visibility for External Administrators
 As an **External Administrator**, I should be able to view my current quota
@@ -351,20 +351,19 @@ capacity and track resource consumption against set limits.
 #### Story 2: Quota Increase Requests  
 As an **External Administrator**, I should be able to request quota increases
 for my organization and projects through an established process (via **Internal
-Administrators**), so that I can scale my resource limits to meet growing
-business needs.
+Administrators**), so that I can scale my quota limits to meet growing business
+needs.
 
-#### Story 3: Platform-wide Quota Management
+#### Story 3: Platform-wide quota management
 As an **Internal Administrator**, I should be able to view and manage quota
 limits for all organizations and projects across the platform through the Staff
-Portal, so that I can ensure optimal resource allocation across provisioned
+Portal, so that I can ensure optimal and fair resource provisioning and allocation across
 infrastructure and maintain overall platform stability.
 
-#### Story 4: Resource Type Registration and Service Integration
+#### Story 4: Resource Type Registration
 As an **Internal Administrator**, I should be able to register new quotable
-resource types and enable Datum Cloud services to easily integrate with the
-quota management system, so that existing and new services can quickly begin to
-leverage quota management capabilities without custom implementations.
+resource types, so that existing and new services can quickly begin to leverage
+quota management capabilities without extensive business logic changes.
 
 ### Risks and Mitigations
 
