@@ -368,56 +368,39 @@ quota management capabilities without extensive business logic changes.
 ### Risks and Mitigations
 
 Various risks must be taken into account for the proposed implementation of the
-Quota Management system to ensure the system is working as expected and the
-risks are mitigated. These risks are not exhaustive, but are intended to provide
-a clear understanding of the potential issues that may arise and the mitigations
-that are proposed if they do arise
+quota management system to ensure the it is working as expected and the
+potential risks are mitigated. These risks are non-exhaustive, but cover the
+main risks and their mitigations.
 
 Best practices will be enforced by reviewers based on their knowledge of the
 Datum Cloud and Milo ecosystems, including full security compliance and
-alignment with established external and internal standards of Datum platforms.
+alignment with established external and internal requirements.
 
 #### Risk: Quota System Unavailability Blocks Resource Creation
 
-**Consequence**: If either the validating or mutating admission webhooks are
-unavailable, they will block the creation and modification of any resource that
-they are configured to watch. This prioritizes system consistency over
-availability, a trade-off that is acceptable for the system to maintain quota
-integrity.
+**Consequence**: If any part of the quota management system is unavailble, data
+plane allocation will be blocked for Owning Service resources. This is a result
+of prioritizing system consistency over availability: a trade-off that is
+acceptable for the system to maintain quota integrity and enforcement.
 
 ##### Mitigations (High-Level):
--   **High Availability of Webhooks:** The primary mitigation is to ensure the
-    Quota Management webhook service is deployed in a highly available
-    configuration (e.g., with multiple replicas) to minimize its downtime.
--   **Webhook `failurePolicy: Fail`:** Both the validating and mutating
-    admission webhooks will be configured with aggressive timeouts and their
-    `failurePolicy` set to `Fail`. This is a deliberate design choice to prevent
-    system inconsistencies and provides:
-    - **Financial protection** - Prevents unexpected resource costs during
-      outages
-    - **Compliance requirements** - Ensures quota limits are never violated
-    - **Predictable behavior** - No "sometimes enforced, sometimes not"
-      scenarios
-    - **Clear failure signals** - Makes quota system health visible to operators
-    
-    This ensures that no quota-managed resource can be created or modified
-    without proper validation and finalizer injection. While this means the
-    webhooks are critical-path components, it guarantees that quota accounting
-    cannot be bypassed due to webhook outages.
--   **`quota-operator` Resilience:** The `quota-operator` will be designed to be
-    resilient. If its connections to necessary components of the system are
-    unavailable for any period not resolved through thorough retries and failure
-    policies, the operator should clearly indicate this in both in its own
-    status *and* logs (providing full transparency), and might temporarily deny
-    new claims.
--   **Monitoring & Alerting:** Comprehensive monitoring will be in place to
-    alert operators immediately if either webhook service becomes unhealthy or
-    if their error rate or latency increases, allowing for rapid intervention.
--   **Emergency Bypass (Break-Glass Procedure):** For extreme, prolonged outages
-    of the core quota enforcement workflow, a well-documented, audited, and
-    IAM-controlled procedure should allow **Internal Administrators only** to
-      temporarily bypass quota checks (e.g., by temporarily removing or altering
-      webhook configurations). This is a last-resort measure.
+- **High System Availability:** The primary mitigation is to ensure the quota
+  management system and its components designed for high availability (e.g.,
+  with multiple replicas) to minimize potential downtime.
+- **Webhook `failurePolicy: Fail`:** Both the validating and mutating admission
+  webhooks will be configured with aggressive timeouts and their `failurePolicy`
+  set to `Fail`. This is a deliberate design tradeoff to prevent system
+  inconsistencies.
+- **System Resilience and Recovery:** The system and its components will be
+  designed to be resilient, with retry and failure policies properly configured.
+- **System Observability:** Comprehensive monitoring will be in place to alert
+  users immediately if the system or its components become unhealthy, defined by
+  unavailability, or error rate and latency exceedubg acceptable levels;
+  allowing for rapid intervention.
+- **Emergency Bypass (Break-Glass Procedure):** For extreme, prolonged outages
+  of the core quota enforcement workflow, a well-documented, audited, and
+  IAM-controlled procedure should allow **Internal Administrators only** to
+  temporarily bypass quota checks. This is a last-resort measure.
 
 ---
 
