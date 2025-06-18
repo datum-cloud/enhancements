@@ -248,21 +248,24 @@ risking unexpected costs.
 
 ## Proposal
 
-This enhancement proposes implementing quota management through a
-controller-based architecture using Custom Resource Definitions. The approach
-centers on three main interactions:
+This enhancement proposes implementing quota management through the Kubernetes
+[operator
+pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/),
+aligning with established patterns within the Datum Cloud and Milo platforms.
 
-1. **Resource Registration** - Services register their quotable resource types
-   with the central system
+This approach centers on three main interactions:
+
+1. **Resource Registration** - **Internal Administrators** register service
+specific quotable resource types with the quota management system
 2. **Quota Limit Management** - Administrators set quota limits by creating
-   `ResourceGrant`s that contribute allowances toward the total effective limits  
-3. **Quota Enforcement** - Services claim quota during resource provisioning,
-   with enforcement happening asynchronously to avoid blocking user requests
+ additive grants that contribute allowances toward the total effective limits  
+3. **Claim Quota** - Owning Services attempt to claim quota during their normal
+  provisioning and allocation workflows
 
-The system uses a "controller-driven pattern" where resources are created
-immediately in the control plane but data plane provisioning waits for quota
-approval. This ensures optimal user experience while maintaining strict quota
-enforcement.
+The system uses an Owning Service "controller-driven pattern" where resources
+are immediately provisioned in the control plane but data plane allocation waits
+for quota claim approval. This ensures optimal user experience while maintaining
+strict quota enforcement.
 
 ### System Capabilities and Success Criteria
 
@@ -270,30 +273,32 @@ The quota management system delivers the following core capabilities:
 
 **For Internal Administrators:**
 - Register quotable resource types from any Datum Cloud service
-- Set quota limits by creating `ResourceGrant`s with multi-dimensional
-  constraints (e.g., by location or instance type)
+- Set quota limits by creating grants with multi-dimensional constraints (e.g.,
+  by location or instance type)
 - Automatically provision default quotas when new projects/organizations are
   created
 - Monitor quota usage across all projects and organizations
 
 **For External Administrators:**
-- View current quota limits and consumption via the Datum Cloud Portal
-- Request quota increases through established processes
-- Receive clear feedback when quota limits will be exceeded by new claims
+- View active quota limits and accurate usage accounting
+- Request quota increases through established standard processes
+- Receive clear feedback when quota limits will be exceeded by new claim
+  attempts
 
 **For Owning Services:**
-- Integrate quota management without modifying core business logic
+- Integrate with the quota management system without modifying core business
+  logic
 - Leverage standardized patterns for quota claim/release workflows
-- Benefit from asynchronous enforcement that doesn't block user requests and
-  degrade user experience
+- Benefit from asynchronous enforcement that doesn't block resource creation in
+  the control plane for allocation-based claims
+- Benefit from synchronous enforcement with low latency for provisioning-based
+  claims 
 
 **System-wide:**
-- Accurate, real-time quota accounting with separated usage tracking to avoid
-  conflicts
-- Extensible architecture supporting new resource types without central system
-  changes
+- Extensible architecture supporting registering mew resource types with the
+  quota management system without requiring bespoke code in the Owning Services
+  for each new registered type
 - Efficient concurrent claim processing through dedicated usage accounting
-  resources
 
 ### Key Components
 
