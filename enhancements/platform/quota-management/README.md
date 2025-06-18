@@ -158,20 +158,19 @@ latest-milestone: "v0.1"
     their typical responsibilities.
 
 - **Quota Limit**: The *maximum permissible amount* of a resource that *can be
-    consumed* by a project or organization for a specific resource type and
+    allocated or provisioned* by a project or organization for a specific resource type and
     dimension combination. Quota limits are set by administrators through
     creating `ResourceGrant` CRDs, with multiple grants combining additively to
-    determine the total effective quota limit.
+    determine the *total effective quota limit*.
 
 - **Quota Allowance**: The *specific amount* of a resource that a single
-    `ResourceGrant` contributes toward the total quota limit. Multiple
+    `ResourceGrant` contributes toward the total effective quota limit. Multiple
     allowances from different grants are additive. This term is used as the
-    field name in `ResourceGrant.spec.allowances[]` to answer "what allowances
-    does this grant contribute toward the total quota limit?"
+    field name in `ResourceGrant.spec.allowances[]`.
 
-- **Quota Claim**: A request made by an Owning Service (via `ResourceClaim` CRD)
-    to allocate a specific amount of quota for a resource. Claims are evaluated
-    against the total available quota limit.
+- **Quota Claim**: A attempt made by an Owning Service (via the `ResourceClaim` CRD)
+    to claim a specific amount of quota for a resource. Claims are evaluated
+    against the total effective quota limit.
 
 - **Allocated Quota**: The amount of quota that has been granted to active
     `ResourceClaim`s and is currently in use. This is tracked in
