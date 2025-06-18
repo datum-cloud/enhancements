@@ -190,15 +190,15 @@ maintaining platform availability through non-blocking enforcement mechanisms.
 Organizations and projects within the Datum Cloud ecosystem need predictable
 resource consumption controls to ensure operational stability, cost
 predictability, and regulatory compliance. Currently, there is no centralized
-mechanism to:
+mechanism that allows:
 
-- Define and enforce resource limits across different Datum Cloud services
-- Provide transparent visibility into resource consumption against allocated
-  quotas
-- Prevent accidental or malicious resource overuse
-- Allow services to integrate quota management without custom implementations
+- Defining and enforcing quota limits across different Datum Cloud services
+- Providing transparent visibility into resource consumption against quota
+  limits.
+- Preventing accidental or malicious resource overuse
+- Services to integrate quota management without custom implementations
 
-The ability to create, observe, and manage resource quotas will provide numerous
+The ability to create, manage, and observe resource quotas will provide numerous
 benefits to both **Internal and External Administrators**:
 
 1. **Operational stability and reliability** - Prevent resource exhaustion
@@ -210,53 +210,41 @@ benefits to both **Internal and External Administrators**:
 4. **Regulatory compliance** - Support for internal and external policy
    enforcement
 
-These safeguards will enable users to confidently explore the Datum Cloud and
-Milo ecosystems without risking unexpected costs or resource constraints.
+The safeguards provided by the quota management system will enable users to
+confidently explore and leverage the Datum Cloud and Milo ecosystems without
+risking unexpected costs.
 
 ### Goals
 
-- Provide clear system context and architectural approach to the creation of a
-  quota management system that Datum Cloud services will integrate with.
-- Define the APIs that **Internal Administrators** will use to:
-  - Register specific service resource types that can be subject to quota
-    management.
-  - Set quota limits for the registered resource types by creating
-    `ResourceGrant`s containing dimensions and labels, with the ability to grant
-    additional quotas to specific projects or organizations.
-  - Automatically generate grants for new projects and organizations when they
-    are initialized.
-- Define the APIs for **External Administrators** to view their quota limits and
-  request changes to them through **Internal Administrators**.
-- Enforce quota limits without blocking the initial creation of the resource
-  object in the **control plane**. This allows a resource (e.g., an `Instance`)
-  to be created and be visible to the user immediately, while the actual
-  provisioning of the underlying **data plane** resources are gated by the
-  Owning Service's controller until the quota is successfully claimed.
+- Provide clear system context and architectural approach for a quota management
+  system that Datum Cloud services integrate with to enforce limits on their
+  resources.
+- Define APIs for **Internal Administrators** to:
+  - Register Owning Service resource types and dimensions with the quota
+    management system 
+  - View and manage quota limits on registered resource types for any/all
+    organizations and projects across the system
+- Define APIs for **External Administrators** to:
+  - View active quota limits and request increases through internal processes
+  - Create claims that attempt to consume resources within their organizations
+    and projects
+- Enforce quota limits without blocking control plane object creation 
 
 ### Non-Goals
 
 - Provide detailed implementation specifics of how the metering and billing
-  components of the platform will work.
+  components of the platform will work
 - Support consumer tier enforcement (e.g., free vs. paid tiers) through
-  configurable quotas (which will be implemented as a future enhancement).
-- Address high-cardinality dimension optimization strategies for
-  `AllowanceBucket` resources at scale (deferred to future enhancement).
-- Define automatic default quota provisioning mechanisms and failure recovery
-  procedures for new projects/organizations (deferred to future enhancement).
+  configurable quotas
+- Define automatic default quota provisioning mechanisms for new
+  projects/organizations (deferred to future enhancement).
 - Define the future Milo Service Catalog and service registration (distinct from
-  the service resource-type registration for quota management).
+  the service resource type registration specific to quota management)
 - Define the exact user interface (UI) mockups or user experience (UX) flows for
-  managing or viewing quotas, beyond initial design for the MVP.
-- Define how time-series metrics (e.g. CPU hours, data written, etc) will be
-  implemented by the data plane.
+  managing or viewing quotas, beyond design for the initial implementation.
 - Define how alerts can be created and sent to **External Administrators** to
   inform them that they are approaching the quota thresholds set for their
-  resources. These "early warning" alerts are *not* enforced by the quota
-  system, nor a part of this enhancement.
-- Provide a mechanism for **External Administrators** (consumers) to define
-  their own "soft limits" for billing alerts or notifications. The limits
-  defined in `ResourceGrant` are authoritative and can only be set by **Internal
-  Administrators**.
+  resources.
 
 ## Proposal
 
