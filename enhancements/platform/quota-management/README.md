@@ -33,7 +33,7 @@ latest-milestone: "v0.1"
         Allocation](#risk-quota-system-unavailability-blocks-resource-allocation)
   - [Design Details](#design-details)
     - [Quota Enforcement Patterns](#quota-enforcement-patterns)
-      - [Provisioning-Based Enforcement (Synchronous Claim
+      - [Entity-Based Enforcement (Synchronous Claim
         Decisions)](#provisioning-based-enforcement-synchronous-claim-decisions)
       - [Allocation-Based Enforcement (Asynchronous Claim
         Decisions)](#allocation-based-enforcement-asynchronous-claim-decisions)
@@ -136,9 +136,8 @@ latest-milestone: "v0.1"
 
 - **Owning Service(s)**: Datum Cloud services that integrate with the quota
   management system to enable quota enforcement on their managed resources.
-  owning services are responsible for generating claims through the
-
-### Quota Specific
+  Owning service controllers are responsible for generating and observing claims
+  as part of their normal provisioning and allocation workflows. 
 
 - **Quota Limit**: The *maximum permissible amount* of a resource that *can be
   allocated or provisioned* by a project or organization for a specific resource
@@ -152,8 +151,6 @@ latest-milestone: "v0.1"
 - **Quota Claim**: A attempt by an owning service to claim quota for a resource.
   Claims are evaluated against the total effective quota limit.
 
-### User Actors
-
 - **Internal Administrators**: Administrators responsible for the overall
   management and operation of the Datum Cloud and Milo platforms as a whole.
 
@@ -165,9 +162,9 @@ latest-milestone: "v0.1"
 <!-- TODO: Determine if this needs to be more thorough, or simplified to not be redundant with the Motivation section -->
 This enhancement proposes the architecture and implementation of a centralized
 quota management system within [Milo](https://github.com/datum-cloud/milo) that
-will provide impactful functionality to both internal administrators of Datum
-Cloud, as well as the external administrators of organizations and projects
-within it.
+will provide impactful functionality to internal administrators of Datum Cloud,
+as well as the external administrators of the resources within their
+organizations and projects within it.
 
 ## Motivation
 
@@ -379,9 +376,9 @@ enforcement and integration by owning services.
 
 The quota management system uses two specific enforcement patterns, depending on
 the `type` defined in the `ResourceRegistration` spec tied to the claim
-(`Allocation` or `Provisioning`, for the phase one release).
+(`Allocation` or `Entity`, for the phase one release).
 
-#### Provisioning-Based Enforcement (Synchronous Claim Decisions)
+#### Entity-Based Enforcement (Synchronous Claim Decisions)
 
 For provisioning-based claims, a synchronous enforcement mechanism is used for
 immediate enforcement. For example, attempting to claim an additional `Instance`
@@ -401,7 +398,7 @@ completes.
 5. **Immediate Claim Decision**: If the claim would exceed quota limits, it is
    immediately denied and the result returned to the owning service. Conversely,
    if it would *not* exceed those limits, it is immediately granted.
-6. **Provisioning**: Once the terminal status of the claim is set (`Granted` or
+6. **Entity**: Once the terminal status of the claim is set (`Granted` or
    `Denied`), the owning service controller watching the claim can proceed with
    its provisioning workflow.
 
@@ -460,13 +457,13 @@ implementation:
 
 #### `ResourceRegistration`
 
-The `ResourceRegistration` CRD gives **Internal Administrators** the ability to
+The `ResourceRegistration` CRD gives internal administrators the ability to
 define and register specific resource types and dimensions from owning services
-(e.g., `compute.datumapis.com/instances/cpu`,
-`networking.datumapis.com/subnets`) that the quota management system can then
-proceed to manage. **Internal Administrators** interact with the quota
-management APIs to manage these registrations, and it is the initial step of the
-end to end quota management workflow.
+(e.g., `compute.datumapis.com/instances/cpu`, `networking.datumapis.com/subnet`)
+that the quota management system can then proceed to manage. internal
+administrators interact with the quota management APIs to manage these
+registrations, and it is the initial step of the end to end quota management
+workflow.
 
 This approach ensures that the quota management system is aware of which
 specific owning service resources are quotable, without the quota management
@@ -484,12 +481,15 @@ spec:
   ownerRef:
     apiGroup: compute.datumapis.com
     kind: Instance
-  # - "Provisioning": Declares a new resource entity (e.g., Instance, Project) that must be counted for quota.
-  # - "Allocation": Declares a resource unit (e.g., CPU, memory, storage) that can be reserved or consumed within a parent entity.
+  # - "Entity": Declares a new resource entity (e.g., Instance, Project) 
+  #   that must be counted for quota.
+  # - "Allocation": Declares a resource unit (e.g., CPU, memory, storage) 
+  #   that can be reserved or consumed within a parent entity.
   # - "Feature": Reserved for future use to track feature flags
-  type: Allocation
+  type: "Entity"
   # Fully qualified name of the resource type being registered, as defined by the owning service.
-  resourceTypeName: compute.datumapis.com/instances/cpu
+  # This field is used in the matching pattern to locate associated ResourceGrants and ResourceClaims
+  resourceTypeName: "compute.datumapis.com/instances/cpu"
   # Description of the resource type.
   description: "Amount of allocated CPU cores for compute instances."
   # The base unit of measurement for the resource.
@@ -505,22 +505,17 @@ spec:
   # from the owning service's API group.
   # Note: Dimensions are not used in the initial release to reduce complexity as stated in this document
   dimensions:
-    - compute.datumapis.com/instance-type
-    - networking.datumapis.com/location
+    - "compute.datumapis.com/instance-type"
+    - "networking.datumapis.com/location"
 status:
   # The specific revision of the ResourceRegistration.
   observedGeneration: 1
   # Standard kubernetes approach to represent the state of a resource.
   conditions:
-    # Indicates if the registration is active and ready for grant creation and claim requests.
-    # - Type: Active
-    # - Status: "True" | "False" | "Unknown"
-    # - Reason: (e.g., "RegistrationActive" | "RegistrationInactive" | "Initializing")
-    # - Message: Human-readable message detailing status reason
-    - type: Active
-      status: True
+    - type: "Active"
+      status: "True"
       lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: RegistrationActive
+      reason: "RegistrationActive"
       message: "The registration is active and ready for grant creation and claim requests."
 ```
 
@@ -530,32 +525,35 @@ The `ResourceGrant` CRD is how administrators set quota limits for a specific
 scope, referencing the owning service resource types and dimensions defined by a
 `ResourceRegistration`. 
 
-Multiple `ResourceGrant` CRs can exist for the same resource type and scope, as
-each grant contributes allowances that are *additive* to determine the total
+Multiple `ResourceGrant` CRs can exist for the same resource type and namespace,
+as each grant contributes allowances that are *additive* to determine the total
 effective quota limit.
 
 ```yaml
 apiGroup: quota.miloapis.com
 kind: ResourceGrant
 metadata:
-  name: <my-resource-quota-grant>
+  name: my-resource-quota-grant
   # namespace corresponds to the org or project the grant applies to
+  # and is used in the matching pattern, along with allowance item resource type names to locate 
+  # associated EffectiveResourceGrants
   namespace: proj-abc
 spec:
   ownerRef:
     apiGroup: resourcemanager.datumapis.com
-    kind: Instance
+    kind: Project
 
   # List of allowances for specific resource types and dimensions that this grant applies to.
   allowances:
     #1. Total instances for the project with no dimension selectors
-    - name: compute.datumapis.com/instance
+    # name used in matching pattern to locate associated EffectiveResourceGrants
+    - name: "compute.datumapis.com/instance"
       buckets:
         - amount: 100
           dimensionSelector: {}
 
     # 2. Compute instance CPUs
-    - name: compute.datumapis.com/instances/cpu
+    - name: "compute.datumapis.com/instances/cpu"
       # A bucket represents a specific amount + combination of dimensions for the resource type
       buckets:
         # Amount of the resource type being granted (base unit already defined in `ResourceRegistration`)
@@ -564,8 +562,8 @@ spec:
           # key *exists* for the resource type.
           dimensionSelector:
             matchExpressions: 
-              - key: networking.datumapis.com/location
-                operator: Exists
+              - key: "networking.datumapis.com/location"
+                operator: "Exists"
 
         # Additional bucket for a different amount of CPU cores for the DLS location only.
         # This grants an extra 500,000 millicores to DLS, in addition to the base 100,000 
@@ -575,27 +573,28 @@ spec:
           # Selector specifying labels to match against.
           dimensionSelector:
             matchLabels:
-              networking.datumapis.com/location: DLS
+              "networking.datumapis.com/location": "DLS"
 
     # 3. Compute instance memory allocation
-    - name: compute.datumapis.com/instances/memoryAllocated
+    - name: "compute.datumapis.com/instances/memoryAllocated"
       buckets:
         - amount: 50000
           # Selector specifying a list of network locations to match against.
           dimensionSelector:
             matchExpressions:
-              - key: networking.datumapis.com/location
+              - key: "networking.datumapis.com/location"
                 # Will match any item in the list of locations defined in `values`
-                operator: In
+                operator: "In"
                 values:
-                  - DFW
-                  - LHR
+                  - "DFW"
+                  - "LHR"
 status:
+  observedGeneration: 1
   conditions:
-    - type: Active
+    - type: "Active"
       status: "True"
       lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: GrantActivated
+      reason: "GrantActivated"
       message: "The grant has been successfully activated and will now be taken into account when evaluating future claims."
 ```
 
@@ -615,74 +614,77 @@ apiGroup: quota.miloapis.com
 kind: ResourceClaim
 metadata:
   name: proj-abc-instance-cpu-claim-abc123
-  # Must match the namespace of applicable ResourceGrants for this claim
+  # Must match the namespace of applicable ResourceGrants for this claim.
   namespace: proj-abc
   finalizers:
-    - quota.miloapis.com/quota-release
+    - "quota.miloapis.com/quota-release"
 spec:
   # used by finalizer logic to release quota when the owning object is deleted
   ownerRef:
     apiGroup: compute.datumapis.com
     kind: Instance
     name: instance-abc123
-    uid: <instance-uid>
+    uid: "550e8400-e29b-41d4-a716-446655440000"
   resources:
-    - name: compute.datumapis.com/instances/cpu
+    - name: "compute.datumapis.com/instances/cpu"
       amount: 8000
       dimensions:
-        networking.datumapis.com/location: "DFW"
-        compute.datumapis.com/instance-type: "d1-standard-2"
+        "networking.datumapis.com/location": "DFW"
+        "compute.datumapis.com/instance-type": "d1-standard-2"
 
     # No dimensions, meaning amount is for all instances and does
     # not take into account location or instance-type
-    - name: compute.datumapis.com/instances/memoryAllocated
+    - name: "compute.datumapis.com/instances/memoryAllocated"
       amount: 68719476736
       dimensions: {}
 
-    - name: compute.datumapis.com/instances/memoryAllocated
+    - name: "compute.datumapis.com/instances/memoryAllocated"
       amount: 34359738368
       dimensions:
-        networking.datumapis.com/location: "DFW"
-        compute.datumapis.com/instance-type: "d1-standard-2"
+        "networking.datumapis.com/location": "DFW"
+        "compute.datumapis.com/instance-type": "d1-standard-2"
 
 status:
+  observedGeneration: 1
   conditions:
-    - type: Granted
+    - type: "Granted"
       status: "True"
       lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: QuotaAvailable
+      reason: "QuotaAvailable"
       message: "Claim was granted due to quota availability."
 ```
 
-**Example: Provisioning Type ResourceClaim**
+**Example: Entity Type ResourceClaim**
 
 ```yaml
 apiGroup: quota.miloapis.com
 kind: ResourceClaim
 metadata:
-  name: proj-abc-instance-cpu-claim-abc123
+  name: org-abc-proj-xyz-entity-claim
   # Must match the namespace of applicable ResourceGrants for this claim
-  namespace: proj-abc
+  # and is used in the matching pattern to locate associated EffectiveResourceGrants
+  namespace: org-abc
   finalizers:
-    - quota.miloapis.com/quota-release
+    - "quota.miloapis.com/quota-release"
 spec:
   # used by finalizer logic to release quota when the owning object is deleted
   ownerRef:
-    apiGroup: compute.datumapis.com
-    kind: Instance
-    name: instance-abc123
-    uid: <instance-uid>
+    apiGroup: resourcemanager.datumapis.com
+    kind: Organization
+    name: org-abc
+    uid: "550e8400-e29b-41d4-a716-446655440000"
   resources:
-    - name: compute.datumapis.com/Instance
+    - name: "compute.datumapis.com/Project"
       amount: 5
       dimensions: {}
 
 status:
+  observedGeneration: 1
   conditions:
-    - type: Granted
+    - type: "Granted"
       status: "True"
       lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: QuotaAvailable
+      reason: "QuotaAvailable"
       message: "Claim was granted due to quota availability."
 ```
 
@@ -699,10 +701,10 @@ apiGroup: quota.miloapis.com
 kind: EffectiveResourceGrant 
 metadata:
   name: proj-abc-compute-cpu-effective
+  # namespace is used in the matching pattern for ResourceGrant and ResourceClaim objects
   namespace: proj-abc
-  # Labels to help in querying the view
+  # Labels to help in querying this custom resource
   labels:
-    # Used by controller logic to find all EffectiveResourceGrants for a specific resource type
     resourceTypeName: "compute.datumapis.com/instances/cpu"
 spec:
   # Reference to project this effective grant applies to
@@ -712,14 +714,23 @@ spec:
     apiGroup: resourcemanager.datumapis.com
     kind: Project
     name: proj-abc
-    uid: <project-uid>
+    uid: "660e8400-e29b-41d4-a716-446655440001"
 status:
+  observedGeneration: 1
   # Total effective quota limit from all applicable ResourceGrants for this resource type
   totalLimit: 120000
   # Total allocated usage across all AllowanceBucket resources for this resource type
   totalAllocated: 30000
   # Available quota (totalLimit - totalAllocated)
   available: 90000
+  # References to AllowanceBuckets used to calculate totalAllocated
+  allowanceBucketRefs:
+    - name: "bucket-proj-abc-cpu-dfw-hash123"
+      observedGeneration: 1
+      allocated: 8000
+    - name: "bucket-proj-abc-cpu-lhr-hash456"
+      observedGeneration: 1
+      allocated: 22000
 ```
 
 #### `AllowanceBucket`
@@ -729,11 +740,9 @@ quota usage for specific resource and dimension combinations, and serves as the
 *single source of truth* for usage accounting.
 
 **Each `AllowanceBucket` is owned by an `EffectiveResourceGrant`**, specified
-through [Kubernetes owner
-references](https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/),
-creating a clear hierarchy where an `EffectiveResourceGrant` owns N buckets, and
-uses those buckets for determining the calculated values to return to the
-client.
+through the metadata `ownerRef` field, creating a clear hierarchy where an
+`EffectiveResourceGrant` owns N buckets, and uses those buckets for determining
+the calculated values to return to the client.
 
 The `EffectiveResourceGrant` Controller manages these buckets by watching
 `ResourceClaim` lifecycle events and updating allocation tracking as they are
@@ -750,31 +759,32 @@ instances within the project *for a specific location*.
 apiGroup: quota.miloapis.com
 kind: AllowanceBucket
 metadata:
-  name: <hash of objectRef + resourceTypeName + dimensions>
+  # Generated deterministic name based on what this bucket tracks
+  name: <hash of namespace + spec.resourceTypeName + serialized spec.dimensions>
   namespace: proj-abc
   # Owned by the corresponding EffectiveResourceGrant
   ownerRef:
     apiGroup: quota.miloapis.com
     kind: EffectiveResourceGrant
-    name: <effective-grant-name>
-    uid: <effective-grant-uid>
+    name: "proj-abc-compute-cpu-effective"
+    uid: "770e8400-e29b-41d4-a716-446655440002"
 spec:
   objectRef:
     apiGroup: resourcemanager.datumapis.com
-    resource: Project
+    kind: Project
     name: proj-abc
-  resourceTypeName: compute.datumapis.com/instances/cpu
+  resourceTypeName: "compute.datumapis.com/instances/cpu"
   dimensions:
-    networking.datumapis.com/location: DFW
+    "networking.datumapis.com/location": "DFW"
 status:
   allocated: 8000
   # Grants used to calculate the total allocated usage.
   resourceGrantRefs:
-    - name: default-grant
+    - name: "default-grant"
       observedGeneration: 1
-    - name: additional-grant-1
+    - name: "additional-grant-1"
       observedGeneration: 1
-    - name: additional-grant-2
+    - name: "additional-grant-2"
       observedGeneration: 1
 ```
 
@@ -792,67 +802,66 @@ resources and remains focused on business logic.
 
 #### ResourceRegistration Controller
 
-*Watches `ResourceRegistration` objects.*
+**Watches `ResourceRegistration` objects**
 
 **Reconciliation Logic**:
 1. Sets `status.conditions.Active` to `True` when the registration is ready for
-   grant creation and claim requests.
+   grant creation and claim requests
+2. Updates `status.observedGeneration` to track the current spec revision
 
 #### ResourceGrant Controller
 
-*Watches `ResourceGrant` objects*
+**Watches `ResourceGrant` objects**
 
 **Reconciliation Logic**:
 1. Sets `status.conditions.Active` to `True` when the grant is ready for use in
-   calculations.
-2. Reads related `EffectiveResourceGrant` objects by namespace and resource type
-   matching to trigger reconciliation in the `EffectiveResourceGrant`
-   controller.
+   quota calculations
+2. Updates `status.observedGeneration` to track the current spec revision
+
+The `EffectiveResourceGrant` controller watches `ResourceClaim` objects
+and will automatically reconcile when claims change.
 
 #### ResourceClaim Controller
 
+**Watches `ResourceClaim` objects**
+
 **Reconciliation Logic**:
-
-*Watches `ResourceClaim` objects*
-
 1. Reads relevant `EffectiveResourceGrant` objects by namespace and resource
-   type matching to determine current usage and total effective quota limit for
-   use in claim evaluation.
-2. Evaluates if `CurrentUsage + ClaimAmount <= TotalEffectiveQuota`.
+   type matching to determine current usage and total effective quota limit
+   (which the `EffectiveResourceGrant` controller calculated based on
+   `AllowanceBuckets`)
+2. Evaluates if `CurrentUsage + ClaimAmount <= TotalEffectiveQuota`
 3. Sets `ResourceClaim.status.conditions.Granted` to `True` or `False` based on
-   quota availability.
-4. Manages finalizer removal for deleted active claims to ensure the release of
-   quota usage.
+   quota availability
+4. Updates `status.observedGeneration` to track the current spec revision
+5. Manages finalizer removal for deleted claims to ensure proper quota cleanup
+
+The `EffectiveResourceGrant` controller watches `ResourceClaim` objects
+and will automatically reconcile when claims change.
 
 #### EffectiveResourceGrant Controller
 
-**Reconciliation Logic**:
+**Watches *both* `ResourceGrant` *and* `ResourceClaim` objects**
 
-*Watches **both** `ResourceGrant` and `ResourceClaim` objects*
+**Reconciliation Logic depends on which type of object was changed:**
 
-When a `ResourceGrant` object changes:
-
-1. Uses namespace + resource type matching to find or create relevant
-   `EffectiveResourceGrant` objects.
+**For `ResourceGrant` Changes:**
+1. For *each allowance* in the grant, uses namespace + resource type matching to
+   find or create relevant `EffectiveResourceGrant` objects
 2. Aggregates allowances from all active `ResourceGrant` objects to calculate
-   `totalLimit`.
-3. Updates `EffectiveResourceGrant.status.totalLimit`
-4. Recalculates `available` quota.
+   the `totalLimit`
+3. Updates `EffectiveResourceGrant.status.totalLimit` and recalculates
+   `available` quota
 
-When a `ResourceClaim` object changes:
-
-1. Uses the same matching pattern used for `ResourceGrant` changes to find
-   relevant `EffectiveResourceGrant` objects.
-2. For *each resource* in the claim, uses a hash of `objectRef +
-   resourceTypeName + dimensions` to find or create specific `AllowanceBucket`
-   objects owned by the `EffectiveResourceGrant`
-3. Updates `AllowanceBucket.status.allocated` based on whether a new claim is
-   granted, or an existing claim is deleted.
-4. Aggregates usage data from *all* `AllowanceBucket` objects owned by the
-   `EffectiveResourceGrant` object in order to calculate the `totalAllocated`
-   quota.
-5. Updates `EffectiveResourceGrant.status.totalAllocated`
-6. Recalculates `available` quota
+**For `ResourceClaim` Changes:**
+1. For *each resource* in the claim, uses a hash of `(namespace +
+   resourceTypeName + serialized dimensions)` to find or create specific
+   `AllowanceBucket` objects owned by the `EffectiveResourceGrant`
+2. Updates `AllowanceBucket.status.allocated`
+3. Aggregates usage data from all owned `AllowanceBucket` objects to calculate
+   `totalAllocated`
+4. Updates `EffectiveResourceGrant.status.totalAllocated` and recalculates
+   `available` quota
 
 ### Admission Webhooks
 
@@ -929,8 +938,8 @@ graph TD
 
 ## Open Questions
 
-1. **Default Quota Provisioning**: What should the default quota limits be for
-   new project and organization resources?
+1. **Default Quota Entity**: What should the default quota limits be for new
+   project and organization resources?
    - Deferred to phase two release
 
 ---
@@ -1119,8 +1128,7 @@ operations) to quota controllers for:
 3. Retrieving quota information to display (Staff and Cloud Portals)
 
 No requests will be made to claim resources, as that is an implementation detail
-of the owning services the portals use for existing provisioning and allocation
-workflows.
+of the owning services the portals use for existing provisioning workflows.
 
 #### Will enabling / using this feature result in introducing new API types?
 
