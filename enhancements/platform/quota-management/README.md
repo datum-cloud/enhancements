@@ -159,12 +159,9 @@ latest-milestone: "v0.1"
 
 ## Summary
 
-<!-- TODO: Determine if this needs to be more thorough, or simplified to not be redundant with the Motivation section -->
 This enhancement proposes the architecture and implementation of a centralized
-quota management system within [Milo](https://github.com/datum-cloud/milo) that
-will provide impactful functionality to internal administrators of Datum Cloud,
-as well as the external administrators of the resources within their
-organizations and projects within it.
+system within [Milo](https://github.com/datum-cloud/milo) that
+provides quota management functionality to both internal and external administrators of Datum Cloud.
 
 ## Motivation
 
@@ -175,31 +172,27 @@ significant operational and technical value, including:
 
 1. **Platform Stability and Reliability** through the prevention of resource
    exhaustion scenarios through accidental or intentional overuse of resources.
-   
 2. **Capacity Planning** through clear visibility into set quota limits and
    accurate accounting of resources usage.
+3. **Financial Protection** through prevention of scenarios that would
+   lead to significant and unexpected cost increases of running infrastructure.
 
-The functionality provided through quota management will strengthen overall
+The functionality provided through this enhancement will strengthen overall
 confidence in the platform as organizations and projects scale to meet their
 specific business needs.
 
 ### Goals
 
-- Provide clear system context and architectural approach for a quota management
-  system that Datum Cloud services will integrate with to enforce limits on
-  resource provisioning and allocation.
-
-- Define APIs that allow **Internal Administrators** to:
-  - Register owning service resource types and dimensions with the quota system
-  - View and manage quota limits on registered resource types for all
-    organizations and projects across the system
-  - View accurate accounting of resource usage
-  - Grant allowances for the additional provisioning and allocation of resources
-
-- Define APIs that allow **External Administrators** to:
-  - View active quota limits and request changes through internal processes
-  - Create claims that attempt to provision or allocate additional resources
-    within their organizations and projects
+- Provide clear system context and architectural approach for the system that
+  Datum Cloud services will integrate with to manage quotas and enforce limits
+  on resource provisioning and allocation
+- Define APIs that enable quota management functionality for both internal and
+  external administrators within the appropriate scope. See the [System
+  Capabilities and Success Criteria](#system-capabilities-and-success-criteria)
+  section for specific details of what these APIs provide for different
+  administrator types.
+- Enable integration by owning services as part of their provisioning and
+  allocation workflows without requiring domain-specific business logic changes.
 
 ### Non-Goals
 
@@ -214,9 +207,8 @@ specific business needs.
   the service resource type registration specific to quota management)
 - Define the exact user interface (UI) mockups or user experience (UX) flows for
   managing or viewing quotas, beyond the scope of the phase one release
-- Define how alerts can be created and sent to **External Administrators** to
-  inform them that they are approaching the quota thresholds set for their
-  resources
+- Define how alerts can be created and sent to internal and external
+  administrators to inform them when quota limits are near exhaustion
 
 ## Proposal
 
@@ -226,36 +218,32 @@ pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/),
 aligning with established standards and approaches used within the Datum Cloud
 and Milo platforms.
 
-The system uses an owning service "controller-driven pattern" where resources
-are immediately provisioned in the control plane, but data plane allocation
-waits for quota claim approval through asynchronous and synchronous approaches,
-depending on the type of the registered resource.
-
 ### System Capabilities and Success Criteria
 
-The quota management system delivers the following core capabilities that will
-serve as success criteria for the system when implemented:
+The quota management system delivers valuable system capabilities that will also
+serve as success criteria for the enhancement when implemented:
 
-**For Internal Administrators:**
-- Register quotable resource types from any Datum Cloud service
-- Set quota limits by creating grants (with multi-dimensional constraints
-  functionality deferred a future enhancement)
-- Automatically provision default quotas when new projects/organizations are
-  created (future enhancement)
-- Monitor quota usage across all projects and organizations
+**For Internal Administrators (platform-wide):**
+- Register owning service resource types and dimensional constraints with the
+  quota system
+- View and manage quota limits and grants for any and all organizations and
+  their projects
+- View accurate accounting of resource usage across the entire platform
 
-**For External Administrators:**
-- View active quota limits and accurate usage accounting
-- Request quota increases through standardized internal processes
+**For External Administrators (specific to their organization and projects):**
+- View quota limits and accurate usage accounting against those limits
+- Request changes to their limits
 - Receive clear feedback when quota limits will be exceeded by new claim
   attempts
 
-**For owning services:**
+**For Owning Services:**
 - Integrate with the quota management system without needing domain-specific
   business logic changes
 - Leverage standardized patterns for quota claim/release workflows
-- Benefit from multiple enforcement patterns for claims evaluation, depending on
+- Benefit from multiple enforcement patterns for claim evaluation, depending on
   the type of the resource registration
+- Automatically provision default quota limits and claims when new
+  projects/organizations are created
 
 ### Key Components
 
