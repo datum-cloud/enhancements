@@ -414,20 +414,19 @@ block the request by waiting for a synchronous response before proceeding with d
 
 ### Kubernetes Resource Quota Limitations 
 
-The quota management system is designed to solve the namespace-based limitations
-(non cluster-wide) of [Kubernetes
-ResourceQuotas](https://kubernetes.io/docs/concepts/policy/resource-quotas/)
+The quota system is designed to solve the namespace-based limitations
+of [Kubernetes Resource Quotas](https://kubernetes.io/docs/concepts/policy/resource-quotas/)
 through a **project or organization scoped approach**, enabling cluster-wide
 quota management:
 
 - **Project-level namespaces**: Enable the definition of quota grants and claims
   for the entire project, regardless of the number of isolated namespaces within
-  the cluster (e.g., max CPU cores for instances within the specified Project).
+  the cluster (e.g., max CPU cores for a specific instance type within the specified project).
 - **Organization-level namespaces**: Enable the definition of quota grants and
   claims for the organization (e.g., max projects and max collaborators per
   organization) but *do not handle project-level resource provisioning or
   allocation quotas at the organizational-level* (e.g., max CPU cores or max
-  allocated memory allowed for the entire organization).
+  allocated memory allowed across the *entire organization*).
 
 This enables multi-tenant quota management where high level *business
 boundaries* (projects/organizations) are used for cross-cluster quota
