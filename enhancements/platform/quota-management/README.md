@@ -434,8 +434,7 @@ capabilities.
 
 ### Custom Resource Definitions
 
-Five main CRDs will be created as core components of the quota management
-implementation: 
+Five main CRDs will be created as core components of the quota system: 
 
 - `ResourceRegistration`
 - `ResourceGrant`
@@ -446,55 +445,78 @@ implementation:
 #### `ResourceRegistration`
 
 The `ResourceRegistration` CRD gives internal administrators the ability to
-define and register specific resource types and dimensions from owning services
-(e.g., `compute.datumapis.com/instances/cpu`, `networking.datumapis.com/subnet`)
-that the quota management system can then proceed to manage. internal
-administrators interact with the quota management APIs to manage these
-registrations, and it is the initial step of the end to end quota management
-workflow.
+define and register specific resource types and dimensions directly through the
+quota system's resource registration API. This is the initial step of the end to end quota management
+workflow, and ensures that the system is aware of which resources types are
+allowed to be managed bt quotas.
 
-This approach ensures that the quota management system is aware of which
-specific owning service resources are quotable, without the quota management
-system itself needing to understand the implementation details of those
-services.
+**Example: Entity Type ResourceRegistration**
 
 ```yaml
 apiGroup: quota.miloapis.com
 kind: ResourceRegistration
 metadata:
   # <service-name>-<parent-resource-name>-<resource-name>-registration
-  name: compute-instances-cpu-registration
+  name: resourcemanager-organization-projects-registration
 spec:
-  # Owning service and resource type
+  # Reference to the owning service resource type. 
   ownerRef:
     apiGroup: compute.datumapis.com
-    kind: Instance
+    kind: Project
   # - "Entity": Declares a new resource entity (e.g., Instance, Project) 
   #   that must be counted for quota.
   # - "Allocation": Declares a resource unit (e.g., CPU, memory, storage) 
   #   that can be reserved or consumed within a parent entity.
-  # - "Feature": Reserved for future use to track feature flags
+  # - "Feature": Declares feature flags (future enhancement)
   type: "Entity"
   # Fully qualified name of the resource type being registered, as defined by the owning service.
   # This field is used in the matching pattern to locate associated ResourceGrants and ResourceClaims
-  resourceTypeName: "compute.datumapis.com/instances/cpu"
-  # Description of the resource type.
-  description: "Amount of allocated CPU cores for compute instances."
-  # The base unit of measurement for the resource.
-  baseUnit: "millicores"
-  # The unit of measurement UI will display to users.
-  # Examples: "cores" (from millicores), "GiB" (from bytes).
-  displayUnit: "cores"
-  # Defines how to convert between the base unit and the display unit to instruct clients how to display the resource.
+  resourceTypeName: "resourcemanager.datumapis.com/project"
+  # Description of the quota limit for the resource type
+  description: "Number of projects that can be created within an organization."
+  # The base unit of measurement for the resource
+  baseUnit: "projects"
+  # The unit of measurement UI will display to users
+  displayUnit: "projects"
+  # Defines how to convert between the base unit and the display unit to instruct Cloud and Staff portals on display
   # Formula: baseUnit * unitConversionFactor = displayUnit
-  unitConversionFactor: 0.001
+  unitConversionFactor: 1.0
   # Dimensions that can be used in ResourceGrant selectors
   # for this resource type. These should be fully qualified resource type names
   # from the owning service's API group.
-  # Note: Dimensions are not used in the initial release to reduce complexity as stated in this document
+  # Note: dimensions are not used in the initial release to reduce complexity as stated previously in this document
+  dimensions: []
+status:
+  # The specific revision of the ResourceRegistration.
+  observedGeneration: 1
+  # Standard kubernetes approach to represent the state of a resource.
+  conditions:
+    - type: "Active"
+      status: "True"
+      lastTransitionTime: "2023-01-01T12:00:00Z"
+      reason: "RegistrationActive"
+      message: "The registration is active and ready for grant creation and claim requests."
+```
+
+**Example: Allocation Type ResourceRegistration**
+
+```yaml
+apiGroup: quota.miloapis.com
+kind: ResourceRegistration
+metadata:
+  name: compute-instances-cpu-registration
+spec:
+  ownerRef:
+    apiGroup: compute.datumapis.com
+    kind: Instance
+  type: "Allocation"
+  resourceTypeName: "compute.datumapis.com/instances/cpu"
+  description: "Number of CPU cores that can be allocated to compute instances."
+  baseUnit: "millicores"
+  displayUnit: "cores"
+  unitConversionFactor: 0.001
   dimensions:
-    - "compute.datumapis.com/instance-type"
-    - "networking.datumapis.com/location"
+    - "compute.datumapis.com/instanceType"
 status:
   # The specific revision of the ResourceRegistration.
   observedGeneration: 1
