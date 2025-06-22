@@ -638,12 +638,43 @@ status:
 
 #### `ResourceClaim`
 
-The `ResourceClaim` CRD represents a request by an owning service to provision
-or allocate additional quota within a specific scope (project or organization).
+The `ResourceClaim` CRD represents a request by an owning service claim
+additional quota within a specific namespace (e.g. project or organization).
 
-When an owning service controller needs to provision a new resource or configure
-its allocation, it creates a `ResourceClaim` that references the namespace where
-the quota limits are defined.
+**Example: Entity Type ResourceClaim**
+
+```yaml
+apiGroup: quota.miloapis.com
+kind: ResourceClaim
+metadata:
+  name: org-abc-proj-xyz-entity-claim
+  # Must match the namespace of applicable ResourceGrants for this claim
+  # and is used in the matching pattern to locate associated EffectiveResourceGrants
+  namespace: org-abc
+  finalizers:
+    - "quota.miloapis.com/resource-claim-cleanup"
+spec:
+  # Reference to the organization this claim is for
+  ownerRef:
+    apiGroup: resourcemanager.datumapis.com
+    kind: Organization
+    name: org-abc
+    uid: "550e8400-e29b-41d4-a716-446655440000"
+  resources:
+    # Project entity count (must reference an active ResourceRegistration)
+    - resourceTypeName: "resourcemanager.datumapis.com/project"
+      amount: 1
+      dimensions: {}
+
+status:
+  observedGeneration: 1
+  conditions:
+    - type: "Active"
+      status: "True"
+      lastTransitionTime: "2023-01-01T12:00:00Z"
+      reason: "ClaimGranted"
+      message: "Claim was granted due to quota availability."
+```
 
 **Example: Allocation Type ResourceClaim**
 
@@ -655,28 +686,29 @@ metadata:
   # Must match the namespace of applicable ResourceGrants for this claim.
   namespace: proj-abc
   finalizers:
-    - "quota.miloapis.com/quota-release"
+    - "quota.miloapis.com/resource-claim-cleanup"
 spec:
-  # used by finalizer logic to release quota when the owning object is deleted
+  # Reference to the resource this claim is for (used by finalizer logic for quota cleanup)
   ownerRef:
-    apiGroup: compute.datumapis.com
+    apiVersion: compute.datumapis.com/v1alpha1
     kind: Instance
     name: instance-abc123
     uid: "550e8400-e29b-41d4-a716-446655440000"
   resources:
-    - name: "compute.datumapis.com/instances/cpu"
+    # CPU cores being claim for instance (must reference an active ResourceRegistration)
+    - resourceTypeName: "compute.datumapis.com/instances/cpu"
       amount: 8000
       dimensions:
         "networking.datumapis.com/location": "DFW"
-        "compute.datumapis.com/instance-type": "d1-standard-2"
+        "compute.datumapis.com/instanceType": "d1-standard-2"
 
-    # No dimensions, meaning amount is for all instances and does
-    # not take into account location or instance-type
-    - name: "compute.datumapis.com/instances/memoryAllocated"
+    # Base memory allocation (no dimensions)
+    - resourceTypeName: "compute.datumapis.com/instances/memoryAllocated"
       amount: 68719476736
       dimensions: {}
 
-    - name: "compute.datumapis.com/instances/memoryAllocated"
+    # Additional memory allocation with specific dimensions
+    - resourceTypeName: "compute.datumapis.com/instances/memoryAllocated"
       amount: 34359738368
       dimensions:
         "networking.datumapis.com/location": "DFW"
@@ -685,10 +717,10 @@ spec:
 status:
   observedGeneration: 1
   conditions:
-    - type: "Granted"
+    - type: "Active"
       status: "True"
       lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: "QuotaAvailable"
+      reason: "ClaimGranted"
       message: "Claim was granted due to quota availability."
 ```
 
