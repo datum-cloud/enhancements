@@ -991,34 +991,35 @@ This failure policy approach provides:
 ```mermaid
 %% C1 - System Context Diagram: Milo Quota Management System
 graph TD
-    subgraph User Actors
-        ExternalAdmin["Datum Cloud External Admin"]
-        DatumPlatformAdminEmployee["Datum Platform Internal Admin"]
+    subgraph UserActors["User Actors"]
+        ExternalAdmin["External Administrator<br/>(Organization/Project Admin)"]
+        InternalAdmin["Internal Administrator<br/>(Datum Platform Admin)"]
+    end
+
+    subgraph UIPortals["UI Portals"]
+        CloudPortal["Cloud Portal / CLI"]
+        StaffPortal["Staff Portal / CLI"]
     end
 
     subgraph DatumCloudEcosystem["Datum Cloud Ecosystem"]
-        direction LR
-        CloudPortalCLI["Cloud Portal / CLI"]
-        StaffPortalCLI["Staff Portal / CLI"]
-        OwningService["Owning Service <br/> (e.g., compute.datumapis.com)"]
+        OwningServices["Owning Services<br/>(compute, networking, etc.)"]
     end
 
-    subgraph MiloCentralServices ["Milo"]
+    subgraph MiloPlatform["Milo Platform"]
         QuotaSystem["Quota Management System"]
     end
 
     %% External Admin interactions
-    ExternalAdmin -- "Views Quotas, Requests Resources via" --> CloudPortalCLI
-    CloudPortalCLI -- "Forwards Resource Request to" --> OwningService
-    CloudPortalCLI -- "Reads Quota Info from" --> QuotaSystem
+    ExternalAdmin --> CloudPortal
+    CloudPortal --> OwningServices
+    CloudPortal --> QuotaSystem
 
     %% Internal Admin interactions
-    DatumPlatformAdminEmployee -- "Registers Resources, Defines Grants via" --> StaffPortalCLI
-    StaffPortalCLI -- "Manages Registrations & Grants via" --> QuotaSystem
+    InternalAdmin --> StaffPortal
+    StaffPortal --> QuotaSystem
 
     %% System interactions
-    OwningService -- "Requests Quota Allocation (via ResourceClaim creation) from" --> QuotaSystem
-    QuotaSystem -- "Returns Quota Decision to" --> OwningService
+    OwningServices --> QuotaSystem
 ```
 #### C2 Diagram - Containers/Components
 
