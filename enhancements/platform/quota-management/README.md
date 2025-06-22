@@ -363,53 +363,54 @@ enforcement and integration by owning services.
 ### Quota Enforcement Patterns
 
 The quota management system uses two specific enforcement patterns, depending on
-the `type` defined in the `ResourceRegistration` spec tied to the claim
-(`Allocation` or `Entity`, for the phase one release).
+the `type` defined in the `ResourceRegistration` spec that is tied to the claim
+(`Allocation` or `Entity` for the phase one release).
 
 #### Entity-Based Enforcement (Synchronous Claim Decisions)
 
-For provisioning-based claims, a synchronous enforcement mechanism is used for
-immediate enforcement. For example, attempting to claim an additional `Instance`
-within a project, increasing the project's `Instance` *count*. The Owning
-Service controller will wait for a synchronous response when claim evaluation
-completes.
+For entity-based claims, a synchronous enforcement mechanism is used involving a
+validating admission webhook, which blocks the API request during claim
+evaluation until a decision is made.
 
-1. **Initial Trigger Event**: User requests resource creation from the Owning
-   Service
-2. **Control Plane Acceptance**: Object is created immediately in the control
-   plane via the owning service controller, representing optimistic creation of
-   the object
-3. **Quota Claim**: owning service controller observes the new object and
-   creates a new `ResourceClaim` via the `ResourceClaim` controller
-4. **Claim Evaluation**: The `ResourceClaim` controller evaluates the claim
-   against available quota based on total effective limits and current usage
-5. **Immediate Claim Decision**: If the claim would exceed quota limits, it is
-   immediately denied and the result returned to the owning service. Conversely,
-   if it would *not* exceed those limits, it is immediately granted.
-6. **Entity**: Once the terminal status of the claim is set (`Granted` or
-   `Denied`), the owning service controller watching the claim can proceed with
-   its provisioning workflow.
+Using the creation of a `Project` as an example:
+
+1. **Initial Event**: A client sends a request for the creation of a new `Project` to 
+    the Milo APIServer, initiating the workflow.
+2. **Claim Creation**: The APIServer invokes the validating
+    webhook as part of the admission chain. The webhook creates a
+    `ResourceClaim` in the cluster and blocks the request while it waits for the claim's
+    `status` field to be updated.
+3. **Claim Detection**: The `ResourceClaim` controller (watching claims)
+    detects the new object and begins reconciliation. 
+4. **Claim Evaluation**: The controller evaluates the claim against the configured
+   quota limit and current usage before updating the claim's `status` once a decision is made.
+5. **Webhook Decision**: When the webhook detects the transitioned claim
+   `status` it proceeds to return the decision to the APIServer.
+6. **Final Outcome**: If the claim was granted, the `Project` is created and the
+   success is returned to the client. If the claim was denied, the `Project` is
+   not created, and the rejection is returned to the client.
 
 #### Allocation-Based Enforcement (Asynchronous Claim Decisions)
 
 For allocation-based claims, an asynchronous approach is used with deferred
 enforcement. For example, attempting to claim an additional 500 GiB of memory
-allocation for a specific `Instance`. The owning service controller will not
-wait for a synchronous response when a claim is being evaluated before
-proceeding with downstream data plane allocation.
+allocation for a specific `Instance`. The owning service controller does not
+block the request by waiting for a synchronous response before proceeding with data plane allocation.
 
-1. **Initial Trigger Event**: User requests additional allocation for a resource
-   via the owning service
-2. **Quota Claim**: owning service controller observes the newly created object
-   and creates a new `ResourceClaim` via the `ResourceClaim` controller
-3. **Claim Evaluation**: The `ResourceClaim` controller evaluates the claim
-   against available quota based on total effective limits and current usage
-4. **Deferred Claim Decision**: Claim status remains as `Pending` until it
-   transitions to a terminal status
-5. **Allocation**: Once the status of the claim transitions to `Granted` or
-   `Denied`...
-   <!-- TODO Fix step 5. this after further research/discussions --> 
-   <!-- should the validating webhook handle this instead of the controller?  -->
+1. **Initial Event**: A client sends a request for the creation of an `Instance`
+  with specific CPU and memory allocations to the project APIServer, and the
+  `Instance` is created.
+2. **Claim Creation**: The `Instance` controller detects the new `Instance`
+   and creates a new `ResourceClaim`.
+3. **Claim Detection**: The `ResourceClaim` controller (watching claims)
+    detects the new object and begins reconciliation. 
+3. **Claim Evaluation**: The controller evaluates the claim
+   against the configured quota limit and current usage.
+4. **Controller Decision**: The claim remains in a pending state
+   until the controller updates it once a decision is made.
+5. **Final Outcome**: Once the status of the claim transitions to
+   the terminal state, the owning service controller either continues with
+   provisioning if the claim was granted, or handles the rejection if denied.
 
 ### Kubernetes Resource Quota Limitations 
 
