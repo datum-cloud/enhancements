@@ -535,69 +535,97 @@ The `ResourceGrant` CRD is how administrators set quota limits for a specific
 scope, referencing the owning service resource types and dimensions defined by a
 `ResourceRegistration`. 
 
-Multiple `ResourceGrant` CRs can exist for the same resource type and namespace,
+Multiple `ResourceGrant` entities can exist for the same resource type with a namespace,
 as each grant contributes allowances that are *additive* to determine the total
 effective quota limit.
+
+**Example: Entity Type ResourceGrant**
 
 ```yaml
 apiGroup: quota.miloapis.com
 kind: ResourceGrant
 metadata:
-  name: my-resource-quota-grant
-  # namespace corresponds to the org or project the grant applies to
-  # and is used in the matching pattern, along with allowance item resource type names to locate 
-  # associated EffectiveResourceGrants
+  name: org-abc-default-project-count-quota
+  # Refers to the org or project the grant applies to and *not*
+  # traditional kubernetes namespaces.
+  namespace: org-abc
+spec:
+  # Reference to the organization this grant applies to
+  ownerRef:
+    apiGroup: resourcemanager.datumapis.com/v1alpha1
+    kind: Organization
+    name: org-abc
+    uid: "550e8400-e29b-41d4-a716-446655440000"
+
+  # List of allowances for specific resource types and dimensions that this grant applies to.
+  allowances:
+    # Maximum number of projects allowed in this organization
+    # resourceTypeName used in matching pattern to locate associated EffectiveResourceGrants
+    - resourceTypeName: "resourcemanager.datumapis.com/project"
+      # Amount of the resource type being granted (base and display units and conversion 
+      # factor are already defined in through the registration)
+      amount: 10
+      # No dimensions for this example as it is organization based
+      dimensionSelector: {}
+
+status:
+  # The specific revision of the ResourceGrant
+  observedGeneration: 1
+  # Standard kubernetes approach to represent the state of a resource
+  conditions:
+    - type: "Active"
+      status: "True"
+      lastTransitionTime: "2023-01-01T12:00:00Z"
+      reason: "GrantActivated"
+      message: "The grant has been successfully activated and will now be taken into account when evaluating future claims."
+```
+
+**Example: Allocation Type ResourceGrant**
+
+```yaml
+apiGroup: quota.miloapis.com
+kind: ResourceGrant
+metadata:
+  name: proj-abc-grant-121-instance-allocation
   namespace: proj-abc
 spec:
   ownerRef:
     apiGroup: resourcemanager.datumapis.com
     kind: Project
+    name: proj-abc
+    uid: "550e8400-e29b-41d4-a716-446655440000"
 
-  # List of allowances for specific resource types and dimensions that this grant applies to.
   allowances:
-    #1. Total instances for the project with no dimension selectors
-    # name used in matching pattern to locate associated EffectiveResourceGrants
-    - name: "compute.datumapis.com/instance"
-      buckets:
-        - amount: 100
-          dimensionSelector: {}
+    # Max instances for the project
+    - resourceTypeName: "compute.datumapis.com/instance"
+      amount: 100
+      dimensionSelector: {}
 
-    # 2. Compute instance CPUs
-    - name: "compute.datumapis.com/instances/cpu"
-      # A bucket represents a specific amount + combination of dimensions for the resource type
-      buckets:
-        # Amount of the resource type being granted (base unit already defined in `ResourceRegistration`)
-        - amount: 100000
-          # Selector with an expression match for determining if the specified
-          # key *exists* for the resource type.
-          dimensionSelector:
-            matchExpressions: 
-              - key: "networking.datumapis.com/location"
-                operator: "Exists"
+    # Compute instance CPUs - base allowance for *all* locations
+    - resourceTypeName: "compute.datumapis.com/instances/cpu"
+      amount: 100000
+      dimensionSelector:
+        matchExpressions: 
+          - key: "networking.datumapis.com/location"
+            operator: "Exists"
 
-        # Additional bucket for a different amount of CPU cores for the DLS location only.
-        # This grants an extra 500,000 millicores to DLS, in addition to the base 100,000 
-        # millicores available to all locations in the previous bucket: resulting in 600,000 
-        # total millicores for DLS.
-        - amount: 500000
-          # Selector specifying labels to match against.
-          dimensionSelector:
-            matchLabels:
-              "networking.datumapis.com/location": "DLS"
+    # Additional CPU allowance for *only* the DLS location
+    - resourceTypeName: "compute.datumapis.com/instances/cpu"
+      amount: 500000
+      dimensionSelector:
+        matchLabels:
+          "networking.datumapis.com/location": "DLS"
 
-    # 3. Compute instance memory allocation
-    - name: "compute.datumapis.com/instances/memoryAllocated"
-      buckets:
-        - amount: 50000
-          # Selector specifying a list of network locations to match against.
-          dimensionSelector:
-            matchExpressions:
-              - key: "networking.datumapis.com/location"
-                # Will match any item in the list of locations defined in `values`
-                operator: "In"
-                values:
-                  - "DFW"
-                  - "LHR"
+    # Compute instance memory allocation for multiple specific network locations
+    - resourceTypeName: "compute.datumapis.com/instances/memoryAllocated"
+      amount: 50000
+      dimensionSelector:
+        matchExpressions:
+          - key: "networking.datumapis.com/location"
+            operator: "In"
+            values:
+              - "DFW"
+              - "LHR"
 status:
   observedGeneration: 1
   conditions:
