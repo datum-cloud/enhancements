@@ -724,79 +724,68 @@ status:
       message: "Claim was granted due to quota availability."
 ```
 
-**Example: Entity Type ResourceClaim**
-
-```yaml
-apiGroup: quota.miloapis.com
-kind: ResourceClaim
-metadata:
-  name: org-abc-proj-xyz-entity-claim
-  # Must match the namespace of applicable ResourceGrants for this claim
-  # and is used in the matching pattern to locate associated EffectiveResourceGrants
-  namespace: org-abc
-  finalizers:
-    - "quota.miloapis.com/quota-release"
-spec:
-  # used by finalizer logic to release quota when the owning object is deleted
-  ownerRef:
-    apiGroup: resourcemanager.datumapis.com
-    kind: Organization
-    name: org-abc
-    uid: "550e8400-e29b-41d4-a716-446655440000"
-  resources:
-    - name: "compute.datumapis.com/Project"
-      amount: 5
-      dimensions: {}
-
-status:
-  observedGeneration: 1
-  conditions:
-    - type: "Granted"
-      status: "True"
-      lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: "QuotaAvailable"
-      message: "Claim was granted due to quota availability."
-```
-
 #### `EffectiveResourceGrant`
 
 The `EffectiveResourceGrant` CRD provides **high-level quota details** and
 serves as an optimized view for UI consumption. It provides pre-calculated
 values that summarize quota limits from relevant `ResourceGrant` objects, usage
-data from owned `AllowanceBucket` objects, and the quota amount that is still
-available to be claimed. 
+data from owned `AllowanceBucket` objects, and the available amount that can
+still be claimed.
+
+**Example: Entity Type EffectiveResourceGrant**
+
+```yaml
+apiGroup: quota.miloapis.com
+kind: EffectiveResourceGrant 
+metadata:
+  # namespace-resourcetype-effective
+  name: org-abc-project-effective
+  # used in the matching pattern for ResourceGrant and ResourceClaim objects
+  namespace: org-abc
+  # Labels to help in querying this custom resource
+  labels:
+    resourceTypeName: "resourcemanager.datumapis.com/project"
+spec:
+  # The resource type this effective grant aggregates quota information for
+  resourceTypeName: "resourcemanager.datumapis.com/project"
+status:
+  # The specific revision of the EffectiveResourceGrant
+  observedGeneration: 1
+  # Total effective quota limit from all applicable ResourceGrants for this resource type
+  totalLimit: 10
+  # Total allocated usage across all AllowanceBucket resources for this resource type,
+  # representing the count of created entities
+  totalAllocated: 3
+  # Available quota (totalLimit - totalAllocated)
+  available: 7
+  # References to AllowanceBuckets used to calculate totalAllocated
+  # For Entity types with no dimensions, typically only one bucket exists
+  allowanceBucketRefs:
+    - name: "bucket-org-abc-project-hash789"
+      observedGeneration: 1
+      allocated: 3
+```
+
+**Example: Allocation Type EffectiveResourceGrant**
 
 ```yaml
 apiGroup: quota.miloapis.com
 kind: EffectiveResourceGrant 
 metadata:
   name: proj-abc-compute-cpu-effective
-  # namespace is used in the matching pattern for ResourceGrant and ResourceClaim objects
   namespace: proj-abc
-  # Labels to help in querying this custom resource
   labels:
     resourceTypeName: "compute.datumapis.com/instances/cpu"
 spec:
-  # Reference to project this effective grant applies to
-  # and is used in controller reconciliation logic to determine which project
-  # it applies to.
-  ownerRef:
-    apiGroup: resourcemanager.datumapis.com
-    kind: Project
-    name: proj-abc
-    uid: "660e8400-e29b-41d4-a716-446655440001"
+  resourceTypeName: "compute.datumapis.com/instances/cpu"
 status:
   observedGeneration: 1
-  # Total effective quota limit from all applicable ResourceGrants for this resource type
   totalLimit: 120000
-  # Total allocated usage across all AllowanceBucket resources for this resource type
   totalAllocated: 30000
-  # Available quota (totalLimit - totalAllocated)
   available: 90000
-  # References to AllowanceBuckets used to calculate totalAllocated
   allowanceBucketRefs:
     - name: "bucket-proj-abc-cpu-dfw-hash123"
-      observedGeneration: 1
+      observedGeneration: 2
       allocated: 8000
     - name: "bucket-proj-abc-cpu-lhr-hash456"
       observedGeneration: 1
