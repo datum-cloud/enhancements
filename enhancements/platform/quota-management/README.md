@@ -250,10 +250,10 @@ serve as success criteria for the enhancement when implemented:
 The quota management system is built on three core architectural components:
 
 1. **Custom Resource Definitions (CRDs)**: Declares the specification of new
-   quota related custom resources
+   quota related custom resources and their exposed APIs.
 2. **Quota Operator**: Orchestrates quota management through a set of dedicated
-   controllers based on the proposed CRDs using the
-   [operator-pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
+   controllers based using the
+   [Kubernetes operator-pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
 3. **Admission Webhooks**: Provides validating and mutating webhooks that ensure
    data integrity through CRD spec validation and finalizer injection
 
@@ -267,9 +267,9 @@ backwards compatibility, the quota management system will be implemented in two
 initial phases:
 
 **Phase One (Initial MVP):**
-- Complete CRD definitions and basic quota enforcement
-- Simple resource-level quota tracking and usage accounting without dimensional
-  constraints
+- Complete CRD definitions
+- Initial quota tracking and usage accounting without complex dimensional
+  constraints for the first set of resources to be managed by the system
 - Core controller logic ensuring the system operates as expected
 
 **Phase Two (Future Enhancement):**
@@ -279,7 +279,7 @@ initial phases:
 - Enhanced UI features for quota visualization at specific dimensional levels
 
 This phased approach ensures rapid delivery of core quota functionality while
-using forward thinking architectural planning for the suppoprt of future phase
+using forward thinking architectural planning for the support of future phase
 functionality.
 
 ### User Stories
