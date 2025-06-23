@@ -144,18 +144,20 @@ latest-milestone: "v0.1"
 - **Total Effective Quota Limit**: The *calculated maximum amount* of a resource
   that can be allocated or provisioned, determined by **summing all applicable
   `ResourceGrant` allowances** for a specific resource type and dimension
-  combination within a namespace. This is stored as `EffectiveResourceGrant.status.totalLimit`.
+  combination within a namespace. This is stored as
+  `EffectiveResourceGrant.status.totalLimit`.
 
 - **Quota Claim**: The amount *attempting to be claimed* by an owning service
-  when provisioning or allocating resources, submitted via `ResourceClaim` objects.
+  when provisioning or allocating resources, submitted via `ResourceClaim`
+  objects.
 
 - **AllowanceBucket**: A CRD that serves as the **single source of truth** for
   quota usage accounting, tracking allocated amounts for specific resource type
   and dimension combinations.
 
 - **EffectiveResourceGrant**: A CRD that provides a **pre-calculated, aggregated
-  view** of quota information, combining total limits from multiple `ResourceGrant`s
-  and usage data from owned `AllowanceBucket`s.
+  view** of quota information, combining total limits from multiple
+  `ResourceGrant`s and usage data from owned `AllowanceBucket`s.
 
 - **Internal Administrators**: Administrators responsible for the overall
   management and operation of the Datum Cloud and Milo platforms as a whole
@@ -174,14 +176,14 @@ Cloud.
 ## Motivation
 
 There is currently no existing mechanism that provides the ability to manage,
-track, and enforce total effective quota limits on resources consumed by organizations and
-projects within Datum Cloud. The implementation of this system will provide
-significant operational and technical value, including:
+track, and enforce total effective quota limits on resources consumed by
+organizations and projects within Datum Cloud. The implementation of this system
+will provide significant operational and technical value, including:
 
 1. **Platform Stability and Reliability** through the prevention of resource
    exhaustion scenarios through accidental or intentional overuse of resources.
-2. **Capacity Planning** through clear visibility into total effective quota limits and
-   accurate accounting of resources usage.
+2. **Capacity Planning** through clear visibility into total effective quota
+   limits and accurate accounting of resources usage.
 3. **Financial Protection** through prevention of scenarios that would lead to
    significant and unexpected cost increases of running infrastructure.
 
@@ -233,12 +235,13 @@ serve as success criteria for the enhancement when implemented:
 **For Internal Administrators (platform-wide):**
 - Register owning service resource types and dimensional constraints with the
   quota system
-- View and manage total effective quota limits and grants for any and all organizations and
-  their projects
+- View and manage total effective quota limits and grants for any and all
+  organizations and their projects
 - View accurate accounting of resource usage across the entire platform
 
 **For External Administrators (specific to their organization and projects):**
-- View total effective quota limits and accurate usage accounting against those limits
+- View total effective quota limits and accurate usage accounting against those
+  limits
 - Request changes to their limits
 - Receive clear feedback when quota limits will be exceeded by new claim
   attempts
@@ -249,9 +252,9 @@ serve as success criteria for the enhancement when implemented:
 - Leverage standardized patterns for quota claim/release workflows
 - Benefit from multiple enforcement patterns for claim evaluation, depending on
   the type of the resource registration
-- Automatically provision default total effective quota limits and claims when new
-  projects/organizations are created, removing the need to immediately create
-  grants during initial project and organization setup.
+- Automatically provision default total effective quota limits and claims when
+  new projects/organizations are created, removing the need to immediately
+  create grants during initial project and organization setup.
 
 ### Key Components
 
@@ -275,14 +278,16 @@ backwards compatibility, the quota management system will be implemented in two
 initial phases:
 
 **Phase One (Initial MVP):**
-- Complete CRD definitions with full dimensional field support for forward compatibility
+- Complete CRD definitions with full dimensional field support for forward
+  compatibility
 - Core controller logic for quota tracking and usage accounting
 - Basic dimensional constraint support using [Kubernetes Label
   Selectors](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/label-selector/#LabelSelector).
   Dimension fields will be supported but initially used only for simple use
   cases, deferring constraints such as location and instance type.
 - Entity and Allocation enforcement patterns
-- Self-contained validation within the quota system (cross-system validation deferred)
+- Self-contained validation within the quota system (cross-system validation
+  deferred)
 
 **Phase Two (Future Enhancement):**
 - Enhanced dimensional constraint logic for complex multi-dimensional resource
@@ -314,10 +319,11 @@ for my organization and projects through an established internal process, so
 that I can scale my total effective quota limits to meet growing business needs.
 
 #### Story 3: Platform-wide quota management
-As an **internal administrator**, I should be able to view and manage total effective quota
-limits for all organizations and projects across the platform through the Staff
-Portal, so that I can ensure optimal and fair-usage of resource consumption
-across infrastructure and maintain overall platform stability.
+As an **internal administrator**, I should be able to view and manage total
+effective quota limits for all organizations and projects across the platform
+through the Staff Portal, so that I can ensure optimal and fair-usage of
+resource consumption across infrastructure and maintain overall platform
+stability.
 
 #### Story 4: Resource Type Registration
 As an **internal administrator**, I should be able to register new quotable
@@ -380,14 +386,19 @@ is being used.
 
 #### Risk: Concurrent Quota Claims May Cause Over-allocation
 
-**Consequence**: Multiple claims being processed simultaneously against the same quota
-limits could result in temporary over-allocation if not properly synchronized.
+**Consequence**: Multiple claims being processed simultaneously against the same
+quota limits could result in temporary over-allocation if not properly
+synchronized.
 
 **Mitigations**:
-- **Optimistic Locking:** Controllers use observed generation optimistic locking to prevent race conditions during quota updates
-- **Atomic Operations:**: `AllowanceBucket` updates use atomic increment/decrement operations
-- **Retry Logic:**: Controllers implement an exponential backoff retry mechanism when encountering resource version conflicts
-- **Eventual Consistency:**: The system will detect and correct over-allocation scenarios during reconciliation loops
+- **Optimistic Locking:** Controllers use observed generation optimistic locking
+  to prevent race conditions during quota updates
+- **Atomic Operations:**: `AllowanceBucket` updates use atomic
+  increment/decrement operations
+- **Retry Logic:**: Controllers implement an exponential backoff retry mechanism
+  when encountering resource version conflicts
+- **Eventual Consistency:**: The system will detect and correct over-allocation
+  scenarios during reconciliation loops
 
 ---
 
@@ -476,15 +487,19 @@ capabilities.
 
 ### Custom Resource Definitions
 
-Five main CRDs will be created as core components of the quota system. Each CRD includes examples for **both** enforcement patterns:
+Five main CRDs will be created as core components of the quota system. Each CRD
+includes examples for **both** enforcement patterns:
 
 - `ResourceRegistration` - Defines quotable resource types
 - `ResourceGrant` - Sets quota allowances per scope  
 - `ResourceClaim` - Requests quota allocation
-- `EffectiveResourceGrant` - System-managed aggregated quota summary for client conveniance
+- `EffectiveResourceGrant` - System-managed aggregated quota summary for client
+  conveniance
 - `AllowanceBucket` - System-managed usage tracking
 
-**Reading Guide**: Each CRD section includes both **Entity** (synchronous) and **Allocation** (asynchronous) examples to demonstrate the two enforcement patterns. Focus on the pattern relevant to your use case.
+**Reading Guide**: Each CRD section includes both **Entity** (synchronous) and
+**Allocation** (asynchronous) examples to demonstrate the two enforcement
+patterns. Focus on the pattern relevant to your use case.
 
 #### `ResourceRegistration`
 
@@ -494,8 +509,8 @@ quota system's resource registration API. This is the initial step of the end to
 end quota management workflow, and ensures that the system is aware of which
 resource types are allowed to be managed by quotas.
 
-**Note on ownerRef field**: The `ownerRef` field identifies which
-owning service and resource type responsible for creating `ResourceClaim` objects for this
+**Note on ownerRef field**: The `ownerRef` field identifies which owning service
+and resource type responsible for creating `ResourceClaim` objects for this
 resource type. In Phase 1, this serves as documentation, while cross-system
 validation will be deferred until a centralized service registry is available.
 
@@ -581,21 +596,22 @@ status:
 
 #### `ResourceGrant`
 
-The `ResourceGrant` CRD is how administrators set quota allowances for a specific
-scope, referencing the owning service resource types and dimensions defined by a
-`ResourceRegistration`. 
+The `ResourceGrant` CRD is how administrators set quota allowances for a
+specific scope, referencing the owning service resource types and dimensions
+defined by a `ResourceRegistration`. 
 
-Multiple `ResourceGrant`s can exist for the same resource type with a
-namespace, as each grant contributes allowances that are *additive* to determine
-the total effective quota limit.
+Multiple `ResourceGrant`s can exist for the same resource type with a namespace,
+as each grant contributes allowances that are *additive* to determine the total
+effective quota limit.
 
 **Dimension Matching**: The `dimensionSelector` field uses the [Kubernetes
 LabelSelector](https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/label-selector/#LabelSelector)
-type (`metav1.LabelSelector`), supporting both `matchLabels` and `matchExpressions` for querying
-resources. This enables the quota controllers to leverage Kubernetes' upstream
-label evaluation libraries (`k8s.io/apimachinery/pkg/labels`) for established
-matching logic. The systemevaluates `ResourceClaim` dimensions against `ResourceGrant` dimension selectors
-to determine which grants apply to specific requests.
+type (`metav1.LabelSelector`), supporting both `matchLabels` and
+`matchExpressions` for querying resources. This enables the quota controllers to
+leverage Kubernetes' upstream label evaluation libraries
+(`k8s.io/apimachinery/pkg/labels`) for established matching logic. The
+systemevaluates `ResourceClaim` dimensions against `ResourceGrant` dimension
+selectors to determine which grants apply to specific requests.
 
 **Example 1: Entity Type ResourceGrant (Synchronous Enforcement)**
 
@@ -787,9 +803,9 @@ status:
 
 The `EffectiveResourceGrant` CRD provides **high-level quota details** and
 serves as an optimized view for UI consumption. It provides pre-calculated
-values that summarize quota allowances from all relevant `ResourceGrant` objects, usage
-data from owned `AllowanceBucket` objects, and the available amount that can
-still be claimed.
+values that summarize quota allowances from all relevant `ResourceGrant`
+objects, usage data from owned `AllowanceBucket` objects, and the available
+amount that can still be claimed.
 
 **Example 1: Entity Type EffectiveResourceGrant (Synchronous Enforcement)**
 
@@ -946,7 +962,9 @@ pattern](https://kubernetes.io/docs/concepts/architecture/controller/).
 controller reconciliation logic. Controllers assume they are working with valid
 resources to ensure focus on business logic implementation.
 
-**Dimension Evaluation**: Controllers use Kubernetes' upstream label selector libraries (`k8s.io/apimachinery/pkg/labels`) to evaluate `ResourceGrant.dimensionSelector` against `ResourceClaim.dimensions`.
+**Dimension Evaluation**: Controllers use Kubernetes' upstream label selector
+libraries (`k8s.io/apimachinery/pkg/labels`) to evaluate
+`ResourceGrant.dimensionSelector` against `ResourceClaim.dimensions`.
 
 #### ResourceRegistration Controller
 
@@ -978,8 +996,10 @@ resources to ensure focus on business logic implementation.
 2. For *each claim request*, matches the request's `dimensions` against
    applicable `ResourceGrant` allowances using label selector logic:
    - Empty `dimensionSelector` (`{}`) matches all claims for that resource type
-   - Non-empty `dimensionSelector` applies standard Kubernetes `LabelSelector` matching
-   - Only matching grants contribute allowances toward the total effective quota limit
+   - Non-empty `dimensionSelector` applies standard Kubernetes `LabelSelector`
+     matching
+   - Only matching grants contribute allowances toward the total effective quota
+     limit
 3. Evaluates if `CurrentUsage + ClaimAmount <= TotalEffectiveQuota` for matching
    grants
 4. Sets `ResourceClaim.status.conditions.Active` to `True` or `False` based on
@@ -1048,12 +1068,17 @@ resource registration type (Entity vs Allocation).
 - **Resource Registration Validation**: Ensures `resourceTypeName` values in
   `ResourceGrant` and `ResourceClaim` objects reference active
   `ResourceRegistration` objects within the quota system
-- **Cross-Reference Validation**: For Phase 1, validates `ownerRef` field format and syntax **only**. Cross-system validation of actual resource existence is deferred to Phase 2 since resources are internally managed
-- **Required Field Validation**: Ensures all required fields are present and properly formatted
+- **Cross-Reference Validation**: For Phase 1, validates `ownerRef` field format
+  and syntax **only**. Cross-system validation of actual resource existence is
+  deferred to Phase 2 since resources are internally managed
+- **Required Field Validation**: Ensures all required fields are present and
+  properly formatted
 - **Dimension Validation**: Validates :
-  - Dimensions used in grants and claims are defined in the corresponding `ResourceRegistration.dimensions`
-  - `ResourceGrant.dimensionSelector` and `ResourceClaim.dimensions` conform to valid Kubernetes
-    `LabelSelector` type syntax to allow accurate implementation
+  - Dimensions used in grants and claims are defined in the corresponding
+    `ResourceRegistration.dimensions`
+  - `ResourceGrant.dimensionSelector` and `ResourceClaim.dimensions` conform to
+    valid Kubernetes `LabelSelector` type syntax to allow accurate
+    implementation
 
 **Mutating Webhook Responsibilities**:
 - **ResourceClaim Finalizer Injection**: Adds finalizers to all incoming
@@ -1177,8 +1202,8 @@ graph TD
 
 ## Open Questions
 
-1. **Default Quota Grants and Claims**: What should the default total effective quota limits be
-   for new project and organization resources?
+1. **Default Quota Grants and Claims**: What should the default total effective
+   quota limits be for new project and organization resources?
 
 ---
 
@@ -1438,11 +1463,14 @@ details). For now, we leave it here.
 #### How does this feature react if the APIServer is unavailable?
 
 If the APIServer is unavailable, the quota system cannot function properly,
-either fully failing or causing data integrity issues, depending on enforcement policy:
+either fully failing or causing data integrity issues, depending on enforcement
+policy:
 - **Entity-based enforcement**: All entity creation requests will fail (by
   design with `failurePolicy: Fail`) due to synchronous enforcement
-- **Allocation-based enforcement**: New claims cannot be created, but existing workloads continue running
-- **Controller reconciliation**: All quota controllers stop processing until APIServer recovery
+- **Allocation-based enforcement**: New claims cannot be created, but existing
+  workloads continue running
+- **Controller reconciliation**: All quota controllers stop processing until
+  APIServer recovery
 
 #### What are other known failure modes?
 
@@ -1488,10 +1516,10 @@ initial release, the implementation has been planned in two main phases:
 Phase 1 focuses on core quota enforcement capabilities, deferring most
 dimensional constraint logic to Phase 2. 
 
-The architecture and implementation proposed in this document includes
-examples with dimensional capabilities to ensure forward compatibility and
-demonstrate the full system potential. Phase 1 will implement basic dimensional
-support for simple use cases, with enhanced multi-dimensional logic deferred to Phase 2.
+The architecture and implementation proposed in this document includes examples
+with dimensional capabilities to ensure forward compatibility and demonstrate
+the full system potential. Phase 1 will implement basic dimensional support for
+simple use cases, with enhanced multi-dimensional logic deferred to Phase 2.
 
 ## Drawbacks
 
