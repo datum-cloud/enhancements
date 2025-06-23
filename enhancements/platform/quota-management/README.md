@@ -1150,8 +1150,8 @@ graph TD
 
     subgraph QuotaSystem["Quota Management System"]
         subgraph Webhooks["Admission Webhooks"]
-            EntityWebhook["Entity Webhook"]
-            AllocationWebhook["Allocation Webhook"]
+            ValidatingWebhook["Validating Webhook"]
+            ValidatingWebhook["Validating Webhook"]
         end
         
         subgraph Controllers["Controllers"]
@@ -1161,30 +1161,30 @@ graph TD
             EffectiveCtrl["EffectiveResourceGrant Controller"]
         end
         
-        subgraph Storage["Storage"]
+        subgraph Storage["APIServer"]
             CRDs["Quota CRDs"]
         end
     end
 
     %% Entity Flow (Synchronous)
-    OwningServices -.->|"Create Entity"| EntityWebhook
-    EntityWebhook -->|"Create Claim"| CRDs
-    CRDs -->|"Watch"| ClaimCtrl
+    OwningServices -.->|"Create Entity"| ValidatingWebhook
+    ValidatingWebhook -->|"Create Claim"| CRDs
+    ClaimCtrl -->|"Watch"| CRDs
     ClaimCtrl -->|"Update Status"| CRDs
-    EntityWebhook -->|"Read Status"| CRDs
-    EntityWebhook -.->|"Permit/Deny"| OwningServices
+    ValidatingWebhook -->|"Read Status"| CRDs
+    ValidatingWebhook -.->|"Permit/Deny"| OwningServices
 
     %% Allocation Flow (Asynchronous)
-    OwningServices -->|"Create Claim"| AllocationWebhook
-    AllocationWebhook -->|"Validate"| CRDs
-    CRDs -->|"Watch"| ClaimCtrl
+    OwningServices -->|"Create Claim"| ValidatingWebhook
+    ValidatingWebhook -->|"Validate"| CRDs
+    ClaimCtrl -->|"Watch"| CRDs
     ClaimCtrl -->|"Update"| CRDs
     OwningServices -->|"Watch Status"| CRDs
 
     %% Controller Operations
-    CRDs -->|"Watch"| RegistrationCtrl
-    CRDs -->|"Watch"| GrantCtrl
-    CRDs -->|"Watch"| EffectiveCtrl
+    RegistrationCtrl -->|"Watch"| CRDs
+    GrantCtrl -->|"Watch"| CRDs
+    EffectiveCtrl -->|"Watch"| CRDs
     EffectiveCtrl -->|"Manage"| CRDs
 
     %% UI Access
