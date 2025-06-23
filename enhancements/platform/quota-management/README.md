@@ -442,14 +442,13 @@ Using the creation of a `Project` as an example:
 #### Allocation-Based Enforcement (Asynchronous Claim Decisions)
 
 For allocation-based claims, an asynchronous approach is used with deferred
-enforcement. For example, attempting to claim an additional 500 GiB of memory
-allocation for a specific instance type within a project. The owning service
-controller does not block the request by waiting for a synchronous response
-before proceeding with initial provisioning.
+enforcement. For example, attempting to create a new `Instance` with specific
+memory and CPU. The owning service controller does not block the request by
+waiting for a synchronous response before proceeding with initial provisioning.
 
 1. **Initial Event**: A client sends a request for the creation of an `Instance`
-  with specific CPU and memory allocations to the project APIServer, and the
-  `Instance` is immediately created by the instance controller.
+  with specific CPU and memory allocations to the Project APIServer, and the
+  `Instance` is immediately created and persisted.
 2. **Claim Creation**: The `Instance` controller detects the new object and
    creates a new `ResourceClaim` to claim required resources from the available
    remaining quota.
@@ -460,8 +459,9 @@ before proceeding with initial provisioning.
 4. **Controller Decision**: The claim remains in a pending state until the
    controller updates it once a decision is made.
 5. **Final Outcome**: Once the status of the claim transitions to a terminal
-   state, the owning service controller either continues with provisioning if
-   the claim was granted, or handles the rejection if denied.
+   state, the `Instance` controller either continues with allocating
+   memory and CPU to the `Instance` (claim granted) or handles the failure
+   (claim denied), and returns the response to the client.
 
 ### Kubernetes Resource Quota Limitations 
 
@@ -497,9 +497,9 @@ includes examples for **both** enforcement patterns:
   conveniance
 - `AllowanceBucket` - System-managed usage tracking
 
-**Reading Guide**: Each CRD section includes both **Entity** (synchronous) and
+**Note**: Each CRD section includes both **Entity** (synchronous) and
 **Allocation** (asynchronous) examples to demonstrate the two enforcement
-patterns. Focus on the pattern relevant to your use case.
+patterns.
 
 #### `ResourceRegistration`
 
@@ -743,10 +743,10 @@ spec:
 status:
   observedGeneration: 1
   conditions:
-    - type: "Active"
+    - type: "Granted"
       status: "True"
       lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: "ClaimGranted"
+      reason: "QuotaAvailable"
       message: "Claim was granted due to quota availability."
 ```
 
@@ -792,10 +792,10 @@ spec:
 status:
   observedGeneration: 1
   conditions:
-    - type: "Active"
+    - type: "Granted"
       status: "True"
       lastTransitionTime: "2023-01-01T12:00:00Z"
-      reason: "ClaimGranted"
+      reason: "QuotaAvailable"
       message: "Claim was granted due to quota availability."
 ```
 
@@ -1002,7 +1002,7 @@ libraries (`k8s.io/apimachinery/pkg/labels`) to evaluate
      limit
 3. Evaluates if `CurrentUsage + ClaimAmount <= TotalEffectiveQuota` for matching
    grants
-4. Sets `ResourceClaim.status.conditions.Active` to `True` or `False` based on
+4. Sets `ResourceClaim.status.conditions.Granted` to `True` or `False` based on
    quota availability
 5. Updates `status.observedGeneration` to track the current spec revision
 6. When a `ResourceClaim` is deleted, decrements allocated amounts in
@@ -1057,8 +1057,9 @@ resource registration type (Entity vs Allocation).
   accurate formatting
 
 **Mutating Webhook Responsibilities**:
-- **Resource Validation**: Ensures the requested entity references an active
-  `ResourceRegistration` with `type: "Entity"`
+- **Finalizer Injection**: Adds finalizers to all incoming
+  `ResourceClaim`s created by validating webhook to ensure cleanup
+  when claims are deleted, requiring the release of their claimed quotas
 
 #### Allocation Type Webhook (Standard Validation Only)
 
@@ -1081,7 +1082,7 @@ resource registration type (Entity vs Allocation).
     implementation
 
 **Mutating Webhook Responsibilities**:
-- **ResourceClaim Finalizer Injection**: Adds finalizers to all incoming
+- **Finalizer Injection**: Adds finalizers to all incoming
   `ResourceClaim`s created by the owning service controller to ensure cleanup
   when claims are deleted, requiring the release of their claimed quotas
 
@@ -1094,16 +1095,9 @@ webhooks are unavailable and quota enforcement can be bypassed, an external
 administrator or bad actor could create a large number of claims that would
 never be enforced by the limits, overloading the system. 
 
-This `failurePolicy` approach provides:
-
-- **Financial protection**: Prevents unexpected resource costs during outages
-- **Compliance requirements**: Ensures quota limits are never violated
-- **Predictable behavior**: Clear distinction between synchronous (Entity) and
-  asynchronous (Allocation) enforcement patterns
-
 ## System Architecture Diagrams
 
-### Static Structure: System Context and Components
+### System Context and Components
 
 #### C1 Diagram - System Context
 
