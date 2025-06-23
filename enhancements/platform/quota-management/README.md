@@ -1197,6 +1197,121 @@ graph TD
     CloudPortal -->|"Read Data"| CRDs
     StaffPortal -->|"Manage System"| CRDs
 ```
+### Sequence Diagrams
+
+#### Entity-based Synchronous Enforcement
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant APIServer as Milo APIServer
+    participant Webhook as Validating Webhook
+    participant Controller as ResourceClaim<br/>Controller
+
+    Note over Client, Controller: Entity-Based Synchronous Quota Enforcement
+
+    Client->>APIServer: POST /projects<br/>Create new Project
+    Note over APIServer: Admission chain triggered
+    
+    APIServer->>Webhook: Validate Project creation
+    Note over Webhook: Webhook blocks request<br/>during quota evaluation
+    
+    Webhook->>APIServer: Create ResourceClaim<br/>(for quota request)
+    APIServer-->>Webhook: ResourceClaim created
+    
+    Note over Webhook: Wait for claim status<br/>(synchronous blocking)
+    
+    Controller->>APIServer: Watch ResourceClaim events
+    APIServer-->>Controller: New ResourceClaim detected
+    
+    Controller->>APIServer: Read EffectiveResourceGrant<br/>and AllowanceBucket
+    APIServer-->>Controller: Current quota limits and usage
+    
+    Note over Controller: Evaluate: CurrentUsage + ClaimAmount <= TotalLimit
+    
+    alt Quota Available
+        Controller->>APIServer: Update ResourceClaim<br/>status.conditions.Granted = True
+        APIServer-->>Controller: Status updated
+        
+        Controller->>APIServer: Update AllowanceBucket<br/>allocated amount (+1)
+        APIServer-->>Controller: Usage updated
+        
+        Note over Webhook: Detect status transition<br/>
+        Webhook-->>APIServer: Admission Granted
+        APIServer-->>Client: 201 Created<br/>Project successfully created
+        
+    else Quota Exceeded
+        Controller->>APIServer: Update ResourceClaim<br/>status.conditions.Granted = False
+        APIServer-->>Controller: Status updated
+        
+        Note over Webhook: Detect status transition<br/>
+        Webhook-->>APIServer: Admission Denied<br/>(quota exceeded)
+        APIServer-->>Client: 403 Forbidden<br/>Quota limit exceeded
+        
+    end
+```
+
+#### Allocation-based Asynchronous Enforcement
+
+```mermaid
+
+sequenceDiagram
+    participant Client
+    participant ProjectAPI as Project APIServer
+    participant InstanceController as Instance Controller<br/>(Owning Service)
+    participant MiloAPI as Milo APIServer
+    participant ClaimController as ResourceClaim<br/>Controller
+
+    Note over Client, ClaimController: Allocation-Based Asynchronous Quota Enforcement
+
+    Client->>ProjectAPI: POST /instances<br/>Create new Instance
+    ProjectAPI-->>Client: 201 Created<br/>Instance created immediately
+    
+    Note over Client: Client receives immediate response<br/>(asynchronous pattern)
+    
+    InstanceController->>ProjectAPI: Watch Instances
+    ProjectAPI-->>InstanceController: New Instance detected
+    
+    InstanceController->>MiloAPI: Create ResourceClaim<br/>(for instance with <br/>CPU/memory allocation)
+    MiloAPI-->>InstanceController: ResourceClaim created
+    
+    Note over InstanceController: Continue with other provisioning<br/>while quota is evaluated
+    
+    ClaimController->>MiloAPI: Watch ResourceClaims
+    MiloAPI-->>ClaimController: New ResourceClaim detected
+    
+    ClaimController->>MiloAPI: Read EffectiveResourceGrant<br/>and AllowanceBucket
+    MiloAPI-->>ClaimController: Current quota limits and usage
+    
+    Note over ClaimController: Evaluate: CurrentUsage + ClaimAmount <= TotalLimit
+    
+    alt Quota Available
+        ClaimController->>MiloAPI: Update ResourceClaim<br/>status.conditions.Granted = True
+        MiloAPI-->>ClaimController: Status updated
+        
+        ClaimController->>MiloAPI: Update AllowanceBucket<br/>allocated amount (+CPU/memory)
+        MiloAPI-->>ClaimController: Usage updated
+        
+        InstanceController->>MiloAPI: Watch ResourceClaim status
+        MiloAPI-->>InstanceController: Claim granted detected
+        
+        Note over InstanceController: Continue with resource allocation<br/>(CPU/memory provisioning)
+        InstanceController->>ProjectAPI: Update Instance status<br/>(provisioning complete)
+        
+    else Quota Exceeded
+        ClaimController->>MiloAPI: Update ResourceClaim<br/>status.conditions.Granted = False
+        MiloAPI-->>ClaimController: Status updated
+        
+        InstanceController->>MiloAPI: Watch ResourceClaim status
+        MiloAPI-->>InstanceController: Claim denied detected
+        
+        Note over InstanceController: Handle allocation failure<br/>(cleanup or error state)
+        InstanceController->>ProjectAPI: Update Instance status<br/>(quota exceeded)
+        
+    end
+
+    Note over Client, ClaimController: Asynchronous enforcement allows immediate response<br/>with deferred quota validation
+```
 
 ---
 
