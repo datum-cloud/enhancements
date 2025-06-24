@@ -363,7 +363,7 @@ is being used.
 - **High System Availability:** The primary mitigation is to ensure the quota
   system is designed for high availability to minimize potential downtime,
   taking advantage of Kubernetes auto-healing capabilities and the replication
-  of key components. Rolling deployments will also help prevent system
+  of key components within the cluster. Rolling deployments will also help prevent system
   unavilability when new deployments fail.
 - **System Resilience and Recovery:** The system and its components will be
   designed to be resilient, with retry mechanisms in place. Upon restoration of
@@ -390,7 +390,7 @@ is being used.
 quota limits could result in temporary over-allocation if not properly
 synchronized.
 
-**Mitigations**:
+###### Mitigations:
 - **Optimistic Locking:** Controllers use observed generation optimistic locking
   to prevent race conditions during quota updates
 - **Atomic Operations:**: `AllowanceBucket` updates use atomic
@@ -1039,13 +1039,13 @@ resource registration type (Entity vs Allocation).
 **For Entity-type resources (e.g., Projects, Users):**
 
 **Validating Webhook Responsibilities**:
+- **Standard Validation**: Validates references, required fields, and ensures
+  accurate formatting
 - **Inline Quota Enforcement**: Creates persistent `ResourceClaim` objects in
   the APIServer and synchronously watches their status within the defined
   webhook timeout limit
 - **Synchronous Decision**: Grants or denies the entity creation based on quota
-  availability returned by the `ResourceClaim` controller
-- **Standard Validation**: Validates references, required fields, and ensures
-  accurate formatting
+  decision made by the `ResourceClaim` controller
 
 **Mutating Webhook Responsibilities**:
 - **Finalizer Injection**: Adds finalizers to all incoming
@@ -1054,17 +1054,14 @@ resource registration type (Entity vs Allocation).
 
 #### Allocation Type Webhook (Standard Validation Only)
 
-**For Allocation-type resources (e.g., CPU, Memory):**
+**For Allocation-type resources (e.g., Instance CPU, Memory):**
 
 **Validating Webhook Responsibilities**:
-- **Resource Registration Validation**: Ensures `resourceTypeName` values in
-  `ResourceGrant` and `ResourceClaim` objects reference active
-  `ResourceRegistration` objects within the quota system
+- **Standard Validation**: Validates references, required fields, and ensures
+  accurate formatting
 - **Cross-Reference Validation**: For Phase 1, validates `ownerRef` field format
   and syntax **only**. Cross-system validation of actual resource existence is
   deferred to Phase 2 since resources are internally managed
-- **Required Field Validation**: Ensures all required fields are present and
-  properly formatted
 - **Dimension Validation**: Validates :
   - Dimensions used in grants and claims are defined in the corresponding
     `ResourceRegistration.dimensions`
@@ -1191,7 +1188,8 @@ graph TD
 sequenceDiagram
     participant Client
     participant APIServer as Milo APIServer
-    participant Webhook as Validating Webhook
+    participant ValWebhook as Validating Webhook
+    participant MutWebhook as Mutating Webhook
     participant Controller as ResourceClaim<br/>Controller
 
     Note over Client, Controller: Entity-Based Synchronous Quota Enforcement
@@ -1199,13 +1197,14 @@ sequenceDiagram
     Client->>APIServer: POST /projects<br/>Create new Project
     Note over APIServer: Admission chain triggered
     
-    APIServer->>Webhook: Validate Project creation
-    Note over Webhook: Webhook blocks request<br/>during quota evaluation
+    APIServer->>ValWebhook: Validate Project creation
+    Note over ValWebhook: Webhook blocks request<br/>during quota evaluation
     
-    Webhook->>APIServer: Create ResourceClaim<br/>(for quota request)
-    APIServer-->>Webhook: ResourceClaim created
+    ValWebhook->>APIServer: Create ResourceClaim<br/>(for quota request)
+    APIServer-->>ValWebhook: ResourceClaim created
+    MutWebhook->>APIServer: Adds finalizer to new ResourceClaim
     
-    Note over Webhook: Wait for claim status<br/>(synchronous blocking)
+    Note over ValWebhook: Wait for claim status<br/>(synchronous blocking)
     
     Controller->>APIServer: Watch ResourceClaim events
     APIServer-->>Controller: New ResourceClaim detected
@@ -1222,16 +1221,16 @@ sequenceDiagram
         Controller->>APIServer: Update AllowanceBucket<br/>allocated amount (+1)
         APIServer-->>Controller: Usage updated
         
-        Note over Webhook: Detect status transition<br/>
-        Webhook-->>APIServer: Admission Granted
+        Note over ValWebhook: Detect status transition<br/>
+        ValWebhook-->>APIServer: Admission Granted
         APIServer-->>Client: 201 Created<br/>Project successfully created
         
     else Quota Exceeded
         Controller->>APIServer: Update ResourceClaim<br/>status.conditions.Granted = False
         APIServer-->>Controller: Status updated
         
-        Note over Webhook: Detect status transition<br/>
-        Webhook-->>APIServer: Admission Denied<br/>(quota exceeded)
+        Note over ValWebhook: Detect status transition<br/>
+        ValWebhook-->>APIServer: Admission Denied<br/>(quota exceeded)
         APIServer-->>Client: 403 Forbidden<br/>Quota limit exceeded
         
     end
