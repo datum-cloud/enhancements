@@ -520,15 +520,16 @@ validation will be deferred until a centralized service registry is available.
 apiGroup: quota.miloapis.com
 kind: ResourceRegistration
 metadata:
-  # <service-name>-<parent-resource-name>-<resource-name>-registration
-  name: resourcemanager-organization-projects-registration
+  # {service}-{resource-type}-{allocation-or-entity-type}-registration
+  name: resourcemanager-organization-project-registration
+  namespace: org-abc
 spec:
-  # Reference to the owning service  that will create claims for the type being registered.
+  # Reference to the owning service and kind that will create claims for the type being registered.
   # Refer to note in CRD description regarding phase 1 approach
   ownerRef:
-    apiGroup: compute.datumapis.com
-    kind: Project
-  # - "Entity": Declares a new resource entity (e.g., Instance, Project) 
+    apiGroup: resourcemanager.miloapis.com
+    kind: Organization
+  # - "Entity": Declares a new resource entity (e.g., User, Project) 
   #   that must be counted for quota.
   # - "Allocation": Declares a resource unit (e.g., CPU, memory, storage) 
   #   that can be reserved or consumed within a parent entity.
@@ -536,15 +537,65 @@ spec:
   type: "Entity"
   # Fully qualified name of the resource type being registered, as defined by the owning service.
   # This field is used in the matching pattern to locate associated ResourceGrants and ResourceClaims
-  resourceTypeName: "resourcemanager.miloapis.com/project"
+  resourceTypeName: "resourcemanager.miloapis.com/Project"
   # Description of the quota limit for the resource type
   description: "Number of projects that can be created within an organization."
   # The base unit of measurement for the resource
   baseUnit: "projects"
   # The unit of measurement UI will display to users
   displayUnit: "projects"
-  # Defines how to convert between the base unit and the display unit to instruct Cloud and Staff portals on display
-  # Formula: baseUnit * unitConversionFactor = displayUnit
+  # Defines how to convert between the base unit and the display unit to instruct Cloud and Staff portals on 
+  # how to display values
+ # Formula: baseValue / unitConversionFactor = displayValue
+  unitConversionFactor: 1.0
+  # Dimensions that can be used in ResourceGrant selectors
+  # for this resource type. These should be fully qualified resource type names
+  # from the owning service's API group.
+  # Note: dimensions are not used in the initial release to reduce complexity as stated previously in this document
+  dimensions: []
+status:
+  # The specific revision of the ResourceRegistration.
+  observedGeneration: 1
+  # Standard kubernetes approach to represent the state of a resource.
+  conditions:
+    - type: "Active"
+      status: "True"
+      lastTransitionTime: "2023-01-01T12:00:00Z"
+      reason: "RegistrationActive"
+      message: "The registration is active and ready for grant creation and claim requests."
+
+---
+
+apiGroup: quota.miloapis.com
+kind: ResourceRegistration
+metadata:
+  # {service}-{resource-type}-{allocation-or-entity-type}-registration
+  name: resourcemanager-organization-project-registration
+  namespace: org-abc
+spec:
+  # Reference to the owning service and kind that will create claims for the type being registered.
+  # Refer to note in CRD description regarding phase 1 approach
+  ownerRef:
+    apiGroup: resourcemanager.miloapis.com
+    kind: Organization
+  # - "Entity": Declares a new resource entity (e.g., User, Project) 
+  #   that must be counted for quota.
+  # - "Allocation": Declares a resource unit (e.g., CPU, memory, storage) 
+  #   that can be reserved or consumed within a parent entity.
+  # - "Feature": Declares feature flags (future enhancement)
+  type: "Entity"
+  # Fully qualified name of the resource type being registered, as defined by the owning service.
+  # This field is used in the matching pattern to locate associated ResourceGrants and ResourceClaims
+  resourceTypeName: "resourcemanager.miloapis.com/Instance"
+  # Description of the quota limit for the resource type
+  description: "Number of instances that can be created within a project."
+  # The base unit of measurement for the resource
+  baseUnit: "instances"
+  # The unit of measurement UI will display to users
+  displayUnit: "instances"
+  # Defines how to convert between the base unit and the display unit to instruct Cloud and Staff portals on 
+  # how to display values
+ # Formula: baseValue / unitConversionFactor = displayValue
   unitConversionFactor: 1.0
   # Dimensions that can be used in ResourceGrant selectors
   # for this resource type. These should be fully qualified resource type names
@@ -569,19 +620,54 @@ status:
 apiGroup: quota.miloapis.com
 kind: ResourceRegistration
 metadata:
-  name: compute-instances-cpu-registration
+  # {service}-{resource-type}-{allocation-or-entity-type}-registration
+  name: compute-instance-cpu-allocated-registration
+  namespace: proj-abc
 spec:
   ownerRef:
     apiGroup: compute.datumapis.com
     kind: Instance
   type: "Allocation"
-  resourceTypeName: "compute.datumapis.com/instances/cpu"
+  resourceTypeName: "compute.datumapis.com/instances/cpuAllocated"
   description: "Number of CPU cores that can be allocated to compute instances."
   baseUnit: "millicores"
   displayUnit: "cores"
-  unitConversionFactor: 0.001
+# Formula: baseValue / unitConversionFactor = displayValue
+  unitConversionFactor: 1000
   dimensions:
     - "compute.datumapis.com/instanceType"
+    - "networking.datumapis.com/Location"
+status:
+  # The specific revision of the ResourceRegistration.
+  observedGeneration: 1
+  # Standard kubernetes approach to represent the state of a resource.
+  conditions:
+    - type: "Active"
+      status: "True"
+      lastTransitionTime: "2023-01-01T12:00:00Z"
+      reason: "RegistrationActive"
+      message: "The registration is active and ready for grant creation and claim requests."
+
+---
+
+apiGroup: quota.miloapis.com
+kind: ResourceRegistration
+metadata:
+name: compute-instance-memory-allocated-registration
+  namespace: proj-abc
+spec:
+  ownerRef:
+    apiGroup: compute.datumapis.com
+    kind: Instance
+  type: "Allocation"
+  resourceTypeName: "compute.datumapis.com/instances/memoryAllocated"
+  description: "Amount of memory that can be allocated to compute instances."
+  baseUnit: "bytes"
+  displayUnit: "GiB"
+  unitConversionFactor: 1073741824
+  dimensions:
+    - "compute.datumapis.com/instanceType"
+    - "networking.datumapis.com/Location"
 status:
   # The specific revision of the ResourceRegistration.
   observedGeneration: 1
@@ -610,8 +696,9 @@ type (`metav1.LabelSelector`), supporting both `matchLabels` and
 `matchExpressions` for querying resources. This enables the quota controllers to
 leverage Kubernetes' upstream label evaluation libraries
 (`k8s.io/apimachinery/pkg/labels`) for established matching logic. The
-systemevaluates `ResourceClaim` dimensions against `ResourceGrant` dimension
-selectors to determine which grants apply to specific requests.
+system evaluates each `ResourceGrant`'s `dimensionSelector` against a 
+`ResourceClaim`'s `dimensions` to determine which grant allowances apply 
+to that specific claim request.
 
 **Example 1: Entity Type ResourceGrant (Synchronous Enforcement)**
 
@@ -635,7 +722,7 @@ spec:
   allowances:
     # Maximum number of projects allowed in this organization
     # resourceTypeName used in matching pattern expressions and labels to locate associated EffectiveResourceGrants
-    - resourceTypeName: "resourcemanager.miloapis.com/project"
+    - resourceTypeName: "resourcemanager.miloapis.com/Project"
       # Amount of the resource type being granted (base and display units and conversion 
       # factor are already defined in through the registration)
       amount: 10
@@ -671,31 +758,31 @@ spec:
 
   allowances:
     # Max instances for the project
-    - resourceTypeName: "compute.datumapis.com/instance"
+    - resourceTypeName: "compute.datumapis.com/Instance"
       amount: 100
       dimensionSelector: {}
 
     # Compute instance CPUs - base allowance for *all* locations
-    - resourceTypeName: "compute.datumapis.com/instances/cpu"
+    - resourceTypeName: "compute.datumapis.com/instances/cpuAllocated"
       amount: 100000
       dimensionSelector:
         matchExpressions: 
-          - key: "networking.datumapis.com/location"
+          - key: "networking.datumapis.com/Location"
             operator: "Exists"
 
     # Additional CPU allowance for *only* the DLS location
-    - resourceTypeName: "compute.datumapis.com/instances/cpu"
+    - resourceTypeName: "compute.datumapis.com/instances/cpuAllocated"
       amount: 500000
       dimensionSelector:
         matchLabels:
-          "networking.datumapis.com/location": "DLS"
+          "networking.datumapis.com/Location": "DLS"
 
     # Compute instance memory allocation for multiple specific network locations
     - resourceTypeName: "compute.datumapis.com/instances/memoryAllocated"
       amount: 50000
       dimensionSelector:
         matchExpressions:
-          - key: "networking.datumapis.com/location"
+          - key: "networking.datumapis.com/Location"
             operator: "In"
             values:
               - "DFW"
@@ -728,7 +815,7 @@ metadata:
   finalizers:
     - "quota.miloapis.com/resource-claim-cleanup"
 spec:
-  # Reference to the organization this claim is for
+  # Reference to the owner of the claim request
   ownerRef:
     apiGroup: resourcemanager.miloapis.com
     kind: Organization
@@ -736,7 +823,7 @@ spec:
     uid: "550e8400-e29b-41d4-a716-446655440000"
   requests:
     # Project entity count (must reference an active ResourceRegistration)
-    - resourceTypeName: "resourcemanager.miloapis.com/project"
+    - resourceTypeName: "resourcemanager.miloapis.com/Project"
       amount: 1
       dimensions: {}
 
@@ -771,10 +858,10 @@ spec:
   # What quota requests are defined by this claim?
   requests:
     # CPU cores being claimed for instance (must reference an active ResourceRegistration)
-    - resourceTypeName: "compute.datumapis.com/instances/cpu"
+    - resourceTypeName: "compute.datumapis.com/instances/cpuAllocated"
       amount: 8000
       dimensions:
-        "networking.datumapis.com/location": "DFW"
+        "networking.datumapis.com/Location": "DFW"
         "compute.datumapis.com/instanceType": "d1-standard-2"
 
     # Base memory allocation (no dimensions)
@@ -786,7 +873,7 @@ spec:
     - resourceTypeName: "compute.datumapis.com/instances/memoryAllocated"
       amount: 34359738368
       dimensions:
-        "networking.datumapis.com/location": "DFW"
+        "networking.datumapis.com/Location": "DFW"
         "compute.datumapis.com/instanceType": "d1-standard-2"
 
 status:
@@ -813,16 +900,15 @@ amount that can still be claimed.
 apiGroup: quota.miloapis.com
 kind: EffectiveResourceGrant 
 metadata:
-  # namespace-resourcetype-effective
+  # {namespace}-{resource-type-slug}-effective
   name: org-abc-project-effective
   # used in the matching pattern for ResourceGrant and ResourceClaim objects
   namespace: org-abc
-  # Labels to help in querying this custom resource
   labels:
-    resourceTypeName: "resourcemanager.miloapis.com/project"
+    resourceTypeName: "resourcemanager.miloapis.com/Project"
 spec:
   # The resource type this effective grant aggregates quota information for
-  resourceTypeName: "resourcemanager.miloapis.com/project"
+  resourceTypeName: "resourcemanager.miloapis.com/Project"
 status:
   # The specific revision of the EffectiveResourceGrant
   observedGeneration: 1
@@ -847,12 +933,13 @@ status:
 apiGroup: quota.miloapis.com
 kind: EffectiveResourceGrant 
 metadata:
-  name: proj-abc-compute-cpu-effective
+  #  {namespace}-{resource-type-slug}-effective
+  name: proj-abc-instances-cpu-allocated-effective
   namespace: proj-abc
   labels:
-    resourceTypeName: "compute.datumapis.com/instances/cpu"
+    - "resourcemanager.miloapis.com/instances/cpuAllocated"
 spec:
-  resourceTypeName: "compute.datumapis.com/instances/cpu"
+  resourceTypeName: "compute.datumapis.com/instances/cpuAllocated"
 status:
   observedGeneration: 1
   totalLimit: 120000
@@ -890,16 +977,16 @@ kind: AllowanceBucket
 metadata:
   # Generated by EffectiveResourceGrant controller, providing a deterministic name for the bucket 
   # based on what it specifically is tracking, with extremely minimal chance of hash collisions based
-  # on the selection of algo e.g. sha256("org-abc" + "resourcemanager.miloapis.com/project" + "")
+  # on the selection of algo e.g. sha256("org-abc" + "resourcemanager.miloapis.com/Project" + "")
   name: <hash of namespace + resourceTypeName + serialized dimensions>
   namespace: org-abc
 spec:
   ownerRef:
-    apiGroup: resourcemanager.miloapis.com
-    resource: Project
-    name: proj-abc
+    apiGroup: quota.miloapis.com
+    kind: EffectiveResourceGrant
+    name: org-abc-project-effective
   # The resource type this bucket tracks quota usage for
-  resourceTypeName: "resourcemanager.miloapis.com/project"
+  resourceTypeName: "resourcemanager.miloapis.com/Project"
   dimensions: {}
 status:
   # The specific revision of the AllowanceBucket
@@ -910,7 +997,8 @@ status:
   # References to ResourceGrants that contribute allowances to this bucket
   contributingGrantRefs:
     - name: "org-abc-default-project-count-quota"
-      observedGeneration: 1
+      # The generation of "org-abc-default-project-count-quota" grant when this bucket last processed it
+      lastObservedGeneration: 1
 ```
 
 **Example 2: Allocation Type AllowanceBucket (Asynchronous Enforcement)**
@@ -923,22 +1011,22 @@ metadata:
   namespace: proj-abc
 spec:
   ownerRef:
-    apiGroup: resourcemanager.miloapis.com
-    resource: Project
-    name: proj-abc
-  resourceTypeName: "compute.datumapis.com/instances/cpu"
+    apiGroup: quota.miloapis.com
+    kind: EffectiveResourceGrant
+    name: proj-abc-instances-cpu-allocated-effective
+  resourceTypeName: "compute.datumapis.com/instances/cpuAllocated"
   dimensions:
-    "networking.datumapis.com/location": "DFW"
+    "networking.datumapis.com/Location": "DFW"
 status:
   observedGeneration: 1
   allocated: 8000
   contributingGrantRefs:
     - name: "default-grant"
-      observedGeneration: 1
+      lastObservedGeneration: 1
     - name: "additional-grant-1"
-      observedGeneration: 3
+      lastObservedGeneration: 3
     - name: "additional-grant-2"
-      observedGeneration: 1
+      lastObservedGeneration: 1
 ```
 
 ### Quota Operator Implementation
@@ -984,15 +1072,16 @@ libraries (`k8s.io/apimachinery/pkg/labels`) to evaluate
    `resourceTypeName` matching to determine current usage and total effective
    quota limit (which the `EffectiveResourceGrant` controller calculates based
    on `AllowanceBuckets`)
-2. For *each claim request*, matches the request's `dimensions` against
-   applicable `ResourceGrant` allowances using label selector logic:
+2. For *each claim request item*, determines which `ResourceGrant` allowances apply
+   by evaluating the grant's `dimensionSelector` against the claim's `dimensions`:
    - Empty `dimensionSelector` (`{}`) matches all claims for that resource type
    - Non-empty `dimensionSelector` applies standard Kubernetes `LabelSelector`
-     matching
-   - Only matching grants contribute allowances toward the total effective quota
-     limit
-3. Evaluates if `CurrentUsage + ClaimAmount <= TotalEffectiveQuota` for matching
-   grants
+     matching logic using `k8s.io/apimachinery/pkg/labels`
+   - Only allowances from matching grants are counted toward the available quota
+     for this specific claim
+3. Evaluates if `CurrentUsage + ClaimAmount <= AvailableQuotaFromMatchingGrants`
+   where AvailableQuotaFromMatchingGrants is the sum of allowances from active grants
+   that have a `dimensionSelector` matching the claim's `dimensions` field.
 4. Sets `ResourceClaim.status.conditions.Granted` to `True` or `False` based on
    quota availability
 5. Updates `status.observedGeneration` to track the current spec revision
@@ -1009,10 +1098,9 @@ libraries (`k8s.io/apimachinery/pkg/labels`) to evaluate
 1. For *each allowance* in the grant, uses namespace + `resourceTypeName`
    matching to find existing `EffectiveResourceGrant` objects, or creates new
    ones if none exist
-2. Aggregates allowances from all active `ResourceGrant` objects via the same
-   matching pattern in step 1 to determine which claims qualify for each grant
-   allowance based on their `dimensionSelector`s in order to calculate the
-   `totalLimit`. 
+2. For each `EffectiveResourceGrant`, aggregates allowances from all active 
+   `ResourceGrant` objects in the same namespace with matching `resourceTypeName`.
+   Each grant allowance contributes its `amount` to the `totalLimit` 
 3. Updates `EffectiveResourceGrant.status.totalLimit` and recalculates
    `available` quota
 
