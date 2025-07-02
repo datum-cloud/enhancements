@@ -670,37 +670,47 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant User as User
+    actor User as User
     participant Client as Client
-    participant IAM as IAM API Server
+    participant Milo as Milo API
+    participant Controller as Auth Provider Controller
     participant AuthZ as Auth Provider
 
     User->>Client: Request machine account key creation
-    Client->>IAM: Create machine account key API call <br> (with key metadata, expiration)
-    IAM->>AuthZ: Forward machine account key creation
-    AuthZ->>AuthZ: Create and <br> stores public key
-    AuthZ-->>IAM: private key
-    IAM-->>Client: private key
-    Client-->>User: private key
+    Client->>Milo: Create machine account key API call <br> (with key metadata, expiration)
+    Milo->>Milo: Create and store <br> public key w/ Machine Key
+    Milo-->>Client: Returns private key json
+    Client-->>User: Returns private key json
+
+    Controller-->>Milo: Observes Machine Key creation
+    Controller->>AuthZ: Creates Machine<br/>Key w/ public key
+    AuthZ->>AuthZ: Trusts public key
+    AuthZ-->>Controller: Returns response
+    Controller-->>Milo: Updates Machine Key status
 ```
 
 ##### 3. Registering a Machine Account Key (User-Generated Key)
 
 ```mermaid
 sequenceDiagram
-    participant User as User
+    actor User as User
     participant Client as Client
-    participant IAM as IAM API Server
+    participant Milo as Milo API
+    participant Controller as Auth Provider Controller
     participant AuthZ as Auth Provider
 
-    User->>User: Generate key pair (private/public) locally
-    User->>Client: Upload public key to IAM
-    Client->>IAM: Register public key API call <br> (with key metadata, expiration)
-    IAM->>AuthZ: Forward public key registration
-    AuthZ->>AuthZ: Stores public key
-    AuthZ-->>IAM: Confirmation and key ID
-    IAM-->>Client: Confirmation and key ID
-    Client-->>User: Show key registration result
+    User->>User: Generate private/public key pair locally
+    User->>Client: Request machine account key creation <br> with a provided Public Key
+    Client->>Milo: Create machine account key API call <br> (with key metadata, expiration and Public Key)
+    Milo->>Milo: Store <br> public key w/ Machine Key
+    Milo-->>Client: Returns response
+    Client-->>User: Returns response
+
+    Controller-->>Milo: Observes Machine Key creation
+    Controller->>AuthZ: Creates Machine<br/>Key w/ public key
+    AuthZ->>AuthZ: Trusts public key
+    AuthZ-->>Controller: Returns response
+    Controller-->>Milo: Updates Machine Key status
 ```
 
 ##### 4. Using a Machine Account Key for Authentication and Authoriation
