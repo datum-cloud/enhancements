@@ -61,7 +61,7 @@ SIG Architecture for cross-cutting RFCs).
 -->
 
 <!-- omit from toc -->
-# IAM Authentication
+# Platform Authentication
 
 <!--
 This is the title of your Enhancement. Keep it short, simple, and descriptive. A good
@@ -92,7 +92,7 @@ template.
     - [Existing User Migration](#existing-user-migration)
     - [Update Existing Services](#update-existing-services)
 - [Design Details](#design-details)
-  - [Login Flow For A Registrated User](#login-flow-for-a-registrated-user)
+  - [Login flow for a human user](#login-flow-for-a-human-user)
   - [Login Flow For A Non Registrated User](#login-flow-for-a-non-registrated-user)
   - [Registration Flow](#registration-flow)
   - [User Management Flow](#user-management-flow)
@@ -108,6 +108,8 @@ template.
     - [Example: User-Generated Key Registration Flow](#example-user-generated-key-registration-flow)
     - [Security Considerations](#security-considerations)
   - [Resource Storage](#resource-storage)
+- [Implementation History](#implementation-history)
+>>>>>>> Stashed changes
 - [Implementation History](#implementation-history)
 
 ## Summary
@@ -413,34 +415,55 @@ discover the trusted JWKS that are use to validate that JWT authentication
 tokens provided by clients are considered valid. All services should be updated
 to trust JWT tokens signed by the new authentication system.
 
-### Login Flow For A Registrated User
+### Login flow for a human user
 
+<<<<<<< Updated upstream
 This sequence flow illustrates the authentication process when a user logs in via an external identity provider (e.g. GitHub, Google).
 
 > [!NOTE]
 >
 > This login flow assumes that the user account has already been created for the external identity provider in use.
+=======
+This sequence flow illustrates the authentication process when a user
+authenticates with the Milo platform. Clients (e.g. web, mobile, CLI) are
+expected to authenticate the user with the Milo platform before accessing
+resources. Human users are expected to authenticate with the Milo platform
+directly and use one or more identity providers to prove their identity. User's
+can use multiple identity providers to authenticate with the Milo platform.
+>>>>>>> Stashed changes
 
 ```mermaid
 sequenceDiagram
-  participant User
-  participant Client as Client
+  participant user as User
+  participant client as Client
   box rgba(93, 93, 93, 0.07) [IAM System]
-  participant IAM as IAM API Server
-  participant IdP as Authentication Provider
+    participant milo as Milo APIServer
+    participant authProvider as Authentication Provider
   end
-  participant EIdP as External Identity Provider
+  participant IdP as Identity Provider
 
-  User->>Client: Login Request
-  Client->>IAM: Authenticate
-  IAM-->>IdP: Redirects client to
-  User->>IdP: Select External Identity Provider
-  IdP-->>EIdP: Redirects client to
-  User->>EIdP: Authenticates with
-  EIdP-->>IdP: Redirects client to
-  opt If additional authentication steps required
-  User-->>IdP: Complete authentication
+  user->>client: Accesses platform resources
+  activate client
+  opt If user is not authenticated
+    client->>authProvider: Authenticates user with
+    activate authProvider
+    authProvider-->>user: Asks user to choose identity provider
+    user->>authProvider: Select identity provider
+    authProvider-->>IdP: Verifies the user's identity with
+    activate IdP
+    user->>IdP: Proves identity to
+    IdP-->>authProvider: Returns user identity info
+    deactivate IdP
+    opt If user is registering
+      authProvider->>milo: Create user in Milo
+      activate milo
+      milo-->>authProvider: Returns user identity info
+      deactivate milo
+    end
+    authProvider-->>client: Redirects authenticated user to
+    deactivate authProvider
   end
+<<<<<<< Updated upstream
   IdP-->>IAM: Redirects Client To
   IAM-->>Client: Auth Token
 ```
@@ -530,17 +553,18 @@ sequenceDiagram
   end
   IdP-->>IAM: Redirects Client To
   IAM-->>Client: Auth Token
+=======
+  client->>milo: Accesses platform resources
+  activate milo
+  milo-->>client: Returns platform resources
+  deactivate milo
+  client-->>user: Returns platform resources
+  deactivate client
+>>>>>>> Stashed changes
 ```
 
-Diagram explanation:
-
-- The user requests registration and is redirected to the identity provider.
-
-- The user authenticates with the chosen external identity provider.
-
-- The user continues with the account registration.
-
-- Optionally, they set up 2FA and then receive the authentication token.
+Users will automatically be created in Milo as they authenticate with configured
+authentication providers.
 
 ### User Management Flow
 
@@ -608,6 +632,7 @@ The IAM APIServer provides the APIs that services are expected to interact with
 the perform authorization checks to enable the IAM system to change the policy
 engine or authentication provider without impacting upstream services.
 
+<<<<<<< Updated upstream
 ### Machine Account and Machine Account Key Management
 
 Machine accounts are special identities intended for use by automated systems, CI/CD pipelines, and workloads that need to interact with the platform programmatically. Each machine account can have one or more cryptographic keys associated with it, which are used to authenticate and authorize API calls.
@@ -789,6 +814,8 @@ flowchart LR
 > scope the resource management API that's needed to enable generic access to
 > all resources.
 
+=======
+>>>>>>> Stashed changes
 <!-- ## Production Readiness Review Questionnaire -->
 
 <!--
