@@ -83,7 +83,7 @@ template.
   - [System Architecture](#system-architecture)
   - [Authentication Flows](#authentication-flows)
     - [User Identity](#user-identity)
-    - [Service Account Keys](#service-account-keys)
+    - [Machine Account Keys](#machine-account-keys)
     - [Workload Identity Federation](#workload-identity-federation)
     - [System for Cross-domain Identity Management (SCIM)](#system-for-cross-domain-identity-management-scim)
   - [Audit Logging](#audit-logging)
@@ -92,7 +92,21 @@ template.
     - [Existing User Migration](#existing-user-migration)
     - [Update Existing Services](#update-existing-services)
 - [Design Details](#design-details)
+  - [Login Flow For A Registrated User](#login-flow-for-a-registrated-user)
+  - [Login Flow For A Non Registrated User](#login-flow-for-a-non-registrated-user)
+  - [Registration Flow](#registration-flow)
+  - [User Management Flow](#user-management-flow)
   - [Service Authentication](#service-authentication)
+  - [Machine Account and Machine Account Key Management](#machine-account-and-machine-account-key-management)
+    - [Best Practices for Machine Account and Key Management](#best-practices-for-machine-account-and-key-management)
+    - [Machine Account Lifecycle](#machine-account-lifecycle)
+      - [0. Machine Account Authentication Flow and Delegation Model](#0-machine-account-authentication-flow-and-delegation-model)
+      - [1. Creating a Machine Account](#1-creating-a-machine-account)
+      - [2. Registering a Machine Account Key (Auth Provider-Generated Key)](#2-registering-a-machine-account-key-auth-provider-generated-key)
+      - [3. Registering a Machine Account Key (User-Generated Key)](#3-registering-a-machine-account-key-user-generated-key)
+      - [4. Using a Machine Account Key for Authentication and Authoriation](#4-using-a-machine-account-key-for-authentication-and-authoriation)
+    - [Example: User-Generated Key Registration Flow](#example-user-generated-key-registration-flow)
+    - [Security Considerations](#security-considerations)
   - [Resource Storage](#resource-storage)
 - [Implementation History](#implementation-history)
 
@@ -189,7 +203,7 @@ through the following methods:
 - **Identity Providers for Users**: Integrate commonly used identity providers
   (e.g., OpenID Connect, SAML, etc.) for single sign-on experiences.
 - **Service Account Keys**: Provide an API-driven approach to generate and
-  manage ephemeral keys for automation use cases that can’t adopt workload
+  manage ephemeral keys for automation use cases that can't adopt workload
   federation yet.
 - **Workload Identity Federation**: Allow microservices or external services to
   authenticate without storing long-lived secrets, leveraging short-lived
@@ -292,9 +306,9 @@ Diagram Explanation:
 - The user accesses resources of a Datum Cloud service
 - Only authorized users are allowed to interact with the service
 
-#### Service Account Keys
+#### Machine Account Keys
 
-Service account keys can be created that allow machines to exchange self-signed
+Machine account keys can be created that allow machines to exchange self-signed
 JWTs for access tokens with the IAM system.
 
 ```mermaid
@@ -401,7 +415,7 @@ to trust JWT tokens signed by the new authentication system.
 
 ### Login Flow For A Registrated User
 
-This sequence flow illustrates the authentication process when a user logs in via an external identity provider (e.g. GitHub, Google). 
+This sequence flow illustrates the authentication process when a user logs in via an external identity provider (e.g. GitHub, Google).
 
 > [!NOTE]
 >
@@ -430,6 +444,7 @@ sequenceDiagram
   IdP-->>IAM: Redirects Client To
   IAM-->>Client: Auth Token
 ```
+
 Diagram explanation:
 
 - The user requests authentication and is redirected to the identity provider.
@@ -474,6 +489,7 @@ sequenceDiagram
   IdP-->>IAM: Redirects Client To
   IAM-->>Client: Auth Token
 ```
+
 Diagram explanation:
 
 - The user requests authentication and is redirected to the identity provider.
@@ -533,7 +549,6 @@ This sequence flow illustrates the user management process. User management incl
 > [!NOTE]
 >
 > Fore ease and simplicity, this diagram asumes taht the user and IAM API Server are already authenticated against the Authentication Provider.
-
 > [!WARNING]
 >
 > Some user account changes, such as email address updates, will require more interaction with the user and the IAM System, as email validation and further actions might be needed to complete the process.
@@ -561,7 +576,6 @@ Diagram explanation:
 - The IAM System receives the request and makes the changes to the authentication provider through the IAM API Server.
 
 - The IAM System returns the response to the client.
-
 
 ### Service Authentication
 
@@ -593,6 +607,161 @@ flowchart LR
 The IAM APIServer provides the APIs that services are expected to interact with
 the perform authorization checks to enable the IAM system to change the policy
 engine or authentication provider without impacting upstream services.
+
+### Machine Account and Machine Account Key Management
+
+Machine accounts are special identities intended for use by automated systems, CI/CD pipelines, and workloads that need to interact with the platform programmatically. Each machine account can have one or more cryptographic keys associated with it, which are used to authenticate and authorize API calls.
+
+#### Best Practices for Machine Account and Key Management
+
+- **Principle of Least Privilege:** Assign only the permissions necessary for the machine account's purpose.
+- **Key Generation:** Users should generate key pairs locally using secure tools (e.g., `openssl`, `ssh-keygen`, or cryptographic libraries). The private key must never leave the user's secure environment.
+- **Public Key Registration:** Only the public key is uploaded to the IAM system. The IAM system uses this public key to verify JWTs signed by the machine account's private key.
+- **Key Rotation:** Regularly rotate machine account keys. The IAM system should support multiple active keys per account to enable seamless rotation.
+- **Key Expiration:** Keys should have configurable expiration dates. Expired keys are automatically invalidated.
+- **Key Revocation:** The IAM system must provide APIs to revoke keys immediately if compromise is suspected.
+- **Audit Logging:** All key management operations (create, upload, rotate, revoke) must be logged for auditability.
+- **Secure Storage:** Private keys must be stored securely, e.g., in a hardware security module (HSM), a secure vault, or an encrypted file system.
+- **No Hardcoding:** Never embed private keys in source code or configuration files checked into version control.
+- **Short-lived Tokens:** Use short-lived JWTs for authentication to minimize the impact of key compromise.
+
+#### Machine Account Lifecycle
+
+##### 0. Machine Account Authentication Flow and Delegation Model
+
+The **IAM API Server** delegates all authentication and authorization responsibilities to a third-party authorization provider (such as ZITADEL). This means that the IAM API Server acts primarily as a proxy or orchestrator, while the actual security-sensitive operations are handled by the external provider. The delegated responsibilities include:
+
+- **Private Key Generation:** The user or client generates the private/public key pair locally. The private key never leaves the user's environment, and only the public key is registered with the authorization server (e.g., ZITADEL).
+- **Machine Account and Key Registration:** The IAM API Server provides an interface for users to register machine accounts and upload public keys, but the actual key management and validation are handled by the authorization provider.
+- **Token Request:** When a machine account needs to authenticate, it creates a JWT signed with its private key and sends it to the IAM API Server, which forwards the request to the authorization provider.
+- **Token Introspection and Validation:** The authorization provider is responsible for validating the JWT, checking the public key, and issuing an OAuth access token if the request is valid.
+- **Access Token Issuance:** The authorization provider issues a short-lived OAuth access token, which is returned to the client via the IAM API Server.
+- **Token Usage:** The client uses the OAuth access token to access protected resources. Resource servers can validate the token directly with the authorization provider (introspection endpoint) or via the IAM API Server.
+- **Audit Logging and Revocation:** All key lifecycle events (creation, rotation, revocation) and token events are logged by the authorization provider, ensuring traceability and compliance.
+
+This delegation model ensures that the IAM API Server does not handle or store any sensitive cryptographic material, and leverages the security, compliance, and operational maturity of the external authorization provider.
+
+**Key Points:**
+
+- The IAM API Server is stateless with respect to cryptographic secrets.
+- All sensitive operations (key validation, token issuance, introspection) are performed by the authorization provider.
+- This model supports strong separation of concerns, minimizes the attack surface, and leverages best-in-class security practices from the authorization provider.
+
+##### 1. Creating a Machine Account
+
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant Client as Client
+    participant IAM as IAM API Server
+    participant AuthZ as Auth Provider
+
+    User->>Client: Request to create machine account
+    Client->>IAM: Create machine account API call
+    IAM->>IAM: Create machine account
+    IAM->>AuthZ: Forward machine account creation
+    AuthZ->>AuthZ: Create machine account
+    AuthZ-->>IAM: Confirmation
+    IAM-->>Client: Machine account details (ID, metadata)
+    Client-->>User: Show machine account info
+```
+
+##### 2. Registering a Machine Account Key (Auth Provider-Generated Key)
+
+```mermaid
+sequenceDiagram
+    actor User as User
+    participant Client as Client
+    participant Milo as Milo API
+    participant Controller as Auth Provider Controller
+    participant AuthZ as Auth Provider
+
+    User->>Client: Request machine account key creation
+    Client->>Milo: Create machine account key API call <br> (with key metadata, expiration)
+    Milo->>Milo: Create and store <br> public key w/ Machine Key
+    Milo-->>Client: Returns private key json
+    Client-->>User: Returns private key json
+
+    Controller-->>Milo: Observes Machine Key creation
+    Controller->>AuthZ: Creates Machine<br/>Key w/ public key
+    AuthZ->>AuthZ: Trusts public key
+    AuthZ-->>Controller: Returns response
+    Controller-->>Milo: Updates Machine Key status
+```
+
+##### 3. Registering a Machine Account Key (User-Generated Key)
+
+```mermaid
+sequenceDiagram
+    actor User as User
+    participant Client as Client
+    participant Milo as Milo API
+    participant Controller as Auth Provider Controller
+    participant AuthZ as Auth Provider
+
+    User->>User: Generate private/public key pair locally
+    User->>Client: Request machine account key creation <br> with a provided Public Key
+    Client->>Milo: Create machine account key API call <br> (with key metadata, expiration and Public Key)
+    Milo->>Milo: Store <br> public key w/ Machine Key
+    Milo-->>Client: Returns response
+    Client-->>User: Returns response
+
+    Controller-->>Milo: Observes Machine Key creation
+    Controller->>AuthZ: Creates Machine<br/>Key w/ public key
+    AuthZ->>AuthZ: Trusts public key
+    AuthZ-->>Controller: Returns response
+    Controller-->>Milo: Updates Machine Key status
+```
+
+##### 4. Using a Machine Account Key for Authentication and Authoriation
+
+```mermaid
+sequenceDiagram
+    participant Machine as Machine (automation)
+    participant IAM as IAM API Server
+    participant AuthZ as Auth Provider
+    participant Resource as Resource API
+
+    Machine->>Machine: Create JWT signed with private key
+   Machine->>IAM: Exchange JWT for access token
+    IAM->>AuthZ: Forward token request
+    AuthZ->>AuthZ: Validate JWT, check public key, issue access token
+    AuthZ-->>IAM: Return access token
+    IAM-->>Machine: Return access token
+    Machine->>Resource: Call API with access token
+    Resource->>IAM: Validate token and check access
+    IAM->>AuthZ: Validate token
+    AuthZ-->>IAM: Confirmation
+    IAM->>IAM: Check access
+    IAM-->>Resource: Authorization decision
+```
+
+#### Example: User-Generated Key Registration Flow
+
+1. User generates a key pair:
+
+   ```sh
+   openssl genpkey -algorithm RSA -out private_key.pem -pkeyopt rsa_keygen_bits:2048
+   openssl rsa -pubout -in private_key.pem -out public_key.pem
+   ```
+
+2. User uploads `public_key.pem` to the IAM system via the API or UI.
+3. IAM system stores the public key, associates it with the machine account, and returns a key ID.
+4. User securely stores `private_key.pem` and uses it to sign JWTs for authentication.
+
+#### Security Considerations
+
+- **Never share or upload private keys.**
+- **Rotate keys regularly and remove unused/old keys.**
+- **Monitor audit logs for suspicious key management activity.**
+- **Enforce strong key generation parameters (e.g., minimum key size, algorithm).**
+- **Support for key attestation or hardware-backed keys is recommended for high-security environments.**
+
+> References:
+>
+> - [ZITADEL: Private key JWT authentication for machine users](https://zitadel.com/docs/guides/integrate/service-users/private-key-jwt)
+> - [Google Cloud IAM Best Practices](https://cloud.google.com/iam/docs/best-practices-for-managing-service-accounts)
+> - [AWS Service Account Key Management](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html)
 
 ### Resource Storage
 
