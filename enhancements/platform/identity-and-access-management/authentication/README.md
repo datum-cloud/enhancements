@@ -96,6 +96,10 @@ template.
   - [Login Flow For A Non Registrated User](#login-flow-for-a-non-registrated-user)
   - [Registration Flow](#registration-flow)
   - [User Management Flow](#user-management-flow)
+  - [User Activation and Deactivation Flow](#user-activation-and-deactivation-flow)
+    - [Overview](#overview)
+    - [Deactivation Flow](#deactivation-flow)
+    - [Reactivation Flow](#reactivation-flow)
   - [Service Authentication](#service-authentication)
   - [Machine Account and Machine Account Key Management](#machine-account-and-machine-account-key-management)
     - [Best Practices for Machine Account and Key Management](#best-practices-for-machine-account-and-key-management)
@@ -576,6 +580,61 @@ Diagram explanation:
 - The IAM System receives the request and makes the changes to the authentication provider through the IAM API Server.
 
 - The IAM System returns the response to the client.
+
+### User Activation and Deactivation Flow
+
+This section documents the mechanism for activating and deactivating user accounts in Milo using the `UserDeactivation` Custom Resource Definition (CRD). This mechanism enables administrators to programmatically deactivate and reactivate user accounts, improving security and lifecycle management.
+
+#### Overview
+
+- **Deactivation:** Creating a `UserDeactivation` resource for a user sets their state to `Inactive` and disables authentication. All existing sessions are revoked.
+- **Reactivation:** Deleting the `UserDeactivation` resource reactivates the user, setting their state to `Active` and restoring authentication capability.
+- The update of the user state and the deactivation/reactivation of the user is handled by the Auth Provider Controller, which observes changes to the `UserDeactivation` resource.
+
+#### Deactivation Flow
+
+The following sequence diagram illustrates the deactivation process:
+
+```mermaid
+sequenceDiagram
+    actor Admin as Admin/Service
+    participant Milo as Milo API
+    participant Controller as Auth Provider Controller
+    participant AuthZ as Auth Provider
+
+    Admin->>Milo: Request to deactivate user
+    Milo->>Milo: Create UserDeactivation CR
+    Controller-->>Milo: Observes UserDeactivation CR
+    Controller->>AuthZ: Deactivate user in Auth Provider
+    AuthZ-->>Controller: Confirmation
+    Controller->>Milo: Update UserDeactivation status (Deactivated)
+    Controller->>Milo: Update User resource state to Inactive
+```
+
+- The MILO API creates a `UserDeactivation` CR for the target user.
+- The Auth Provider Controller observes the new CR, deactivates the user in the external Auth Provider, and updates the status of the CR and the user's state.
+
+#### Reactivation Flow
+
+The following sequence diagram illustrates the reactivation process:
+
+```mermaid
+sequenceDiagram
+    actor Admin as Admin/Service
+    participant Milo as Milo API
+    participant Controller as Auth Provider Controller
+    participant AuthZ as Auth Provider
+
+    Admin->>Milo: Request to reactivate user
+    Milo->>Milo: Delete UserDeactivation CR
+    Controller-->>Milo: Observes UserDeactivation CR deletion
+    Controller->>AuthZ: Reactivate user in Auth Provider
+    AuthZ-->>Controller: Confirmation
+    Controller->>Milo: Update User resource state to Active
+```
+
+- The MILO API deletes the `UserDeactivation` CR for the user.
+- The Auth Provider Controller observes the deletion, reactivates the user in the external Auth Provider, and updates the user's state to `Active`.
 
 ### Service Authentication
 
