@@ -216,15 +216,17 @@ real-time feedback loops to network performance and delivery.
 
 ### User Stories
 
-#### Story 1: Alt Cloud Service Provider
-As a service provider, I want to offer differentiated network services to my
-customers, with different performance tiers and SLA guarantees. My greatest
-challenge is getting my customers from my compute environment to their data
-environment. I want to be able to offer a service to connect my cloud offering
-to existing environments in AWS and GCP, to the locations where my customer's
+#### Story 1: Neo-cloud, Alt Cloud Service Provider
+As a service provider, I want to offer differentiated application, service, agentic connectivity to customers' service/agent, with different performance tiers and SLA guarantees, inference for eg has different requirements compared to a model-training or batch BI reporting job. 
+A further challenge is connecting privately and securely to data sources, applications, services in a seamless manner. Consequently I want to be able to offer a service to connect my cloud offering to existing environments in AWS and GCP, to the locations where my customer's
 data is at rest, and to my customer's workforce.
 
 **Requirements:**
+- VPC peering or Private link or PSC like service with automated authentication and authorization and connection to a service
+- Partners/customers participate in the Galactic VPC
+- Route learning from AWS/GCP using describe VPC APIs
+- DRTP reverse tunnels to provide service access/agent/app connectivity
+- Private Authoritative DNS service.
 - Software defined "backbone as a service"
 - Multi-tenant network isolation
 - Configurable SLA profiles per customer
@@ -237,7 +239,7 @@ multiple cloud providers with guaranteed performance, so that my applications
 can reliably communicate across environments.
 
 **Requirements:**
-- L3VPN service with SLA-backed performance
+- L3VPN service to provide peering services for partners, customers, consumers and providers with SLA-backed performance
 - Ability to define traffic classes with different performance requirements
 - BGP integration for route exchange
 - Real-time performance monitoring
