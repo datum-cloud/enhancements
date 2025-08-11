@@ -225,7 +225,7 @@ data is at rest, and to my customer's workforce.
 - VPC peering or Private link or PSC like service with automated authentication and authorization and connection to a service
 - Partners/customers participate in the Galactic VPC
 - Route learning from AWS/GCP using describe VPC APIs
-- DRTP reverse tunnels to provide service access/agent/app connectivity
+- Reverse tunnels to provide service access/agent/app connectivity
 - Private Authoritative DNS service.
 - Software defined "backbone as a service"
 - Multi-tenant network isolation
@@ -233,8 +233,8 @@ data is at rest, and to my customer's workforce.
 - Connectivity to 3rd parties an API call away
 - Bring the network anywhere using IPv6/SRv6
 
-#### Story 2: Multi-Cloud Enterprise Network
-As an enterprise network operator, I want to connect my on-premises network to
+#### Story 2: Multi-Cloud Span
+As an enterprise/alt-cloud/neoCloud network operator, I want to connect my on-premises/vpc/private network to
 multiple cloud providers with guaranteed performance, so that my applications
 can reliably communicate across environments.
 
@@ -242,8 +242,21 @@ can reliably communicate across environments.
 - L3VPN service to provide peering services for partners, customers, consumers and providers with SLA-backed performance
 - Ability to define traffic classes with different performance requirements
 - BGP integration for route exchange
+- Build Overlays to prefixes learnt from BGP and Route APIs from AWS/GCP (user story #1) 
 - Real-time performance monitoring
 
+#### Story 3: Deterministic Routing and Traffic Engineering
+Datum provides a differentiated service over it's galactic VPC, in other words it enables a service plane that allows 
+services/applications/agents to request a specific path for their traffic. Constrained based paths need to be calculated
+and programmed. 
+
+**Requirements:**
+- Implement/Integrate  a controller or central path computation engine
+- The controller should be able to talk PCEP and BGP across routing domains in different ASes
+- The controller should be able to speak multiple protocols for the configuration plane - API/gRPC
+- Interfacing with a Datapath programming service which does the datapath programming.
+- Per-hop behaviour enforcement
+- Monitoring - with logs, events and metrics  
 ### Notes/Constraints/Caveats
 
 1. **Network Transport Requirements**
