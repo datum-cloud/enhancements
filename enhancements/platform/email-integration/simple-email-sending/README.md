@@ -220,16 +220,17 @@ metadata:
 spec:
   templateRef: 
     name: "user-invitation"
-  to: ["john.doe@company.com"]
+  userRef:
+    name: ["332926980888461588"]
   cc: []
   bcc: []
   variables:
-    - name: UserName: 
+    - name: UserName
       value: "John Doe"
-    - name InviteLink
+    - name: InviteLink
       value: "https://cloud.datum.net/org/xyz/invites/user-invitation-12345"
     - name: CompanyName
-      value: Datum Technology, Inc.
+      value: "Datum Technology, Inc."
   # Used to prioritize in which order emails are sent.
   priority: "high"
 ```
