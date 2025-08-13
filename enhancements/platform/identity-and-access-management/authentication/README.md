@@ -100,6 +100,10 @@ template.
     - [Overview](#overview)
     - [Deactivation Flow](#deactivation-flow)
     - [Reactivation Flow](#reactivation-flow)
+  - [JWT Revocation \& Authentication Webhook](#jwt-revocation--authentication-webhook)
+    - [High-Level Flow](#high-level-flow)
+    - [Webhook Deployment Guide](#webhook-deployment-guide)
+    - [Request / Response Example](#request--response-example)
   - [Service Authentication](#service-authentication)
   - [Machine Account and Machine Account Key Management](#machine-account-and-machine-account-key-management)
     - [Best Practices for Machine Account and Key Management](#best-practices-for-machine-account-and-key-management)
@@ -635,6 +639,81 @@ sequenceDiagram
 
 - The MILO API deletes the `UserDeactivation` CR for the user.
 - The Auth Provider Controller observes the deletion, reactivates the user in the external Auth Provider, and updates the user's state to `Active`.
+
+### JWT Revocation & Authentication Webhook
+
+Milo’s core APIServer **does not** keep an in-memory block-list of revoked JSON Web Tokens (JWTs).  
+Once a token is signed it remains valid until the `exp` claim is reached even if the associated user or organization is disabled in the IAM system.  
+For control-plane components—most notably the Milo APIServer—integrators **must** configure an authentication webhook that validates every incoming bearer token against Milo before it is accepted.
+
+#### High-Level Flow
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant KubeAPI as Milo APIServer
+    participant MiloAuth as Milo AuthN Webhook
+    participant AuthProvider as Auth Provider
+
+    Client->>KubeAPI: Bearer <JWT>
+    KubeAPI->>MiloAuth: TokenReview webhook
+    MiloAuth->>AuthProvider: Post <TokenReview>
+    AuthProvider-->>MiloAuth: <TokenReview> Response
+    MiloAuth-->>KubeAPI: TokenReview{authenticated=true}
+    KubeAPI-->>KubeAPI: Executes Request
+    KubeAPI-->>Client: Request Response
+```
+
+1. The Kubernetes APIServer receives a request with a bearer token.
+2. Instead of validating the signature only, it triggers the configured `authentication.k8s.io/v1` webhook.
+3. The Milo AuthN webhook checks the token signature **and** calls the Auth Provider to verify the user is still active.
+4. If the user is disabled (e.g. a `UserDeactivation` CR exists) the webhook returns `authenticated=false` and the request is rejected.
+
+#### Request / Response Example
+
+Request (Authn Webhook → Auth Provider):
+
+```json
+{
+  "apiVersion": "authentication.k8s.io/v1",
+  "kind": "TokenReview",
+  "spec": {
+    "token": "eyJhbGciOiJSUzI1NiIsIn..."
+  }
+}
+```
+
+Success Response:
+
+```json
+{
+  "apiVersion": "authentication.k8s.io/v1",
+  "kind": "TokenReview",
+  "status": {
+    "authenticated": true,
+    "user": {
+      "username": "alice@example.com",
+      "uid": "756e253a-...",
+    }
+  }
+}
+```
+
+Revoked / Disabled Response:
+
+```json
+{
+  "apiVersion": "authentication.k8s.io/v1",
+  "kind": "TokenReview",
+  "status": {
+    "user": {},
+    "error": "jwt token is not active"
+  }
+}
+```
+
+> **Note**  
+> Disabling a user via the `UserDeactivation` CRD takes effect instantly for new requests because every token is re-validated through the webhook.  
 
 ### Service Authentication
 
