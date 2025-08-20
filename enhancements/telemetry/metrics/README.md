@@ -61,7 +61,7 @@ SIG Architecture for cross-cutting RFCs).
 -->
 
 <!-- omit from toc -->
-# Metrics Platform
+# Policy-Driven Metrics Platform
 
 <!--
 This is the title of your Enhancement. Keep it short, simple, and descriptive. A good
@@ -80,6 +80,16 @@ template.
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
+  - [Concepts.](#concepts)
+  - [Architecture \& flexibility.](#architecture--flexibility)
+  - [Desired outcome \& success measures.](#desired-outcome--success-measures)
+- [Design Details](#design-details)
+  - [Metric Definitions](#metric-definitions)
+    - [Complete MetricDefinition example](#complete-metricdefinition-example)
+  - [Metric Policies](#metric-policies)
+  - [Scenarios](#scenarios)
+    - [Control Plane Metrics](#control-plane-metrics)
+    - [Data Plane Metrics](#data-plane-metrics)
 - [Implementation History](#implementation-history)
 
 ## Summary
@@ -102,12 +112,35 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
+This enhancement adds a **policy-driven metrics platform** to Milo that
+introduces a stable contract for metric identity and production so service
+providers can declare *what* metrics a registered resource exposes and *how*
+those metrics are produced—independent of the telemetry stack in use. Today,
+operators hand-craft backend-specific configs (e.g., kube-state-metrics,
+Prometheus scrapes). With this change, providers author portable **definitions**
+and **policies** that the platform translates into whatever
+collectors/processors/exporters are deployed, allowing the implementation to
+evolve without API churn.
+
+The result is consistent metric discovery, naming, units, and labels across the
+platform. This foundation also enables future **alerting** (policy-driven
+conditions over standardized metrics) and **metering for billing and cost
+attribution** (well-defined counters/histograms per tenant/resource) without
+revisiting every workload or dashboard.
+
 ## Motivation
 
 <!--
 This section is for explicitly listing the motivation, goals, and non-goals of
 this Enhancement.  Describe why the change is important and the benefits to users.
 -->
+
+Operators and service providers need a consistent, declarative way to define
+resource metrics and to produce them from either fields on control-plane
+resources or data-plane telemetry. Backend-specific configuration creates drift
+in names/units/labels and makes migration costly. A portable contract avoids
+per-backend rewrites, improves discoverability, and lets the underlying
+telemetry components change over time without breaking users.
 
 ### Goals
 
@@ -116,12 +149,33 @@ List the specific goals of the Enhancement. What is it trying to achieve? How wi
 know that this has succeeded?
 -->
 
+- Provide a stable, declarative contract to:
+  - Define metric identity, description, instrument type, unit, and label schema
+    per resource kind.
+  - Declare policies that map resource fields and/or data-plane telemetry to
+    metric values.
+- Ensure portability across implementations (OTLP, Prometheus-compatible, and
+  future backends) with no API changes.
+- Standardize naming/units/labels to eliminate drift and enable metric
+  discovery.
+- Support multi-tenant/authorization-aware exposure aligned with Milo IAM.
+- Establish a forward path for alerting and metering (billing/cost attribution)
+  to consume these standardized metrics.
+- Measure success by: reduced bespoke configs, ability to swap
+  collectors/exporters without changing API objects, and adoption across core
+  Milo resources.
+
 ### Non-Goals
 
 <!--
 What is out of scope for this Enhancement? Listing non-goals helps to focus discussion
 and make progress.
 -->
+
+- Building a new time-series database or UI dashboard.
+- Replacing external alerting systems; only enabling consistent inputs to them.
+- Defining billing business logic; only enabling reliable meters for it.
+- Introducing a new telemetry format or standard
 
 ## Proposal
 
@@ -133,6 +187,56 @@ implementation. What is the desired outcome and how do we measure success?.
 The "Design Details" section below is for the real
 nitty-gritty.
 -->
+
+Introduce a contract that separates *what a metric is* from h*ow it is
+produced*, and a translation layer that compiles that contract into the active
+telemetry implementation.
+
+### Concepts.
+
+- **MetricDefinition** — Declares a single metric for a resource kind: name,
+  description, instrument (counter/gauge/histogram), unit (spelled out, e.g.,
+  `seconds`, `bytes`, `1`), and label schema. It is the discoverable, stable surface
+  for consumers.
+- **MetricPolicy** — Binds resource instances to a definition and specifies
+  production rules:
+  - **Resource-fields source**: derive values from control-plane objects
+    (including list expansion for conditions/arrays, timestamp extraction,
+    simple transforms).
+  - **Data-plane source**: select incoming telemetry (e.g., from Envoy or edge
+    router) by attributes and transform samples/units; attach resource identity
+    labels.
+
+### Architecture & flexibility.
+
+- **Controller/translator**. A controller watches definitions/policies,
+  validates them, and produces backend-specific configs for the active stack
+  (e.g., OTel Collector pipelines, Prometheus relabeling/recording rules, or
+  other processors). Swapping collectors/exporters or moving between “pull” and
+  “push” models is an implementation detail behind the translator.
+
+- **Runtime surfaces**. The platform can support multiple runtimes without
+  changing API objects:
+  - An **OTLP** path for modern backends.
+  - A **Prometheus-compatible** path (name/label transforms only) for existing dashboards/alerts.
+
+- **Source neutrality**. Policies can combine control-plane fields and
+	data-plane telemetry. Implementations may realize this via:
+  - Direct emission from the controller (control-plane metrics).
+  - OTel Collector processors for attribute-based selection and unit conversion.
+  - Adapters for existing components (e.g., translating policies into
+    kube-state-metrics configuration or Prometheus rules) to ease migration.
+- **Change management**. Definitions are stable; changes that would break
+  consumers (name/unit/label changes) are treated as new definitions. Status
+  conditions (e.g., Accepted) communicate readiness or validation errors to
+  producers/consumers. Stability indicators are included on metric definitions.
+
+### Desired outcome & success measures.
+
+- Core Milo resources (e.g. Project, Groups) publish metric definitions;
+  policies generate series from both control-plane fields and data-plane
+  telemetry.
+- Backends/collectors can be changed with no API edits; consumers see uninterrupted, stable metrics.
 
 <!-- ### User Stories (Optional) -->
 
@@ -170,7 +274,7 @@ How will UX be reviewed, and by whom?
 Consider including folks who also work outside of your immediate team.
 -->
 
-<!-- ## Design Details -->
+## Design Details
 
 <!--
 This section should contain enough information that the specifics of your
@@ -178,6 +282,449 @@ change are understandable. This may include API specs (though not always
 required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
+
+This section details the resources, fields, and concrete examples that implement
+the policy-driven metrics platform. It uses real HTTPRoute examples from the
+control plane and Envoy metrics from the data plane.
+
+### Metric Definitions
+
+**MetricDefinition** declares **what** a single metric is for a given resource kind: identity (name), description, instrument type, unit, and the **label schema** consumers can rely on. It does **not** describe how values are generated.
+
+Key points:
+- Metric names follow OTel style: `<api-group>.<singular-resource>.<metric>[.<subparts>]`.
+- Units must be spelled out (`seconds`, `bytes`, `1` for dimensionless).
+- Status conditions communicate acceptance and readiness.
+
+#### Complete MetricDefinition example
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricDefinition
+metadata:
+  # Name of this definition object (cluster-unique, kebab-case recommended)
+  name: gateway-httproute-delivery-upstream-request-latency
+  labels:
+    service.miloapis.com: gateway.networking.k8s.io
+spec:
+  # --- Unversioned reference to the owning resource kind ---
+  resource:
+    # API group of the resource that owns this metric
+    group: gateway.networking.k8s.io
+    # Plural name of the resource
+    kind: HTTPRoute
+
+  # --- Metric identity and instrument configuration ---
+  metric:
+    # Fully-qualified OTel-style name: <group>.<singular>.<metric>[...]
+    # NOTE: singular form "httproute" is used here.
+    name: gateway.networking.k8s.io.httproute.delivery.upstream_request.latency
+    # Human-readable purpose for docs and discovery UIs
+    description: Upstream request latency attributed to an HTTPRoute.
+    instrument:
+      # Enum: Counter | UpDownCounter | Gauge | Histogram
+      type: Histogram
+      # Unit spelled out; seconds for latency; use "1" for dimensionless
+      unit: "seconds"
+      # Enum: cumulative | delta (applies where meaningful; optional for histogram)
+      aggregationTemporality: delta
+      # Optional, forward-looking: processor-specific histogram hints
+      # (e.g., defaultBuckets). Omitted here to keep the definition portable.
+
+  # --- Label schema advertised by this metric ---
+  labels:
+    # Keys must follow OTel attribute naming; do not encode units in labels.
+    - key: resource_name
+      # Describe where the label value originates from conceptually
+      description: The metadata.name of the HTTPRoute
+      # Whether producers must provide this label for every point
+      required: true
+    - key: resource_namespace
+      description: The metadata.namespace of the HTTPRoute
+      required: true
+    - key: resource_uid
+      description: The metadata.uid of the HTTPRoute
+      required: true
+    - key: gateway_name
+      description: Gateway associated with the route (if known)
+      required: false
+    - key: upstream_cluster
+      description: Upstream cluster identifier from data plane telemetry
+      required: false
+
+status:
+  conditions:
+    - type: Accepted
+      status: "True"
+      reason: TelemetryRegistered
+      message: Metric will be exposed when a matching MetricPolicy emits series.
+```
+
+### Metric Policies
+
+**MetricPolicy** declares **how** to produce values for a single
+`MetricDefinition` from either:
+
+- **Control-plane fields** (`ResourceFields`): read k8s object fields and
+  transform them.
+- **Data-plane telemetry** (`DataPlane`): select incoming OTel/Prometheus
+  samples and transform/attribute them.
+
+Policies bind a subject (the resource instances) to a targetMetric (by name). A
+policy uses one source type at a time.
+
+**Complete MetricPolicy example — ResourceFields source**
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricPolicy
+metadata:
+  # Unique policy name
+  name: httproute-condition-status-policy
+spec:
+  # --- Subject (what objects this policy applies to) ---
+  subject:
+    # Versioned reference to the resource kind so that different policies can be
+    # configured per version in case field paths change between resources.
+    group: gateway.networking.k8s.io
+    version: v1
+    kind: HTTPRoute
+
+  # --- Target metric (must match a MetricDefinition.spec.metric.name) ---
+  targetMetric:
+    name: gateway.networking.k8s.io.httproute.status.condition
+
+  # --- Source: derive values from control-plane fields ---
+  source:
+    type: ResourceFields
+    resourceFields:
+      # seriesFrom: explode an array to multiple series; "item" is the element
+      seriesFrom:
+        # JSONPath-like path into "resource" (the api object)
+        path: "resource.status.conditions"
+        # "value" is a CEL expression evaluated per "item"
+        value:
+          # Emit 1 when condition is True, else 0
+          cel: "item.status == 'True' ? 1 : 0"
+        # Map labels using CEL against "item" and "resource"
+        labels:
+          condition: "item.type"
+          reason: "item.reason"
+          resource_name: "resource.metadata.name"
+          resource_namespace: "resource.metadata.namespace"
+          resource_uid: "string(resource.metadata.uid)"
+
+      # Optional: guard emission for the whole policy (drop series if true)
+      # dropIf:
+      #   cel: "resource.metadata.deletionTimestamp != null"
+
+      # Optional: static labels always attached by the policy
+      # staticLabels:
+      #   environment: "prod"
+```
+
+**Complete MetricPolicy example — DataPlane source**
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricPolicy
+metadata:
+  name: httproute-upstream-latency-policy
+spec:
+  subject:
+    group: gateway.networking.k8s.io
+    version: v1
+    kind: HTTPRoute
+
+  targetMetric:
+    name: gateway.networking.k8s.io.httproute.delivery.upstream_request.latency
+
+  source:
+    type: DataPlane
+    dataPlane:
+      # Select incoming telemetry to consume
+      selector:
+        otel:
+          # Backend-native metric name to read (e.g., Envoy stat or OTEL metric)
+          metricName: "envoy.cluster.upstream_rq_time"
+          # Enum: cumulative | delta (match the source’s temporality)
+          temporality: delta
+          # Attribute selectors bind samples to the k8s resource identity
+          attributeSelectors:
+            # Match HTTPRoute name/namespace carried on the sample
+            - key: "k8s.httproute.name"
+              valueFrom: "resource.metadata.name"
+            - key: "k8s.namespace.name"
+              valueFrom: "resource.metadata.namespace"
+          # Optional additional filters (prefix/regex on attribute values)
+          # attributeFilters:
+          #   - key: "http.route"
+          #     regex: "^/api/.*"
+
+      # Transform the selected samples into the target metric’s unit/labels
+      transform:
+        # CEL over "value" (numeric), "attributes" (map), and "resource"
+        value:
+          # Convert milliseconds -> seconds
+          cel: "value / 1000.0"
+        labels:
+          resource_name: "resource.metadata.name"
+          resource_namespace: "resource.metadata.namespace"
+          resource_uid: "string(resource.metadata.uid)"
+          gateway_name: "attributes['k8s.gateway.name']"
+          upstream_cluster: "attributes['envoy.cluster_name']"
+
+      # Optional: sampling and rate controls (implementation-dependent hints)
+      # sampling:
+      #   maxSamplesPerSecond: 500
+      #   dropOnBackpressure: true
+```
+
+### Scenarios
+
+#### Control Plane Metrics
+
+**Goal**: Use resource fields on HTTPRoute to produce identity, timestamps, and
+condition metrics.
+
+**MetricDefinition — HTTPRoute condition status (1/0)**
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricDefinition
+metadata:
+  name: gateway-httproute-condition-status
+spec:
+  resource:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+  metric:
+    name: gateway.networking.k8s.io.httproute.status.condition
+    description: Status for each HTTPRoute condition (1=True, 0 otherwise).
+    instrument:
+      type: gauge
+      unit: "1"
+  labels:
+    - key: resource_name
+      description: HTTPRoute name
+      required: true
+    - key: resource_namespace
+      description: HTTPRoute namespace
+      required: true
+    - key: resource_uid
+      description: HTTPRoute UID
+      required: true
+    - key: condition
+      description: Condition type (e.g., Accepted, Programmed)
+      required: true
+    - key: reason
+      description: Condition reason string (may be empty)
+      required: false
+status:
+  conditions:
+    - type: Accepted
+      status: "True"
+      reason: TelemetryRegistered
+```
+
+**MetricPolicy — produce per-condition series from control-plane fields**
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricPolicy
+metadata:
+  name: gateway-httproute-condition-status-policy
+spec:
+  subject:
+    group: gateway.networking.k8s.io
+    version: v1
+    kind: HTTPRoute
+  targetMetric:
+    name: gateway.networking.k8s.io.httproute.status.condition
+  source:
+    type: ResourceFields
+    resourceFields:
+      seriesFrom:
+        path: "resource.status.conditions"
+        value:
+          cel: "item.status == 'True' ? 1 : 0"
+        labels:
+          condition: "item.type"
+          reason: "item.reason"
+          resource_name: "resource.metadata.name"
+          resource_namespace: "resource.metadata.namespace"
+          resource_uid: "string(resource.metadata.uid)"
+```
+
+> [!NOTE]
+>
+> Similar patterns can define creation_time, deletion_time, and an info metric with value 1.
+
+#### Data Plane Metrics
+
+**Goal**: Attribute Envoy gateway telemetry to `HTTPRoute` and expose standardized metrics.
+
+**MetricDefinition — upstream request count (counter)**
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricDefinition
+metadata:
+  name: gateway-httproute-upstream-request-count
+spec:
+  resource:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+  metric:
+    name: gateway.networking.k8s.io.httproute.delivery.upstream_request.count
+    description: Upstream request count attributed to an HTTPRoute.
+    instrument:
+      type: counter
+      unit: "1"
+      aggregationTemporality: cumulative
+  labels:
+    - key: resource_name
+      description: HTTPRoute name
+      required: true
+    - key: resource_namespace
+      description: HTTPRoute namespace
+      required: true
+    - key: resource_uid
+      description: HTTPRoute UID
+      required: true
+    - key: gateway_name
+      description: Owning Gateway (if known)
+      required: false
+    - key: upstream_cluster
+      description: Upstream cluster identifier
+      required: false
+    - key: response_code_family
+      description: HTTP status code class (e.g., 2xx, 5xx)
+      required: false
+status:
+  conditions:
+    - type: Accepted
+      status: "True"
+      reason: TelemetryRegistered
+```
+
+**MetricPolicy — map Envoy counter to the platform metric**
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricPolicy
+metadata:
+  name: gateway-httproute-upstream-request-count-policy
+spec:
+  subject:
+    group: gateway.networking.k8s.io
+    version: v1
+    resource: HTTPRoute
+  targetMetric:
+    name: gateway.networking.k8s.io.httproute.delivery.upstream_request.count
+  source:
+    type: DataPlane
+    dataPlane:
+      selector:
+        otel:
+          metricName: "envoy.cluster.upstream_rq_total"
+          temporality: cumulative
+          attributeSelectors:
+            - key: "k8s.httproute.name"
+              valueFrom: "resource.metadata.name"
+            - key: "k8s.namespace.name"
+              valueFrom: "resource.metadata.namespace"
+      transform:
+        value:
+          # Pass-through counter sample
+          cel: "value"
+        labels:
+          resource_name: "resource.metadata.name"
+          resource_namespace: "resource.metadata.namespace"
+          resource_uid: "string(resource.metadata.uid)"
+          gateway_name: "attributes['k8s.gateway.name']"
+          upstream_cluster: "attributes['envoy.cluster_name']"
+          response_code_family: "attributes['http.response.status_code_class']"
+```
+
+**MetricDefinition — upstream request latency (histogram in seconds)**
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricDefinition
+metadata:
+  name: gateway-httproute-upstream-latency
+spec:
+  resource:
+    group: gateway.networking.k8s.io
+    resource: HTTPRoute
+  metric:
+    name: gateway.networking.k8s.io.httproute.delivery.upstream_request.latency
+    description: Upstream request latency attributed to an HTTPRoute.
+    instrument:
+      type: histogram
+      unit: "seconds"
+      aggregationTemporality: delta
+  labels:
+    - key: resource_name
+      description: HTTPRoute name
+      required: true
+    - key: resource_namespace
+      description: HTTPRoute namespace
+      required: true
+    - key: resource_uid
+      description: HTTPRoute UID
+      required: true
+    - key: gateway_name
+      description: Owning Gateway (if known)
+      required: false
+    - key: upstream_cluster
+      description: Upstream cluster identifier
+      required: false
+status:
+  conditions:
+    - type: Accepted
+      status: "True"
+      reason: TelemetryRegistered
+```
+
+**MetricPolicy — convert Envoy latency to seconds and attribute**
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricPolicy
+metadata:
+  name: gateway-httproute-upstream-latency-policy
+spec:
+  subject:
+    apiGroup: gateway.networking.k8s.io
+    resource: httproutes
+    scope: Namespaced
+  targetMetric:
+    name: gateway.networking.k8s.io.httproute.delivery.upstream_request.latency
+  source:
+    type: DataPlane
+    dataPlane:
+      selector:
+        otel:
+          metricName: "envoy.cluster.upstream_rq_time"
+          temporality: delta
+          attributeSelectors:
+            - key: "k8s.httproute.name"
+              valueFrom: "resource.metadata.name"
+            - key: "k8s.namespace.name"
+              valueFrom: "resource.metadata.namespace"
+      transform:
+        value:
+          # Convert milliseconds -> seconds to match MetricDefinition unit
+          cel: "value / 1000.0"
+        labels:
+          resource_name: "resource.metadata.name"
+          resource_namespace: "resource.metadata.namespace"
+          resource_uid: "string(resource.metadata.uid)"
+          gateway_name: "attributes['k8s.gateway.name']"
+          upstream_cluster: "attributes['envoy.cluster_name']"
+```
 
 <!-- ## Production Readiness Review Questionnaire -->
 
