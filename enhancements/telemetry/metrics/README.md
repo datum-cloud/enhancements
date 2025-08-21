@@ -85,7 +85,6 @@ template.
   - [Desired outcome \& success measures.](#desired-outcome--success-measures)
 - [Design Details](#design-details)
   - [Metric Definitions](#metric-definitions)
-    - [Complete MetricDefinition example](#complete-metricdefinition-example)
   - [Metric Policies](#metric-policies)
   - [Scenarios](#scenarios)
     - [Control Plane Metrics](#control-plane-metrics)
@@ -296,7 +295,7 @@ Key points:
 - Units must be spelled out (`seconds`, `bytes`, `1` for dimensionless).
 - Status conditions communicate acceptance and readiness.
 
-#### Complete MetricDefinition example
+**Complete MetricDefinition example**
 
 ```yaml
 apiVersion: telemetry.miloapis.com/v1alpha1
@@ -365,63 +364,13 @@ status:
 **MetricPolicy** declares **how** to produce values for a single
 `MetricDefinition` from either:
 
-- **Control-plane fields** (`ResourceFields`): read k8s object fields and
-  transform them.
 - **Data-plane telemetry** (`DataPlane`): select incoming OTel/Prometheus
   samples and transform/attribute them.
+- **Control-plane fields** (`ResourceFields`): read k8s object fields and
+  transform them.
 
 Policies bind a subject (the resource instances) to a targetMetric (by name). A
 policy uses one source type at a time.
-
-**Complete MetricPolicy example — ResourceFields source**
-
-```yaml
-apiVersion: telemetry.miloapis.com/v1alpha1
-kind: MetricPolicy
-metadata:
-  # Unique policy name
-  name: httproute-condition-status-policy
-spec:
-  # --- Subject (what objects this policy applies to) ---
-  subject:
-    # Versioned reference to the resource kind so that different policies can be
-    # configured per version in case field paths change between resources.
-    group: gateway.networking.k8s.io
-    version: v1
-    kind: HTTPRoute
-
-  # --- Target metric (must match a MetricDefinition.spec.metric.name) ---
-  targetMetric:
-    name: gateway.networking.k8s.io.httproute.status.condition
-
-  # --- Source: derive values from control-plane fields ---
-  source:
-    type: ResourceFields
-    resourceFields:
-      # seriesFrom: explode an array to multiple series; "item" is the element
-      seriesFrom:
-        # JSONPath-like path into "resource" (the api object)
-        path: "resource.status.conditions"
-        # "value" is a CEL expression evaluated per "item"
-        value:
-          # Emit 1 when condition is True, else 0
-          cel: "item.status == 'True' ? 1 : 0"
-        # Map labels using CEL against "item" and "resource"
-        labels:
-          condition: "item.type"
-          reason: "item.reason"
-          resource_name: "resource.metadata.name"
-          resource_namespace: "resource.metadata.namespace"
-          resource_uid: "string(resource.metadata.uid)"
-
-      # Optional: guard emission for the whole policy (drop series if true)
-      # dropIf:
-      #   cel: "resource.metadata.deletionTimestamp != null"
-
-      # Optional: static labels always attached by the policy
-      # staticLabels:
-      #   environment: "prod"
-```
 
 **Complete MetricPolicy example — DataPlane source**
 
@@ -478,6 +427,56 @@ spec:
       # sampling:
       #   maxSamplesPerSecond: 500
       #   dropOnBackpressure: true
+```
+
+**Complete MetricPolicy example — ResourceFields source**
+
+```yaml
+apiVersion: telemetry.miloapis.com/v1alpha1
+kind: MetricPolicy
+metadata:
+  # Unique policy name
+  name: httproute-condition-status-policy
+spec:
+  # --- Subject (what objects this policy applies to) ---
+  subject:
+    # Versioned reference to the resource kind so that different policies can be
+    # configured per version in case field paths change between resources.
+    group: gateway.networking.k8s.io
+    version: v1
+    kind: HTTPRoute
+
+  # --- Target metric (must match a MetricDefinition.spec.metric.name) ---
+  targetMetric:
+    name: gateway.networking.k8s.io.httproute.status.condition
+
+  # --- Source: derive values from control-plane fields ---
+  source:
+    type: ResourceFields
+    resourceFields:
+      # seriesFrom: explode an array to multiple series; "item" is the element
+      seriesFrom:
+        # JSONPath-like path into "resource" (the api object)
+        path: "resource.status.conditions"
+        # "value" is a CEL expression evaluated per "item"
+        value:
+          # Emit 1 when condition is True, else 0
+          cel: "item.status == 'True' ? 1 : 0"
+        # Map labels using CEL against "item" and "resource"
+        labels:
+          condition: "item.type"
+          reason: "item.reason"
+          resource_name: "resource.metadata.name"
+          resource_namespace: "resource.metadata.namespace"
+          resource_uid: "string(resource.metadata.uid)"
+
+      # Optional: guard emission for the whole policy (drop series if true)
+      # dropIf:
+      #   cel: "resource.metadata.deletionTimestamp != null"
+
+      # Optional: static labels always attached by the policy
+      # staticLabels:
+      #   environment: "prod"
 ```
 
 ### Scenarios
