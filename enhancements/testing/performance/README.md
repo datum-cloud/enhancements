@@ -187,3 +187,5 @@ We will build test harnesses for both CL2 and k6:
    - Capture latency percentiles and error rates with k6’s reporting.  
 
 We’ll evaluate results from both and converge on one framework (or a hybrid approach) for Milo’s ongoing performance and scalability testing.  
+
+Issue [#265](https://github.com/datum-cloud/enhancements/issues/265)
