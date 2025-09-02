@@ -1,7 +1,7 @@
 ---
-status: provisional|implementable|implemented|deferred|rejected|withdrawn|replaced
-stage: alpha|beta|stable
-latest-milestone: "v0.x"
+status: provisional
+stage: alpha
+latest-milestone: "v0.1"
 ---
 <!--
 Inspired by https://github.com/kubernetes/enhancements/tree/master/keps/NNNN-kep-template
