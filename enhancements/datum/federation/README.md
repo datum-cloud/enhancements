@@ -14,8 +14,8 @@
 
 ## Design Details
 
-- **Datum Core API Server**: Organization level stuff - projects / etc.
-- **Datum Project API Server**: Project specific API server, for project scoped things.
+- **Milo Core API Server**: Organization level stuff - projects / etc.
+- **Milo Project API Server**: Project specific API server, for project scoped things.
 - **Datum Platform API Server**:  API server that operators create resources in to satisfy
   the intent of resources defined in the Project APIs.
 - **Federation API Server**: API servers that a “scheduler” will place resources in for
