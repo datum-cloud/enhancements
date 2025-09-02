@@ -84,6 +84,7 @@ template.
   - [Architecture \& flexibility.](#architecture--flexibility)
   - [Desired outcome \& success measures.](#desired-outcome--success-measures)
 - [Design Details](#design-details)
+  - [Illustrative Implementation](#illustrative-implementation)
   - [Metric Definitions](#metric-definitions)
   - [Metric Policies](#metric-policies)
   - [Scenarios](#scenarios)
@@ -195,8 +196,8 @@ telemetry implementation.
 
 - **MetricDefinition** — Declares a single metric for a resource kind: name,
   description, instrument (counter/gauge/histogram), unit (spelled out, e.g.,
-  `seconds`, `bytes`, `1`), and label schema. It is the discoverable, stable surface
-  for consumers.
+  `seconds`, `bytes`, `1`), and label schema. It is the discoverable, stable
+  surface for consumers.
 - **MetricPolicy** — Binds resource instances to a definition and specifies
   production rules:
   - **Resource-fields source**: derive values from control-plane objects
@@ -217,7 +218,8 @@ telemetry implementation.
 - **Runtime surfaces**. The platform can support multiple runtimes without
   changing API objects:
   - An **OTLP** path for modern backends.
-  - A **Prometheus-compatible** path (name/label transforms only) for existing dashboards/alerts.
+  - A **Prometheus-compatible** path (name/label transforms only) for existing
+    dashboards/alerts.
 
 - **Source neutrality**. Policies can combine control-plane fields and
 	data-plane telemetry. Implementations may realize this via:
@@ -235,7 +237,8 @@ telemetry implementation.
 - Core Milo resources (e.g. Project, Groups) publish metric definitions;
   policies generate series from both control-plane fields and data-plane
   telemetry.
-- Backends/collectors can be changed with no API edits; consumers see uninterrupted, stable metrics.
+- Backends/collectors can be changed with no API edits; consumers see
+  uninterrupted, stable metrics.
 
 <!-- ### User Stories (Optional) -->
 
@@ -282,16 +285,64 @@ required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
 
-This section details the resources, fields, and concrete examples that implement
-the policy-driven metrics platform. It uses real HTTPRoute examples from the
-control plane and Envoy metrics from the data plane.
+This section provides comprehensive technical specifications for implementing
+the policy-driven metrics platform. It covers:
+
+- **[Illustrative Implementation](#illustrative-implementation)**: A concrete
+  example using controllers and OpenTelemetry Collectors to demonstrate how the
+  APIs could translate into scalable telemetry infrastructure
+- **[Metric Definitions](#metric-definitions)**: Complete API specification for
+  **MetricDefinition** resources that declare metric identity, instrument types,
+  units, and label schemas
+- **[Metric Policies](#metric-policies)**: Detailed API specification for
+  **MetricPolicy** resources that bind metrics to data sources (control-plane
+  fields or data-plane telemetry) with transformation rules
+- **[Scenarios](#scenarios)**: End-to-end examples showing both control-plane
+  metrics (derived from Kubernetes resource fields) and data-plane metrics
+  (sourced from Envoy gateway telemetry) for HTTPRoute resources
+
+### Illustrative Implementation
+
+A potential implementation of the **MetricDefinition** and **MetricPolicy**
+foundation could be built as a standalone controller paired with the
+[OpenTelemetry Operator][opentelemetry-operator]. This controller watches
+**MetricDefinition** and **MetricPolicy** resources and translates them into
+concrete OpenTelemetry Collector configurations:
+
+- **Agents (DaemonSet):** Deployed on every node to scrape pods, collect host
+  metrics, and forward OTLP telemetry upstream.
+- **Gateways (Deployment/StatefulSet)**: Centralized processing pipelines where
+  **MetricPolicy** rules are realized using Collector processors (e.g., filter,
+  transform, routing, batch, memory_limiter).
+- **Control-plane metrics**: For ResourceFields policies, the controller
+  evaluates Kubernetes object fields and emits OTLP metrics directly into the
+  gateway pipeline.
+- **Data-plane metrics**: For DataPlane policies, the controller generates the
+  necessary filter/transform/routing processors so raw telemetry streams are
+  reshaped into metrics aligned with their **MetricDefinition**.
+- **Status reporting**: Both **MetricDefinition** and **MetricPolicy** objects
+  are updated with status conditions to indicate validation success or errors
+  (e.g., missing definition, invalid CEL expression).
+- **Separation of concerns**: This implementation is fully decoupled from Milo.
+  Milo only owns the CRDs, while the controller and collectors provide a
+  scalable, standards-based realization.
+
+This example demonstrates how the APIs Milo defines can be mapped cleanly onto
+the OpenTelemetry ecosystem, delivering a reusable and vendor-neutral telemetry
+foundation without embedding collector logic directly into Milo’s control plane.
+
+[opentelemetry-operator]: https://opentelemetry.io/docs/platforms/kubernetes/operator/
 
 ### Metric Definitions
 
-**MetricDefinition** declares **what** a single metric is for a given resource kind: identity (name), description, instrument type, unit, and the **label schema** consumers can rely on. It does **not** describe how values are generated.
+**MetricDefinition** declares **what** a single metric is for a given resource
+kind: identity (name), description, instrument type, unit, and the **label
+schema** consumers can rely on. It does **not** describe how values are
+generated.
 
 Key points:
-- Metric names follow OTel style: `<api-group>.<singular-resource>.<metric>[.<subparts>]`.
+- Metric names follow OTel style:
+  `<api-group>.<singular-resource>.<metric>[.<subparts>]`.
 - Units must be spelled out (`seconds`, `bytes`, `1` for dimensionless).
 - Status conditions communicate acceptance and readiness.
 
@@ -557,11 +608,13 @@ spec:
 
 > [!NOTE]
 >
-> Similar patterns can define creation_time, deletion_time, and an info metric with value 1.
+> Similar patterns can define creation_time, deletion_time, and an info metric
+> with value 1.
 
 #### Data Plane Metrics
 
-**Goal**: Attribute Envoy gateway telemetry to `HTTPRoute` and expose standardized metrics.
+**Goal**: Attribute Envoy gateway telemetry to `HTTPRoute` and expose
+standardized metrics.
 
 **MetricDefinition — upstream request count (counter)**
 
