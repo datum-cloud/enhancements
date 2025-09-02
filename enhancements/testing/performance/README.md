@@ -60,7 +60,7 @@ should be approved by the remaining approvers and/or the owning SIG (or
 SIG Architecture for cross-cutting RFCs).
 -->
 
-# Short, descriptive title
+# Milo Performance Testing
 
 <!--
 This is the title of your Enhancement. Keep it short, simple, and descriptive. A good
