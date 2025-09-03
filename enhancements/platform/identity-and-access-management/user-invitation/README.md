@@ -196,7 +196,6 @@ sequenceDiagram
     participant controller as Milo UserInvitation Controller
     participant milowebhook as Milo Webhook Server
     end
-    participant authprovider as Authorization Provider
     participant emailprovider as Email Provider
     actor inviteduser as Invited User
 
@@ -206,15 +205,16 @@ sequenceDiagram
     milowebhook -->> milo: Mutates invitation: adds InvitedBy field.
     milo ->> controller: Sends User Invitation created event
     controller ->> controller: Reconciles User Invitation resource
-    controller ->> authprovider: Grant invited user permission <br/> to accept the invitation (get & update)
-    controller ->> emailprovider: Send User Invitation Email
+    controller ->> milo: Grant invited user permission <br/> to accept the invitation (get & update)
+    controller ->> milo: Create User Invitation Email
+    milo ->> emailprovider: Create User Invitation Email Event
     emailprovider ->> inviteduser: Send User Invitation Email
 
     inviteduser -->> portal: Accepts invitation
     portal ->> milo: Updates User Invitation <br/> 'spec.status' to accepted
     milo ->> controller: Sends User Invitation updated event
     controller ->> controller: Reconciles User Invitation resource
-    controller ->> authprovider: Revoke permission to update User Invitation
+    controller ->> milo: Revoke permission to update User Invitation
     Note over controller: Invitation completed, cleanup if needed
 ```
 
@@ -229,7 +229,6 @@ sequenceDiagram
     participant controller as Milo UserInvitation Controller
     participant milowebhook as Milo Webhook Server
     end
-    participant authprovider as Authorization Provider
     participant emailprovider as Email Provider
     actor inviteduser as Invited User
 
@@ -240,7 +239,8 @@ sequenceDiagram
     milo ->> controller: Sends User Invitation created event
     controller ->> controller: Reconciles User Invitation resource
     Note over controller: User does not exist yet, <br/>no permissions granted
-    controller ->> emailprovider: Send User Invitation Email
+    controller ->> milo: Create User Invitation Email
+    milo ->> emailprovider: Create User Invitation Email Event
     emailprovider ->> inviteduser: Send User Invitation Email
 
     inviteduser -->> portal: Creates account and accepts invitation
@@ -251,13 +251,13 @@ sequenceDiagram
     controller ->> controller: Detects User creation for pending invitation
     controller ->> controller: Triggers User Invitation reconciliation
     controller ->> controller: Reconciles User Invitation resource
-    controller ->> authprovider: Grant invited user permission <br/> to accept the invitation (get & update)
+    controller ->> milo: Grant invited user permission <br/> to accept the invitation (get & update)
     
     inviteduser -->> portal: Accept invitation
     portal ->> milo: Updates User Invitation <br/>'spec.status' to accepted
     milo ->> controller: Sends User Invitation updated event
     controller ->> controller: Reconciles User Invitation resource
-    controller ->> authprovider: Revoke permission to update User Invitation
+    controller ->> milo: Revoke permission to update User Invitation
     Note over controller: Invitation completed, cleanup if needed
 ```
 
