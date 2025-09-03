@@ -289,7 +289,7 @@ spec:
       name: "admin-user-id"
   
   # Mutable field (can be updated by invited user)
-  status: "pending"  # pending, accepted, declined
+  state: "pending"  # pending, accepted, declined
 ```
 
 ### Controller Implementation
