@@ -43,7 +43,9 @@ The Milo platform needs the ability for organization administrators to invite us
 
 **This enhancement focuses on the backend invitation management system.** It proposes implementing a UserInvitation controller using Kubernetes Custom Resource Definitions (CRDs) that automatically sends email invitations, manages permissions, and handles role assignment upon acceptance.
 
-**Scope Note:** This enhancement does NOT include the frontend UI for viewing invitations. The frontend integration will be addressed in future enhancements once the backend invitation system is established and proven.
+> [!NOTE]
+>
+> This enhancement does NOT include the frontend UI for viewing invitations. The frontend integration will be addressed in future enhancements once the backend invitation system is established and proven.
 
 ## Motivation
 
