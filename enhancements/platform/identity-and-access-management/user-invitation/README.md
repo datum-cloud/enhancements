@@ -358,8 +358,6 @@ The UserInvitation controller integrates with the existing email system by:
 #### Simple Alerting
 
 - Invitation acceptance rate drops below 70%
-- Email delivery failure rate exceeds 5%
-- Role assignment failures occur
 - Controller pod restarts or becomes unhealthy
 
 ## Implementation History
