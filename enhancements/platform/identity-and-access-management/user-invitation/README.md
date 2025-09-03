@@ -136,7 +136,7 @@ As a platform operator, I need invitations to expire automatically and provide v
 - **Immutable invitations** - Only the status field can be modified after creation
 - **Single organization scope** - Invitations are scoped to individual organizations
 - **Email integration dependency** - Requires the email integration system to be operational
-- **Authorization integration** - Integrates with existing OpenFGA authorization provider
+- **Authorization integration** - Integrates with existing authorization provider
 
 **Invitation Processing:**
 
@@ -158,7 +158,7 @@ As a platform operator, I need invitations to expire automatically and provide v
 #### Risk: Unauthorized Access to Invitations
 
 - *Impact:* Malicious users could potentially access or modify invitations they shouldn't have access to
-- *Mitigation:* Implement strict permission scoping using OpenFGA, ensure invited users only have access to their specific invitations
+- *Mitigation:* Implement strict permission scoping using a authorization provider, to ensure invited users only have access to their specific invitations
 
 #### Risk: Email Delivery Failures
 
@@ -178,7 +178,7 @@ The user invitation system is implemented as a Kubernetes controller that watche
 1. **UserInvitation Controller** - Kubernetes controller that processes UserInvitation resources
 2. **UserInvitation CRD** - Defines invitation resources with recipient, roles, and lifecycle information
 3. **Email Integration** - Leverages existing email system to send invitation notifications
-4. **Authorization Integration** - Manages permissions using OpenFGA authorization provider
+4. **Authorization Integration** - Manages permissions using an authorization provider
 5. **Role Assignment Engine** - Handles automatic role assignment upon invitation acceptance
 
 #### Invitation Flow
@@ -194,8 +194,8 @@ sequenceDiagram
     participant controller as Milo UserInvitation Controller
     participant milowebhook as Milo Webhook Server
     end
-    participant authprovider as Authorization Provider <br/>[auth-provider-openfga]
-    participant emailprovider as Email Provider <br/>[email-provider-resend]
+    participant authprovider as Authorization Provider
+    participant emailprovider as Email Provider
     actor inviteduser as Invited User
 
     adminuser ->> portal: Invites user to join organization
@@ -227,8 +227,8 @@ sequenceDiagram
     participant controller as Milo UserInvitation Controller
     participant milowebhook as Milo Webhook Server
     end
-    participant authprovider as Authorization Provider <br/>[auth-provider-openfga]
-    participant emailprovider as Email Provider <br/>[email-provider-resend]
+    participant authprovider as Authorization Provider
+    participant emailprovider as Email Provider
     actor inviteduser as Invited User
 
     adminuser ->> portal: Invites user to join organization
@@ -296,7 +296,7 @@ The UserInvitation Controller is a standard Kubernetes controller that:
 
 1. **Watches UserInvitation Resources** - Uses controller-runtime to watch for UserInvitation resource changes
 2. **Manages Email Notifications** - Creates Email resources using the email integration system
-3. **Handles Permission Management** - Grants and revokes permissions using OpenFGA integration
+3. **Handles Permission Management** - Grants and revokes permissions using an authorization provider
 4. **Processes Status Updates** - Handles invitation acceptance, decline, and expiration
 5. **Assigns Roles** - Automatically assigns specified roles upon invitation acceptance
 6. **Updates Status** - Updates UserInvitation resource status throughout the lifecycle
@@ -310,7 +310,7 @@ The UserInvitation Controller is a standard Kubernetes controller that:
 
 #### Permission Management
 
-The controller manages permissions through OpenFGA integration:
+The controller manages permissions through an external authorization provider integration:
 
 - **On Creation:** Grant invited user permissions to `get` and `update` their specific invitation
 - **On Acceptance:** Revoke invitation permissions and assign specified organization roles
