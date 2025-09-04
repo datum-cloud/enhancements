@@ -1,4 +1,3 @@
-
 ---
 status: provisional
 stage: alpha
@@ -16,6 +15,7 @@ latest-milestone: "v0.1"
   - [Proposed Tool Surface](#proposed-tool-surface)
   - [Validation](#validation)
   - [Error Model](#error-model)
+- [Phased Implementation](#phased-implementation)
 - [Implementation History](#implementation-history)
 - [References](#references)
 
@@ -23,7 +23,8 @@ latest-milestone: "v0.1"
 
 Extend `datumctl mcp` with (1) **project/org context switching** and (2) **generic CRUD** (create/read/update/delete)
 for resources. The engine is **resource‑agnostic** and **discovery‑driven**, so new CRDs work without shipping a new CLI.
-Initial examples below use **`HTTPProxy`** for clarity. This is **Phase 2**, building on **#255** (read‑only MCP MVP).
+Initial examples below use **`HTTPProxy`** for clarity. Currently we are in **Phase 2**, building on **#255** (read‑only MCP MVP).
+A subsequent **Phase 3** will add **safe change management** via `patch/plan/apply` and optional approvals.
 
 ## Motivation
 
@@ -31,6 +32,8 @@ With the read‑only MCP from **#255** shipped, the next step is to enable **con
 (e.g. Claude) can perform simple operations without leaving the prompt box.
 
 ### Goals
+
+Add additional tools to datumctl mcp to enhance the developer experience.
 
 - `datum/change_context(project, org)` sets the active context for the MCP session.
 - Generic CRUD tools: `datum/create_resource`, `datum/get_resource`, `datum/update_resource`, `datum/delete_resource`.
@@ -43,7 +46,7 @@ With the read‑only MCP from **#255** shipped, the next step is to enable **con
 
 ## Proposal
 
-Expose a small set of MCP tools under the `datum/` namespace. The session can carry a default **project/org** via
+Expose a small set of MCP tools. The session can carry a default **project/org** via
 `datum/change_context`, while CRUD calls may also specify explicit `project`/`org` (which override session defaults).
 The engine uses Kubernetes **API discovery** so newly added resource kinds are available automatically if RBAC permits.
 
@@ -51,7 +54,6 @@ The engine uses Kubernetes **API discovery** so newly added resource kinds are a
 
 - **Resource‑agnostic engine**: CRUD relies on **API discovery** so the CLI does **not** require new releases for new CRDs.
   This aligns with **#217** (discovery‑driven `datumctl`, kubectl‑familiar UX).
-- **MVP compatibility**: Existing MVP tools remain available (e.g., `datum/list_crds`, `datum/get_crd`, `datum/validate_yaml`).
 
 ### Proposed Tool Surface
 
@@ -121,6 +123,14 @@ The engine uses Kubernetes **API discovery** so newly added resource kinds are a
 { "kind": "HTTPProxy", "project": "intro-project-3", "org": "datum", "name": "bittensor-dapp", "dryRun": false }
 ```
 
+---
+
+#### Phase 3 (details TBD) additions (Safe Change Management — minimal surface)
+
+- `datum/patch_resource` — JSONPatch/StrategicMerge/Server‑Side‑Apply with optional `expectedResourceVersion` and `dryRun`.
+- `datum/plan_resource` — produce a stable `planId`/`planHash`, return diff and policy gate results (no writes).
+- `datum/apply_plan` — apply only a previously reviewed plan; enforces `planHash` + TTL; optional human approval.
+
 ### Validation
 
 - **Schema validation**: validate resources against CRD schemas before apply.
@@ -134,9 +144,21 @@ The engine uses Kubernetes **API discovery** so newly added resource kinds are a
 ```
 Canonical codes: `PROJECT_NOT_FOUND`, `ORG_NOT_FOUND`, `PERMISSION_DENIED`, `VALIDATION_ERROR`, `ALREADY_EXISTS`, `NOT_FOUND`, `CONFLICT`, `INTERNAL`.
 
+## Phased Implementation
+
+- **Phase 1 — Read‑Only MCP (shipped; #255)**  
+  `list_crds`, `get_crd`, `validate_yaml`.
+
+- **Phase 2 — Context + Generic CRUD**  
+  `change_context`, `create_resource`, `get_resource`, `update_resource`, `delete_resource`; schema validation; dry‑run.
+
+- **Phase 3 — Safe Change Management**  
+  `patch_resource`, `plan_resource`, `apply_plan`; optional policy guardrails and approvals; optimistic concurrency on write paths.
+
 ## Implementation History
 
-- 2025-09-02 — Phase 2 proposal drafted (this doc). Baseline: **#255** shipped read‑only MCP MVP.
+- 2025-09-04 — Added Phase 3 note and Phased Implementation section.
+- 2025-09-03 — Phase 2 proposal drafted (this doc). Baseline: **#255** shipped read‑only MCP MVP.
 
 ## References
 
