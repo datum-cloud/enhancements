@@ -4,7 +4,7 @@ stage: alpha
 latest-milestone: "v0.1"
 ---
 
-# MCP Phase 2 — Project/Org Context & Generic CRUD (Discovery‑Driven)
+# Project/Org Context & Generic CRUD (Discovery‑Driven)
 
 - [Summary](#summary)
 - [Motivation](#motivation)
