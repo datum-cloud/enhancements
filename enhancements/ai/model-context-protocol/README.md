@@ -4,7 +4,7 @@ stage: alpha
 latest-milestone: "v0.1"
 ---
 
-# Project/Org Context & Generic CRUD (Discovery‑Driven)
+# Datumctl MCP
 
 - [Summary](#summary)
 - [Motivation](#motivation)
