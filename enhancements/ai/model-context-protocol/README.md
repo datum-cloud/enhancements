@@ -21,20 +21,29 @@ latest-milestone: "v0.1"
 
 ## Summary
 
-Extend `datumctl mcp` with (1) **project/org context switching** and (2) **generic CRUD** (create/read/update/delete)
-for resources. The engine is **resource‑agnostic** and **discovery‑driven**, so new CRDs work without shipping a new CLI.
-Initial examples below use **`HTTPProxy`** for clarity. Currently we are in **Phase 2**, building on **#255** (read‑only MCP MVP).
-A subsequent **Phase 3** will add **safe change management** via `patch/plan/apply` and optional approvals.
+**Datumctl MCP** is a multi-phase initiative to make `datumctl mcp` a **discovery-driven, resource-agnostic management surface** for IDE/agent workflows **over the existing Kubernetes/Datum control planes**. The north star is a small, stable tool surface that: (1) discovers kinds at runtime, (2) enables **safe, reviewable writes**, and (3) fits naturally into AI copilots and editors.
+
+We are currently delivering **Phase 2** (project/org context + generic CRUD) on top of **Phase 1** (read‑only MVP from **#255**). A subsequent **Phase 3** will add **safe change management** via `patch/plan/apply` and optional approvals.
 
 ## Motivation
 
-With the read‑only MCP from **#255** shipped, the next step is to enable **context switching** and **CRUD** so IDE copilots
-(e.g. Claude) can perform simple operations without leaving the prompt box.
+Teams want AI/IDE workflows that can **see, propose, and safely apply** changes without leaving the prompt box. Today, writes require bespoke CLIs or manual YAML gymnastics. The MCP initiative aims to:
+- Provide a **single, discovery-driven surface** that works across CRDs without per-kind releases.
+- Keep agents **safe-by-default** via validation, dry‑run, plan/approval gates, and RBAC.
+- **Reduce context switching** for developers (chat → change → validate → apply) in one loop.
+- Preserve **kubectl‑familiar UX** while exposing a cleaner API for MCP-aware tools.
+- Align with **#217** so new kinds and clusters are addressable with minimal changes.
 
 ### Goals
 
-Add additional tools to datumctl mcp to enhance the developer experience.
+**Program-level goals (initiative):**
+- **Discovery-first surface:** resolve kinds dynamically and support **generic CRUD** across CRDs.
+- **Safe write path:** validation + dry‑run now; **patch/plan/apply** with approvals in Phase 3.
+- **Scoped context:** lightweight `project/org` session defaults with per‑request override.
+- **Auditability & guardrails:** consistent error model, actor tagging, and optional policy checks.
+- **Small, stable API:** minimal verbs (`change_context`, CRUD, patch/plan/apply) that map well to IDEs/agents.
 
+**Milestone goals for v0.1 (Phase 2):**
 - `datum/change_context(project, org)` sets the active context for the MCP session.
 - Generic CRUD tools: `datum/create_resource`, `datum/get_resource`, `datum/update_resource`, `datum/delete_resource`.
 - Keep the design **resource‑agnostic** and **discovery‑driven** in line with **#217**.
@@ -42,7 +51,7 @@ Add additional tools to datumctl mcp to enhance the developer experience.
 ### Non-Goals
 
 - Bulk operations, diff/patch planners, or cross‑project replication.
-- Full AI UX for Datum (tracked separately).
+- Full AI UX for Datum (will be tracked separately).
 
 ## Proposal
 
@@ -157,6 +166,7 @@ Canonical codes: `PROJECT_NOT_FOUND`, `ORG_NOT_FOUND`, `PERMISSION_DENIED`, `VAL
 
 ## Implementation History
 
+- 2025-09-04 — Revised Summary/Motivation/Goals/Non‑Goals to describe the full MCP initiative.
 - 2025-09-04 — Added Phase 3 note and Phased Implementation section.
 - 2025-09-03 — Phase 2 proposal drafted (this doc). Baseline: **#255** shipped read‑only MCP MVP.
 
