@@ -307,16 +307,11 @@ spec:
   email: john.doe@company.com # it is not overriden by userRef email, user may want to use different email address for Contact
   familyName: Doe
   givenName: John
-  subject:
-    ## one of userRef \ organizationRef \ projectRef
-    userRef:
-      name: "332926980888461588"
-    organizationRef:
-      name: "personal-org-31farw"
-      namespace: "organization-personal-org-31farw"
-    projectRef:
-      name: "project-name"
-      namespace: "project-namespace"
+  subjectRef: # Optional, in case a not Milo user wants to receive news.
+    apiGroup: resourcemanager.miloapis.com
+    kind: Organization
+    name: <org-name>
+    namespace: "" # only valid for namespaced resources
 ```
 
 #### ContactGroup Resource
