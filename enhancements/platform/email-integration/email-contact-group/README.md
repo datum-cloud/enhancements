@@ -279,14 +279,18 @@ sequenceDiagram
     staffPortal ->> miloAPI: Create <br/> ContactGroupMembershipRemoval
     miloAPI ->> miloWebhook: Send create <br/> GroupMembershipRemoval event
     miloWebhook ->> miloWebhook: Validate Contact and <br/> ContactGroup references
-    miloWebhook -->> miloAPI: Send created <br/> GroupMembershipRemoval event
-    miloAPI ->> emailIntegration: Removal resource event
-    emailIntegration ->> emailIntegration: Reconciles <br/> GroupMembershipRemoval resource
-    emailIntegration ->> provider: Remove member from group
-    provider -->> emailIntegration: Removal confirmed
-    emailIntegration ->> miloAPI: Update Removal status <br/> with removal confirmation
-    provider -->> emailIntegration: Contact deleted from group event
-    emailIntegration -->> miloAPI: Create event for activity log
+    alt ContactGroup is private
+        miloWebhook -->> staffPortal: Reject removal (private group)
+    else ContactGroup is public
+        miloWebhook -->> miloAPI: Send created <br/> GroupMembershipRemoval event
+        miloAPI ->> emailIntegration: Removal resource event
+        emailIntegration ->> emailIntegration: Reconciles <br/> GroupMembershipRemoval resource
+        emailIntegration ->> provider: Remove member from group
+        provider -->> emailIntegration: Removal confirmed
+        emailIntegration ->> miloAPI: Update Removal status <br/> with removal confirmation
+        provider -->> emailIntegration: Contact deleted from group event
+        emailIntegration -->> miloAPI: Create event for activity log
+    end
 ```
 
 ### CRD Specifications
@@ -387,6 +391,7 @@ For maintainability and clear separation of concerns, there is a dedicated contr
 4. **ContactGroupMembershipRemoval Controller**
    - Watches ContactGroupMembershipRemoval resources.
    - Validates references to Contact and ContactGroup.
+   - Validates that the ContactGroup is public; if private, rejects the removal request and updates status with a rejection reason.
    - Manages removal lifecycle, including provider sync for removing members from groups. This is done by deleting the corresponding ContactGroupMembership.
    - Updates removal status and handles provider removal confirmations.
 
