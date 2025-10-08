@@ -173,7 +173,7 @@ sequenceDiagram
     user ->> portal: Create DcumentRevision
     portal ->> apiserver: Create DocumentRevision
     apiserver ->> webhook: Send create <br/> DocumentRevision Event
-    webhook ->> webhook: Validate namespace, documentRef <br/> and version
+    webhook ->> webhook: Validate namespace, documentRef <br/>, version, expectedAccepterKinds and expectedSubjectKinds
     webhook -->> apiserver: Sends DocumentVersion <br/> created event
     apiserver ->> controller: DocumentVeersion resource event
     controller ->> controller: Reconciles DocumentVersion
@@ -198,7 +198,7 @@ sequenceDiagram
     user -->> portal: Views agreement
     portal ->> apiserver: Create DocumentAcceptance
     apiserver ->> webhook: Send create <br/> DocumentAcceptance Event
-    webhook ->> webhook: Validate DocumentRevision, <br/> User reference and namespace
+    webhook ->> webhook: Validate DocumentRevision<br/>, Accepter and Subject. 
     webhook -->> apiserver: Sends DocumentAcceptante <br/> created event
     apiserver ->> controller: DocumentAcceptance resource event
     controller ->> controller: Reconciles DocumentAcceptance
@@ -260,6 +260,12 @@ spec:
       ...
   effectiveDate: "2025-06-01T00:00:00Z"
   changesSummary: "Updated dispute resolution section."
+  expectedSubjectKinds:
+    - group: resourcemanager.miloapis.com
+      kind: Organization
+  expectedAccepterKinds:
+    - group: iam.miloapis.com
+      kind: User
 status:
   contentHash: "sha256:abc123..."
 ```
@@ -276,7 +282,17 @@ status:
   - Enables external auditors, staff, or users to confirm the authenticity of the agreement text they accepted.
   - Required for all DocumentRevision resources.
 
+##### About `expectedSubjectKinds` and `expectedAccepterKinds`
+
+- **Purpose:** These fields define which Kubernetes resource kinds are permitted for `subjectRef` and `accepterRef` in DocumentAcceptance resources that reference this DocumentRevision.
+- **How it works:**
+  - When a DocumentAcceptance is created, the validating webhook confirms that the referenced Subject and Accepter resources match the kinds specified here.
+  - Each list is an array of objects containing `group` and `kind` keys, allowing future extension to additional resource types.
+
 #### DocumentAcceptance Resource
+
+> [!NOTE]
+> Organizations/Projects DocumentAcceptance resources are always stored in the organization namespace. This ensures that all acceptance records are scoped and managed according to the organization context, supporting clear auditability and access control.
 
 ```yaml
 apiVersion: agreements.miloapis.com/v1alpha1
@@ -289,7 +305,14 @@ spec:
     name: terms-of-service-v2-0
     namespace: legal-documents
     resourceVersion: "12345"
-  userRef:
+  subjectRef:
+    group: resourcemanager.miloapis.com
+    kind: Organization
+    name: personal-org-1234
+    namespace: organization-personal-org-1234
+  accepterRef:
+    group: iam.miloapis.com
+    kind: User
     name: user-12345
   state: "accepted"  # accepted, declined
   acceptanceContext:
