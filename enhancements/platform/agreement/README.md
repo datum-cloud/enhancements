@@ -174,7 +174,6 @@ sequenceDiagram
     portal ->> apiserver: Create DocumentRevision
     apiserver ->> webhook: Send create <br/> DocumentRevision Event
     webhook ->> webhook: Validate namespace, documentRef <br/> and version
-    webhook ->> webhook: Populate CR with contentCash
     webhook -->> apiserver: Sends DocumentVersion <br/> created event
     apiserver ->> controller: DocumentVeersion resource event
     controller ->> controller: Reconciles DocumentVersion
@@ -246,17 +245,18 @@ spec:
     data: |
       # Terms of Service
       ...
-    contentHash: "sha256:abc123..."
   effectiveDate: "2025-06-01T00:00:00Z"
   changesSummary: "Updated dispute resolution section."
+status:
+  contentHash: "sha256:abc123..."
 ```
 
 ##### About `contentHash`
 
 - **Purpose:** The `contentHash` field is a cryptographic hash (typically SHA-256) of the canonical document content in the `data` field. It ensures the integrity and auditability of each document revision.
 - **How it works:**
-  - When a new DocumentRevision is created, compute the SHA-256 hash of the exact content in the `data` field (after normalizing line endings and whitespace if required).
-  - Store the resulting hash in the `contentHash` field, prefixed with the hash algorithm (e.g., `sha256:`).
+  - When a new DocumentRevision is created, the webhook or controller computes the SHA-256 hash of the exact content in the `data` field (after normalizing line endings and whitespace if required).
+  - The resulting hash is stored in the `status.contentHash` field, prefixed with the hash algorithm (e.g., `sha256:`).
   - This allows anyone to verify that the content has not been tampered with by recomputing the hash and comparing it to the stored value.
 - **Why required:**
   - Guarantees that the content of a published agreement revision is immutable and verifiable.
