@@ -225,7 +225,20 @@ spec:
   metadata:
     category: "legal"
     jurisdiction: "US"
+status:
+  latestRevisionRef:
+    name: terms-of-service-v2-0
+    namespace: legal-documents
+    version: "2.0.0"
+    publishedAt: "2025-06-01T00:00:00Z"
 ```
+
+##### About `status.latestRevisionRef`
+
+- **Purpose:** The `status.latestRevisionRef` field provides a reference to the most recent (latest) published DocumentRevision for this Document. This allows clients, staff, and automation to quickly determine which revision is current without listing and sorting all revisions.
+- **How it works:**
+  - Whenever a new DocumentRevision is created and validated, the controller updates the `status.latestRevisionRef` field on the corresponding Document resource.
+  - The field includes the name, namespace, version, and publishedAt timestamp of the latest revision for convenience and traceability.
 
 #### DocumentRevision Resource
 
