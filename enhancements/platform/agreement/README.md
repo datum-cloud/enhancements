@@ -37,7 +37,7 @@ The Milo platform needs a robust, versioned, and auditable system for managing a
 **This enhancement focuses on backend agreement management.** It proposes implementing a set of CRDs and a controller to manage agreement lifecycles, versioning, and acceptance tracking, with clear, generic naming for reusability.
 
 > [!NOTE]
-> This enhancement does NOT include a frontend UI for agreement management or acceptance. Frontend integration will be addressed in future enhancements.
+> This enhancement currently focuses on backend agreement management and does not include a frontend UI for agreement management or acceptance. However, it is intended that this enhancement will be expanded in the future to include frontend UI components for agreement management and acceptance workflows.
 
 ## Motivation
 
@@ -63,7 +63,7 @@ Modern SaaS platforms must track user and organization acceptance of legal agree
 
 **Future enhancements will address:**
 
-- Frontend UI for agreement management and acceptance
+- Phase 2: Frontend UI for agreement management and user acceptance
 - Automated notifications for new versions
 - Localization and translations
 - Advanced analytics and reporting
