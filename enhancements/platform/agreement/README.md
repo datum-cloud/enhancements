@@ -23,11 +23,9 @@ latest-milestone: "v0.1"
       - [DocumentRevision Resource](#documentrevision-resource)
       - [DocumentAcceptance Resource](#documentacceptance-resource)
     - [Controller Implementation](#controller-implementation)
-      - [Acceptance Status States](#acceptance-status-states)
       - [Permission Management](#permission-management)
     - [Basic Monitoring](#basic-monitoring)
       - [Key Metrics](#key-metrics)
-      - [Simple Alerting](#simple-alerting)
   - [Implementation History](#implementation-history)
 
 ## Summary
@@ -314,7 +312,6 @@ spec:
     group: iam.miloapis.com
     kind: User
     name: user-12345
-  state: "accepted"  # accepted, declined
   acceptanceContext:
     method: web-ui
     ipAddress: "192.168.1.100"
@@ -335,11 +332,6 @@ The Agreements Controller is a standard Kubernetes controller that:
 4. **Ensures immutability** of documents and revisions after creation
 5. **Maintains audit logs** for all acceptance events
 
-#### Acceptance Status States
-
-- `accepted` - User has accepted the agreement
-- `rejected` - User declined or failed to accept (optional, for future use)
-
 #### Permission Management
 
 - **On Document/Revision creation:** Only staff/operators can create or update
@@ -352,11 +344,6 @@ The Agreements Controller is a standard Kubernetes controller that:
 
 - **Document Creation Rate** - Number of new agreement documents created
 - **Revision Publication Rate** - Number of new revisions published
-- **Acceptance Rate** - Percentage of users who have accepted required agreements
-
-#### Simple Alerting
-
-- Acceptance rate for required agreements drops below threshold
 
 ## Implementation History
 
