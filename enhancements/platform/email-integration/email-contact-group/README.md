@@ -304,7 +304,7 @@ metadata:
   name: john-doe
   namespace: org-xyz
 spec:
-  email: john.doe@company.com # it is not overriden by userRef email, user may want to use different email address for Contact
+  email: john.doe@company.com # it is not overridden by userRef email, user may want to use different email address for Contact
   familyName: Doe
   givenName: John
   subjectRef: # Optional, in case a not Milo user wants to receive news.
