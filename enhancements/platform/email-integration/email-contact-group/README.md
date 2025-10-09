@@ -218,8 +218,8 @@ sequenceDiagram
 
     admin ->> staffPortal: Create/Update ContactGroup
     staffPortal ->> miloAPI: Create/Update ContactGroup
-    miloAPI ->> miloWebhook: Send create contact <br/> webhook event
-    miloWebhook -->> miloAPI: Send created/updated contact <br/> webhook event
+    miloAPI ->> miloWebhook: Send create contact group <br/> webhook event
+    miloWebhook -->> miloAPI: Send created/updated contact group <br/> webhook event
 
     
     %% Creation flow
