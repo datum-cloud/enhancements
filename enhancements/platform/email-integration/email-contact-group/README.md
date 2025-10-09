@@ -379,7 +379,7 @@ For maintainability and clear separation of concerns, there is a dedicated contr
 3. **ContactGroupMembership Controller**
    - Watches ContactGroupMembership resources.
    - Validates references to Contact and ContactGroup.
-   - Manages membership lifecycle, including provider sync for adding membersto groups.
+   - Manages membership lifecycle, including provider sync for adding members to groups.
    - When deleted, removes the contact from the group.
    - Updates membership status and handles provider membership IDs.
 
