@@ -52,7 +52,7 @@ Milo needs the ability to send emails to end-users based on events happening acr
 
 The Milo platform currently lacks a basic email notification system, which limits our ability to communicate with users about important platform events and notifications. This enhancement addresses the need for a simple, reliable email system for transactional and notification emails.
 
-Modern SaaS platforms require basic email capabilities to notify users about account changes, system events, and provide important service notifications. Without this capability, Milo cannot effectively communicate with users about critical platform events.
+Modern Alt Cloud providers require basic email capabilities to notify users about account changes, system events, and provide important service notifications. Without this capability, Milo cannot effectively communicate with users about critical platform events.
 
 ### Goals
 
@@ -65,6 +65,7 @@ Modern SaaS platforms require basic email capabilities to notify users about acc
 
 **Explicitly out of scope for this enhancement:**
 
+- **Full e-signature workflows** - No built-in support for electronic signature solutions (e.g., DocuSign, Documenso)
 - **Contact management** - No Contact CRDs, contact storage, or contact lifecycle management
 - **Contact groups/mailing lists** - No ContactGroup CRDs or automated group membership
 - **Multi-provider support** - Initial implementation will focus on a single provider (Resend)
