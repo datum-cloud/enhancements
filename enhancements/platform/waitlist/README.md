@@ -90,6 +90,7 @@ apiVersion: iam.miloapis.com/v1alpha1
 kind: UserApproval
 metadata:
   name: alice@example-com
+spec:
   subjectRef:
    email: alice@example.com # used for Email Invited Users
    userRef:
@@ -103,6 +104,7 @@ apiVersion: iam.miloapis.com/v1alpha1
 kind: UserDenial
 metadata:
   name: alice@example-com
+spec:
   userRef:
    name: "154353338193813"
   reason: "The reason..." 
