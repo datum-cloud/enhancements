@@ -28,7 +28,7 @@ stateDiagram-v2
     [*] --> NoWaitlist
     NoWaitlist --> Pending : Self-registration
     Pending --> Approved : Admin Approves invitation
-    Pending --> Denied : Admin Denies
+    Pending --> Rejects : Admin Rejects
     Approved --> FullAccess : User completes registration
 ```
 
@@ -43,8 +43,8 @@ stateDiagram-v2
 
 **State Axes** (orthogonal):
 
-1. **Waitlist State** – `pending / approved / denied`
-2. **Account Access** – `pending / approved/ denied`
+1. **Waitlist State** – `Pending / Approved / Rejected`
+2. **Account Access** – `Pending / Approved/ Rejected`
 
 ---
 
@@ -52,8 +52,8 @@ stateDiagram-v2
 
 | Resource | Scope | Purpose |
 | -------- | ----- | ------- |
-| **User** *(iam.miloapis.com/v1alpha1)* | Cluster | Adds `status.activation` to track `Pending` → `Approved/Denied` progression. |
-| **UserWaitlistEntry** *(iam.miloapis.com/v1alpha1)* | Cluster | Records self-signup requests awaiting review. Captures administrator decision (`Pending`, `Approved`, `Denied`). |
+| **User** *(iam.miloapis.com/v1alpha1)* | Cluster | Adds `status.activation` to track `Pending` → `Approved/Rejected` progression. |
+| **UserWaitlistEntry** *(iam.miloapis.com/v1alpha1)* | Cluster | Records self-signup requests awaiting review. Captures administrator decision (`Pending`, `Approved`, `Rejected`). |
 | **UserApproval** *(iam.miloapis.com/v1alpha1)* | Cluster | Records administrator approval action, transitioning a pending account to active. |
 | **UserDenial** *(iam.miloapis.com/v1alpha1)* | Cluster | Records administrator denial decision and reason, marking the account as inactive. |
 | **PlatformInvitation** *(iam.miloapis.com/v1alpha1)* | Cluster | Represents an invitation issued by staff; allows invited users to bypass the waitlist and become active upon registration. |
@@ -62,7 +62,7 @@ stateDiagram-v2
 
 ```yaml
 status:
-  activation: Pending | Approved | Denied   # defaults to Pending
+  activation: Pending | Approved | Rejected   # defaults to Pending
 ```
 
 ### `UserWaitlistEntry` fields
@@ -145,8 +145,8 @@ Controllers will reconcile these resources as follows:
 - `UserDenial Creation`
 
   - sets user `Activation: Inactive`; denies full access.
-  - sends denied account email
-  - sets `WaitList{Denied}`
+  - sends rejected account email
+  - sets `WaitList{Rejected}`
 
 - `PlatformInvitation Creation`
 
@@ -207,7 +207,7 @@ The front-end can access the user’s status, so it knows which screen to redire
 | **Not on waitlist** | 1️⃣ User submits registration <br> 2️⃣ Record `UserWaitlistEntry(Pending)` <br> 3️⃣ Show *“Thanks – we’ll be in touch”* screen <br> 4️⃣ Send confirmation email |
 | **Waitlisted, Pending** | 1️⃣ User logging <br> 2️⃣ Detect existing `Pending` entry <br> 3️⃣ Show same *pending* screen (idempotent) |
 | **Waitlisted, Approved** | 1️⃣ User hits login <br> 2️⃣ System sees `Approved` <br> 3️⃣ Allows full access<br> |
-| **Waitlisted, Denied** | 1️⃣ User hits login <br> 2️⃣ System sees `Denied` <br> 3️⃣ Show *“We're sorry...”* screen <br> |
+| **Waitlisted, Rejected** | 1️⃣ User hits login <br> 2️⃣ System sees `Rejected` <br> 3️⃣ Show *“We're sorry...”* screen <br> |
 
 ### 2. Invitation
 
