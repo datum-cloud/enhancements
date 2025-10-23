@@ -292,7 +292,6 @@ Represents a set of DNS records inside a `DNSZone`. Its structure matches extern
   - **recordType**: A, AAAA, CNAME, etc.
   - **targets**: list of values.
   - **recordTTL**: optional.
-  - **labels / providerSpecific**: metadata for providers.
 
 ```go
 type DNSRecordSet struct {
@@ -312,8 +311,6 @@ type DNSRecord struct {
   RecordType string  `json:"recordType"`
   Targets   []string `json:"targets"`
   TTL *int64   `json:"ttl,omitempty"`
-  Labels    map[string]string `json:"labels,omitempty"`
-  ProviderSpecific []ProviderSpecificKeyValue `json:"providerSpecific,omitempty"`
 }
 
 type DNSRecordSetStatus struct {
@@ -323,10 +320,6 @@ type DNSRecordSetStatus struct {
   Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
-type ProviderSpecificKeyValue struct {
-  Name  string `json:"name"`
-  Value string `json:"value"`
-}
 ```
 
 #### 2) Controller Responsibilities
