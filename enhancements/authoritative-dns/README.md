@@ -270,7 +270,7 @@ type DNSZone struct {
 
 type DNSZoneSpec struct {
   DomainName string `json:"domainName"`
-  ClassName  string `json:"className,omitempty"`
+  DNSZoneClassName  string `json:"dnsZoneClassName,omitempty"`
   AutoRegister bool `json:"autoRegister,omitempty"`
 }
 
