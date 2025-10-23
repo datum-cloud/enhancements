@@ -308,7 +308,7 @@ type DNSRecordSetSpec struct {
 }
 
 type DNSRecord struct {
-  DNSName   string   `json:"dnsName,omitempty"`
+  Name   string   `json:"name,omitempty"`
   RecordType string  `json:"recordType"`
   Targets   []string `json:"targets"`
   RecordTTL *int64   `json:"recordTTL,omitempty"`
