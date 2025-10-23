@@ -311,7 +311,7 @@ type DNSRecord struct {
   Name   string   `json:"name,omitempty"`
   RecordType string  `json:"recordType"`
   Targets   []string `json:"targets"`
-  RecordTTL *int64   `json:"recordTTL,omitempty"`
+  TTL *int64   `json:"ttl,omitempty"`
   Labels    map[string]string `json:"labels,omitempty"`
   ProviderSpecific []ProviderSpecificKeyValue `json:"providerSpecific,omitempty"`
 }
