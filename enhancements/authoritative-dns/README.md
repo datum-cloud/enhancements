@@ -218,7 +218,7 @@ type DNSZoneClass struct {
 }
 
 type DNSZoneClassSpec struct {
-  ControllerType string `json:"controllerType"`
+  ControllerName string `json:"controllerName"`
   ProviderRef *corev1.SecretReference `json:"providerRef,omitempty"`
   Endpoint string `json:"endpoint,omitempty"`
   NameServerPolicy NameServerPolicy `json:"nameServerPolicy"`
