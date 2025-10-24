@@ -206,7 +206,6 @@ Defines how zones are provisioned and their nameserver policy.
 - **spec.controllerType**: backend identifier (e.g., "powerdns", "hickory").
 - **spec.nameServerPolicy**:
   - **mode: Static**: hardcoded list of NS hostnames.
-  - **mode: Dynamic**: future option to assign NS dynamically from a pool.
 - **spec.defaults**: optional defaults (e.g., TTL).
 
 ```go
@@ -219,8 +218,6 @@ type DNSZoneClass struct {
 
 type DNSZoneClassSpec struct {
   ControllerName string `json:"controllerName"`
-  ProviderRef *corev1.SecretReference `json:"providerRef,omitempty"`
-  Endpoint string `json:"endpoint,omitempty"`
   NameServerPolicy NameServerPolicy `json:"nameServerPolicy"`
   Defaults *ZoneDefaults `json:"defaults,omitempty"`
 }
@@ -228,17 +225,10 @@ type DNSZoneClassSpec struct {
 type NameServerPolicy struct {
   Mode string `json:"mode"`
   Static *StaticNS `json:"static,omitempty"`
-  Dynamic *DynamicNS `json:"dynamic,omitempty"`
 }
 
 type StaticNS struct {
   Servers []string `json:"servers"`
-}
-
-type DynamicNS struct {
-  ProviderPoolRef *corev1.LocalObjectReference `json:"providerPoolRef,omitempty"`
-  Count *int `json:"count,omitempty"`
-  Strategy string `json:"strategy,omitempty"`
 }
 
 type ZoneDefaults struct {
@@ -379,9 +369,6 @@ metadata:
   name: powerdns-standard
 spec:
   controllerType: powerdns
-  endpoint: https://pdns.example.net:8443
-  providerRef:
-    name: pdns-api-credentials
   nameServerPolicy:
     mode: Static
     static:
