@@ -244,11 +244,10 @@ type DNSZoneClassStatus struct {
 Declares an authoritative DNS zone such as example.com.
 
 - **spec.domainName**: the FQDN of the zone.
-- **spec.className**: references a `DNSZoneClass`.
+- **spec.dnsZoneClassName**: references a `DNSZoneClass`.
 - **status**:
-  - **zoneCreated**: backend confirmed.
   - **nameservers[]**: active authoritative NS.
-  - **delegationStatus**: Pending|Delegated|Unknown.
+  - **conditions[]**: includes `Accepted` and `Programmed` as primary conditions.
 
 ```go
 type DNSZone struct {
@@ -265,23 +264,22 @@ type DNSZoneSpec struct {
 }
 
 type DNSZoneStatus struct {
-  ZoneCreated       bool     `json:"zoneCreated,omitempty"`
   Nameservers       []string `json:"nameservers,omitempty"`
-  DelegationStatus  string   `json:"delegationStatus,omitempty"`
-  Message           string   `json:"message,omitempty"`
   Conditions        []metav1.Condition `json:"conditions,omitempty"`
 }
 ```
 
 ##### DNSRecordSet (namespaced)
-Represents a set of DNS records inside a `DNSZone`. Its structure matches external-dns’ `Endpoint`, using `records[]`.
+Represents many records of a single `recordType` inside a `DNSZone`. The `recordType` is a top-level enum. Each entry in `spec.records[]` represents one owner name (and optional TTL) with either raw RDATA or a type-specific object for that `recordType`.
 
-- **spec.zoneName**: parent zone (e.g., "example.com").
-- **spec.records[]**: list of record objects.
-  - **dnsName**: relative or FQDN.
-  - **recordType**: A, AAAA, CNAME, etc.
-  - **targets**: list of values.
-  - **recordTTL**: optional.
+- **spec.dnsZoneRef**: reference to the `DNSZone` object (same namespace). At minimum, `name` (e.g., `example-com`).
+- **spec.recordType**: enum of DNS RR types (A, AAAA, CNAME, TXT, MX, SRV, CAA, NS, SOA, PTR, TLSA, HTTPS, SVCB).
+- **spec.records[]**: list of record entries. Each record:
+  - **name**: owner name (relative or FQDN).
+  - **ttl**: optional TTL for this owner/RRset.
+  - Exactly one of:
+    - **raw[]**: list of raw RDATA strings for this owner.
+    - Type-specific object matching `recordType` (e.g., **a.content[]**, **txt.content[]**, **mx[]**, **srv[]**, **caa[]**, **tlsa[]**, **https[]**).
 
 ```go
 type DNSRecordSet struct {
@@ -291,22 +289,67 @@ type DNSRecordSet struct {
   Status DNSRecordSetStatus `json:"status,omitempty"`
 }
 
+// +kubebuilder:validation:Enum=A;AAAA;CNAME;TXT;MX;SRV;CAA;NS;SOA;PTR;TLSA;HTTPS;SVCB
+type RRType string
+
 type DNSRecordSetSpec struct {
-  ZoneName string      `json:"zoneName"`
-  Records  []DNSRecord `json:"records"`
+  DNSZoneRef corev1.LocalObjectReference `json:"dnsZoneRef"`
+  RecordType RRType `json:"recordType"`
+  Records []RecordEntry `json:"records"`
 }
 
-type DNSRecord struct {
-  Name   string   `json:"name,omitempty"`
-  RecordType string  `json:"recordType"`
-  Targets   []string `json:"targets"`
-  TTL *int64   `json:"ttl,omitempty"`
+type RecordEntry struct {
+  Name string `json:"name"`
+  TTL *int64 `json:"ttl,omitempty"`
+  Raw []string `json:"raw,omitempty"`
+
+  // Only the field matching RecordType may be set
+  A    *SimpleValues    `json:"a,omitempty"`
+  AAAA *SimpleValues    `json:"aaaa,omitempty"`
+  CNAME *CNAMEValue     `json:"cname,omitempty"`
+  TXT  *SimpleValues    `json:"txt,omitempty"`
+  MX   []MXRecordSpec   `json:"mx,omitempty"`
+  SRV  []SRVRecordSpec  `json:"srv,omitempty"`
+  TLSA []TLSARecordSpec `json:"tlsa,omitempty"`
+  HTTPS []HTTPSRecordSpec `json:"https,omitempty"`
+  ...
+}
+
+type SimpleValues struct {
+  Content []string `json:"content"`
+}
+
+type CNAMEValue struct {
+  Content string `json:"content"`
+}
+
+type SRVRecordSpec struct {
+  Priority uint16 `json:"priority"`
+  Weight   uint16 `json:"weight"`
+  Port     uint16 `json:"port"`
+  Target   string `json:"target"`
+}
+
+type MXRecordSpec struct {
+  Preference uint16 `json:"preference"`
+  Exchange   string `json:"exchange"`
+}
+
+type CAARecordSpec struct {
+  Flag  uint8  `json:"flag"`
+  Tag   string `json:"tag"`   // e.g., issue, issuewild, iodef
+  Value string `json:"value"` // e.g., ca.example.net
+}
+
+type HTTPSRecordSpec struct {
+  Priority uint16 `json:"priority"`
+  Target   string `json:"target"`
+  // Parameters in key=value form (e.g., alpn=h2,h3; ipv4hint=192.0.2.1)
+  Params   map[string]string `json:"params,omitempty"`
 }
 
 type DNSRecordSetStatus struct {
   ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-  PropagationStatus  string `json:"status,omitempty"`
-  Message            string `json:"message,omitempty"`
   Conditions         []metav1.Condition `json:"conditions,omitempty"`
 }
 
@@ -338,14 +381,24 @@ Both replicators also watch downstream status changes and re-enqueue upstream ob
   - Applies nameserver policy:
     - Static: uses class NS list.
     - Dynamic (future): picks NS from pool.
-  - Updates status: `zoneCreated`, `nameservers`, `delegationStatus`.
+  - Updates status: `nameservers` and `conditions` (`Accepted`, `Programmed`).
 
 - **DNSRecordSetReconciler**
-  - Waits for zone readiness (Delegated or zoneCreated).
+  - Waits for zone readiness via conditions (e.g., `Programmed` on parent `DNSZone`).
   - Converts `spec.records[]` → external-dns `DNSEndpoint.spec.endpoints[]`.
   - Creates/updates the `DNSEndpoint` and marks status Published.
 
 External-DNS then reads those DNSEndpoints and pushes the changes to the actual DNS provider. Note: we may replace external-dns with our own reconciliation loop in the future.
+
+##### Default Conditions and Kubebuilder Markers
+
+Controllers should standardize on `Accepted` and `Programmed` conditions. Use kubebuilder markers to inject and manage conditions fields automatically on CRDs. Example marker:
+
+```go
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Accepted",type=string,JSONPath=.status.conditions[?(@.type=="Accepted")].status
+// +kubebuilder:printcolumn:name="Programmed",type=string,JSONPath=.status.conditions[?(@.type=="Programmed")].status
+```
 
 #### 3) Object Mapping and Status Flow
 
@@ -354,8 +407,8 @@ External-DNS then reads those DNSEndpoints and pushes the changes to the actual 
 
 Condition semantics:
 
-- Accepted=True → downstream object created.
-- Programmed=True → downstream reports ready/published.
+- Accepted=True → downstream object created/validated by replicator.
+- Programmed=True → downstream reports ready/published; use Reason to convey delegation issues.
 
 Both controllers use idempotent patching and deep-equality guards to avoid conflicts.
 
@@ -385,25 +438,61 @@ metadata:
   namespace: default
 spec:
   domainName: example.com
-  className: powerdns-standard
+  dnsZoneClassName: powerdns-standard
 
 ---
-# DNSRecordSet
+# DNSRecordSet (A with two owners, using typed content)
 apiVersion: dns.datum.cloud/v1alpha1
 kind: DNSRecordSet
 metadata:
-  name: www-example-com
+  name: a-records-example-com
   namespace: default
 spec:
-  zoneName: example.com
+  dnsZoneRef:
+    name: example-com
+  recordType: A
   records:
-    - dnsName: www
-      recordType: A
-      recordTTL: 300
-      targets: ["203.0.113.10","203.0.113.11"]
-    - dnsName: "_acme-challenge"
-      recordType: TXT
-      targets: ["token-abc123"]
+    - name: www
+      ttl: 300
+      a:
+        content: ["203.0.113.10","203.0.113.11"]
+    - name: api
+      a:
+        content: ["203.0.113.20"]
+
+---
+# DNSRecordSet (TXT, raw values)
+apiVersion: dns.datum.cloud/v1alpha1
+kind: DNSRecordSet
+metadata:
+  name: acme-challenge-example-com
+  namespace: default
+spec:
+  dnsZoneRef:
+    name: example-com
+  recordType: TXT
+  records:
+    - name: _acme-challenge
+      raw: ["token-abc123"]
+
+---
+# DNSRecordSet (SRV typed entries)
+apiVersion: dns.datum.cloud/v1alpha1
+kind: DNSRecordSet
+metadata:
+  name: srv-example-com
+  namespace: default
+spec:
+  dnsZoneRef:
+    name: example-com
+  recordType: SRV
+  records:
+    - name: _sip._tcp
+      srv:
+        - priority: 10
+          weight: 60
+          port: 5060
+          target: sipserver.example.com.
 ```
 
 #### 5) Future Work
