@@ -359,7 +359,7 @@ One-shot discovery/snapshot of existing DNS records for a `DNSZone`. On creation
 
 - **spec.dnsZoneRef**: reference to the `DNSZone` object (same namespace).
 - **status.conditions[]**: includes at minimum `Accepted` and `Discovered`.
-- **status.records[]**: list of discovered RRsets grouped by `recordType`, using the shared `RecordEntry` schema.
+- **status.recordsets[]**: list of discovered RRsets grouped by `recordType`, using the shared `RecordEntry` schema.
 
 ```go
 type DNSZoneDiscovery struct {
@@ -387,11 +387,11 @@ type DiscoveredRecordSet struct {
 
 type DNSZoneDiscoveryStatus struct {
   Conditions []metav1.Condition   `json:"conditions,omitempty"`
-  Records []DiscoveredRecordSet `json:"records,omitempty"`
+  RecordSets []DiscoveredRecordSet `json:"recordSets,omitempty"`
 }
 ```
 
-Discovery implementation will leverage a DNS client library to iterate common RR types (A, AAAA, CNAME, TXT, MX, SRV, NS, SOA, CAA, PTR, TLSA, HTTPS, SVCB) and populate `.status.records`. A suitable library is `miekg/dns` [link](https://github.com/miekg/dns), which supports authoritative queries and modern RR types.
+Discovery implementation will leverage a DNS client library to iterate common RR types (A, AAAA, CNAME, TXT, MX, SRV, NS, SOA, CAA, PTR, TLSA, HTTPS, SVCB) and populate `.status.recordSets`. A suitable library is `miekg/dns` [link](https://github.com/miekg/dns), which supports authoritative queries and modern RR types.
 
 Example:
 
