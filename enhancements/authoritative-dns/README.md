@@ -354,6 +354,58 @@ type DNSRecordSetStatus struct {
 
 ```
 
+##### DNSZoneDiscovery (namespaced)
+One-shot discovery/snapshot of existing DNS records for a `DNSZone`. On creation, a controller queries common RR types for the zone and stores them in `.status` for easy extraction/translation into `DNSRecordSet` objects. This object is write-once (status) and has no lifecycle beyond initial discovery.
+
+- **spec.dnsZoneRef**: reference to the `DNSZone` object (same namespace).
+- **status.conditions[]**: includes at minimum `Accepted` and `Discovered`.
+- **status.records[]**: list of discovered RRsets grouped by `recordType`, using the shared `RecordEntry` schema.
+
+```go
+type DNSZoneDiscovery struct {
+  metav1.TypeMeta   `json:",inline"`
+  metav1.ObjectMeta `json:"metadata,omitempty"`
+  Spec   DNSZoneDiscoverySpec   `json:"spec"`
+  Status DNSZoneDiscoveryStatus `json:"status,omitempty"`
+}
+
+type DNSZoneDiscoverySpec struct {
+  // DNSZoneRef references the DNSZone (same namespace) this discovery targets.
+  // +kubebuilder:validation:Required
+  DNSZoneRef corev1.LocalObjectReference `json:"dnsZoneRef"`
+}
+
+type DiscoveredRecordSet struct {
+  // RecordType is the DNS RR type for this recordset.
+  // +kubebuilder:validation:Required
+  RecordType RRType `json:"recordType"`
+
+  // Records contains one or more owner names with values appropriate for the RecordType.
+  // +kubebuilder:validation:MinItems=1
+  Records []RecordEntry `json:"records"`
+}
+
+type DNSZoneDiscoveryStatus struct {
+  Conditions []metav1.Condition   `json:"conditions,omitempty"`
+  Records []DiscoveredRecordSet `json:"records,omitempty"`
+}
+```
+
+Discovery implementation will leverage a DNS client library to iterate common RR types (A, AAAA, CNAME, TXT, MX, SRV, NS, SOA, CAA, PTR, TLSA, HTTPS, SVCB) and populate `.status.records`. A suitable library is `miekg/dns` [link](https://github.com/miekg/dns), which supports authoritative queries and modern RR types.
+
+Example:
+
+```yaml
+apiVersion: dns.datum.cloud/v1alpha1
+kind: DNSZoneDiscovery
+metadata:
+  name: example-com-scan
+  namespace: default
+spec:
+  dnsZoneRef:
+    name: example-com
+```
+
 #### 2) Controller Responsibilities
 
 ##### Upstream (control-plane) – Replicators
