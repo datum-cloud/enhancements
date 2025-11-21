@@ -1,20 +1,20 @@
-# Galactic VPCs - NPMS Overview
+# Galactic VPCs -
 
 ## High-Level Overview
 
-The Network Performance Management System (NPMS) is a programmable, SLA-aware overlay that provides deterministic traffic routing between edge, core, and cloud environments. Built on Segment Routing over IPv6 (SRv6), WireGuard, and high-performance VPP routers, NPMS enables centralized control of path selection, observability, and performance optimization across distributed infrastructures.
+Galactic VPC  is a programmable, SLA-aware overlay that provides private connectivity, VPC peering, Private link and  deterministic traffic routing between edge, core, cloud  and enterprise environments. Built on Segment Routing over IPv6 (SRv6), encrypted tunnels, and high-performance VPP routers, gVPC enables centralized control of path selection, observability, and performance optimization across distributed infrastructures.
 
 This system is designed to serve multi-tenant environments where customers need application-specific traffic steering (e.g., ultra-low latency, lossless delivery, or high-throughput paths). All routing decisions are computed centrally and enforced via programmable sidecars, enabling proactive SLA enforcement and visibility across every link and tunnel in the system.
 
-This document describes the architecture and technical design of a centralized Network Performance Management System (NPMS) responsible for probing, measuring, and programming an SRv6-based overlay network built on VPP routers. The system supports a multi-tenant environment, offers policy-based traffic steering (e.g., low latency, lossless, high throughput), and enables deterministic end-to-end path computation.
+This document describes the architecture and technical design of a global VPC spanning all clouds, devices, applications, agents. The control/operation/management plane is responsible for probing, measuring, and programming an SRv6-based overlay network built on VPP routers. The system supports a multi-tenant environment, offers policy-based traffic steering (e.g., low latency, lossless, high throughput), and enables deterministic end-to-end path computation.
 
-Edge nodes are securely connected to the core fabric via WireGuard tunnels, and all path computation and policy enforcement is performed out-of-band via a centralized controller. The system supports geographic path exclusions, synthetic bandwidth testing via iPerf, and configurable Forward Error Correction (FEC) per traffic class. A ten-minute control loop ensures consistent and predictable data plane updates across the fabric.
+Edge nodes are securely connected to the core fabric via encrypted tunnels, and all path computation and policy enforcement is performed out-of-band via a centralized controller. The system supports geographic path exclusions, synthetic bandwidth testing via iPerf, and configurable Forward Error Correction (FEC) per traffic class. A ten-minute control loop ensures consistent and predictable data plane updates across the fabric.
 
----
+--- 
 
 ### Business Benefits
 
-NPMS transforms connectivity from a fixed, opaque network into a programmable, real-time service layer. It enables:
+Galactic VPC transforms connectivity from a fixed, opaque network into a programmable, real-time service layer. It enables:
 
 - **Reduced Cost of Connectivity**  
   Replace MPLS or private circuits with SLA-aware paths over public infrastructure.
@@ -47,7 +47,7 @@ For developers and infrastructure engineers, NPMS behaves like “network as cod
 
 ### Why Executives Trust It
 
-For technology leaders, NPMS delivers agility, visibility, and control:
+For technology leaders, Galactic VPC delivers agility, visibility, and control:
 
 - **Centralized Management**  
   Enforce policy and routing from a single controller.
@@ -60,21 +60,23 @@ For technology leaders, NPMS delivers agility, visibility, and control:
 
 ---
 
-NPMS brings the best of modern infrastructure—APIs, automation, real-time feedback loops—to network performance and delivery.
+Galactic VPC brings the best of modern infrastructure—APIs, automation, real-time feedback loops—to network performance and delivery.
 
 ## Multi-Tenant Architecture
 
-The NPMS is designed from the ground up to support a multi-tenant operating
+The Galactic VPC is designed from the ground up to support a multi-tenant operating
 model. Each tenant has isolated data plane resources and private performance
 visibility, while sharing control plane logic and core network intelligence.
 
 ### Refefence Architectural Concept
 
-Similar to MPLS BGP VPNs, NPMS is built upon a nearly state-free core network
+Similar to MPLS BGP VPNs, Galactic-VPC is built upon a nearly state-free core network
 built on SRv6 (similar in fashion to MPLS "P" routers) with a distributed L3
 cloud router using BGP built at the edge (similar in fashion to MPLS "PE"
 routers). Unlike MPLS BGP VPNs, routing and path information is forwarded to a
-centrlaized controller for complete network topology computation and control.
+centralized controller for complete network topology computation and control. In addition
+attachment is provided to Cloud environment via dynamic registration of attachment 
+endpoints and service.
 
 ### Shared Components
 
@@ -147,9 +149,9 @@ The system builds a real-time model of network performance through active synthe
 
 ### Edge Nodes
 
-- Each edge node connects to the core via at least three WireGuard tunnels
+- Each edge node connects to the core via at least three tunnels
 - Edge nodes determine upstream core nodes through initial triangulation probes; they query an IP with their current WAN IP address, Datum geolocates that IP address, and hands back 6x POP IPs. ICMP probes are used to determine the 3x best performing POPs.
-- A direct WireGuard tunnel between edge sites enable baseline internet path testing
+- A direct encrypted tunnel between edge sites enable baseline internet path testing
 
 ### Configuration Delivery
 
@@ -179,9 +181,15 @@ The system builds a real-time model of network performance through active synthe
 - Controller evaluates performance data in ten-minute windows
 - This windowed model underpins SLA enforcement and routing decisions
 
-## Customer Route Learning and Forwarding (BGP Integration)
+## Customer Route Learning and Forwarding 
 
-To support dynamic route discovery from tenant networks, NPMS uses BGP at the edge to learn and advertise customer L3 routes. This mechanism is used solely for reachability exchange—**not** for determining forwarding paths.
+To support dynamic route discovery from tenant networks, Galactic VPC uses BGP, API or pub-sub mechanisms at the edge to learn and advertise customer L3 routes. This mechanism is used solely for reachability exchange—**not** for determining forwarding paths.
+
+### Cloud VPC attachment
+
+The attachment VPC routing table is subscribed to using pub-sub mechanisms, API calls and galactic-agents. 
+galactic-agents provide the VPC route table tables to be learned to galactic-routers(vpp routers). The routes for
+egress are then programmed on all ingress routers.
 
 ### BGP for Customer-Facing Interfaces
 
@@ -198,22 +206,24 @@ This BGP function is confined to edge nodes and is **not used** for internal cor
 
 ### Separation of Reachability and Forwarding
 
-Although the VPP router learns routes via BGP, **it does not autonomously install next-hops based on BGP**. Instead:
+Although the VPP router learns routes via BGP or other means such as galactic-agents running in edge locations
+**it does not autonomously install next-hops **. Instead:
 
 - A sidecar or local BGP daemon collects learned routes and submits them to the centralized controller
 - The **controller** is responsible for determining:
   - Whether a path to the destination prefix exists
   - Which SLA-compliant path (segment list or tunnel) should be used
+  - applied policy 
 - The controller **programs explicit forwarding entries** into the VPP router
   - These entries override BGP-inferred next-hops with centrally computed paths
 
 ### Outbound Flow Behavior
 
 1. Customer sends traffic to a remote destination.
-2. VPP receives the traffic and performs a route lookup.
-3. If the prefix exists, the controller-installed next-hop is used (e.g., SRv6 or WireGuard).
+2. VPP receives the traffic and performs a route lookup and policy lookup 
+3. If the prefix exists, the controller-installed next-hop is used (e.g., SRv6 or WireGuard or other tunnel next-hop).
 4. The packet is forwarded into the overlay using the correct SLA-compliant path.
-
+esc
 ### Inbound Flow Behavior
 
 1. Customer prefixes are advertised by the edge VPP via BGP.
@@ -224,16 +234,16 @@ This architecture ensures a flexible and policy-driven approach to overlay routi
 
 ## Overlay Network Programming
 
-### WireGuard Edge Attachment
+### Encrypted Tunnel Edge Attachment
 
-- Each edge has three or more WireGuard tunnels to diverse core sites
-- Each edge also have wireguard tunnels to other edges, representing "the Internet"
+- Each edge has three or more encrypted tunnels to diverse core sites
+- Each edge also has encrypted tunnels to other edges, representing "the Internet"
 - Tunnels are treated as individual interfaces in VPP
 - Controller selects optimal ingress and egress tunnels based on telemetry
 
 ### Direct Edge-to-Edge Optimization
 
-- Optional WireGuard tunnels between edge nodes allow for baseline testing
+- Optional encrypted tunnels between edge nodes allow for baseline testing
 - If the internet path meets SLA criteria, the controller may select it over the overlay
 - Use is policy-controlled per traffic class
 
@@ -285,11 +295,11 @@ This architecture ensures a flexible and policy-driven approach to overlay routi
 
 ### VPP Router Responsibilities
 
-- Forward traffic via SRv6 or WireGuard interfaces
+- Forward traffic via SRv6 or encrypted tunnel interfaces
 - Maintain static tunnel interfaces and apply centrally-issued segment lists
 - Apply updates every ten minutes via config polling
 
-### Sidecar Agent Responsibilities
+### Galactic-Agent Responsibilities
 
 - Execute all probing tasks
 - Poll for config from Fastly-backed API
@@ -304,7 +314,7 @@ This architecture ensures a flexible and policy-driven approach to overlay routi
 
 ## Observability and Monitoring
 
-NPMS includes built-in observability features to ensure that developers, operators, and tenants can monitor network performance in real-time and over time. Observability is scoped per tenant and integrates seamlessly with SLA and policy logic.
+Galactic VPC includes built-in observability features to ensure that developers, operators, and tenants can monitor network performance in real-time and over time. Observability is scoped per tenant and integrates seamlessly with SLA and policy logic.
 
 ### Core Observability Capabilities
 
@@ -342,12 +352,23 @@ a service." We have envisioned the concept and initial behaviour of core nodes
 and edge nodes. Future work for us to consider:
 
 - How does traffic arrive at a Galactic VPC from a Datum Gateway (Anycast Envoy
-  Proxy)?
+  Proxy)? - Traffic is steered to Datum Gateways via DNS, default route, Datum agent
+            tunnels
+          - Edge traffic is routed to backend/origin/upstream using encrypted tunnel
+            interfaces - QUIC tunnels
   How can traffic egress from a Galactic VPC to the Internet (e.g. Datum CGNAT)?
+  - Through NAT gateways
   How can traffic ingress/egress from other application providers (e.g. AWS
   PrivateLink)?
+  -Traffic lands on native IPv4/IPV6 on Datum Edges and is encapsulated to destinations
+   such as DCs, Proxies in QUIC tunnels.  Traffic is always routed at higher layers
+  application/agent/services into overlay tunnels.
   How can traffic ingress/egress from other physical networks via cross
   connects, IXPs, NNIs, or Network as a Service Providers?
+   -Traffic typically is finally destined to a cloud service (eg DynamoDB) or DC or Enterprise
+   -Peer at the NNI or IXP route to Datum edge
+   -Proxy to named service using encrypted tunnels 
+    
 
 ## Glossary
 
@@ -356,7 +377,7 @@ and edge nodes. Future work for us to consider:
 - **Edge Node**: A VPP router deployed adjacent to a customer's workload
 - **FEC**: Forward Error Correction: Adds redundancy to recover from packet loss without retransmission
 - **iPerf**: Tool used to measure available bandwidth
-- **Overlay Network**: Path-controlled fabric using SRv6 and WireGuard
+- **Overlay Network**: Path-controlled fabric using SRv6 and encrypted tunnels
 - **Path Computation Engine**: Computes best paths using performance graph and policies
 - **Probing**: Active synthetic measurements between nodes
 - **Sidecar**: Container handling telemetry, probing, and config sync
@@ -366,15 +387,17 @@ and edge nodes. Future work for us to consider:
 - **Telemetry**: Time-series data collected from probes
 - **VPP**: Vector Packet Processing, the high-performance data plane
 - **WireGuard**: VPN protocol for tunneling over the public internet
+- **QUIC**: Encrypted tunnels over UDP
+- 
 
 # Business Benefits & Messaging Strategy for NPMS
 
 ## Business Benefits of the Network Performance Management System (NPMS)
 
 ### 🔐 1. Improved Application Performance and Reliability
-- Deliver deterministic, SLA-backed paths for critical applications
-- Guarantee low latency or lossless delivery per traffic class
-- Ensure high bandwidth or FEC-assisted delivery for bulk and sensitive flows
+- Deliver deterministic, SLA-backed paths for critical applications 
+- Guarantee low latency or lossless delivery per traffic class eg inference
+- Ensure high bandwidth or FEC-assisted delivery for bulk and sensitive flows eg backups
 
 ### 🌐 2. Geopolitical Routing Control
 - Enforce customer-specific regional exclusions (e.g., "never traverse India")
@@ -407,7 +430,8 @@ and edge nodes. Future work for us to consider:
 
 ### 👩‍💻 For Software Developers and Network Engineers
 
-> "This is the network as code. Think: a programmable substrate that reacts in real time to conditions like loss, latency, or bandwidth bottlenecks."
+> "This is the network as code, network comes to your app/agent 
+  Think: a programmable substrate that reacts in real time to conditions like loss, latency, or bandwidth bottlenecks.
 
 **Key Selling Points:**
 - Full API control
