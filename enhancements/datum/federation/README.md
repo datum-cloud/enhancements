@@ -142,6 +142,49 @@ flowchart LR
   federator-b <--> datum-pop-a-cell-b & datum-pop-b-cell-b
 ```
 
+#### Launch Architecture
+
+```mermaid
+flowchart LR
+
+  subgraph core["Core Control Plane"]
+    datum-core-api["Datum API"]@{shape: procs}
+    project-api-servers-a["Project A - Virt API Server"]
+    project-api-servers-b["Project A - Virt API Server"]
+
+    datum-core-api <--> project-api-servers-a
+    datum-core-api <--> project-api-servers-b
+  end
+
+  subgraph upstream-cell-a["Control Plane Cell A"]
+    operators-a["Operators"]@{shape: procs}
+  end
+
+  subgraph federation["Federation (Karmada)"]
+
+    federation-apiserver-a["API Server"]@{shape: procs}
+    federator-a["PropagationPolicies"]@{shape: procs}
+
+  end
+
+
+  operators-a <--> federation-apiserver-a
+
+  subgraph datum-pop-a["Datum POP"]
+    datum-pop-a-cell-a["Cell A"]
+  end
+
+  subgraph datum-pop-b["Datum POP"]
+    datum-pop-b-cell-a["Cell A"]
+  end
+
+  project-api-servers-a <--> operators-a
+  project-api-servers-b <--> operators-a
+
+  federation-apiserver-a <--> federator-a
+  federator-a  <--> datum-pop-a-cell-a & datum-pop-b-cell-a
+```
+
 #### MVP Architecture
 
 ```mermaid
