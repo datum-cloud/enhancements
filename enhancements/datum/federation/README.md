@@ -150,7 +150,7 @@ flowchart LR
   subgraph core["Core Control Plane"]
     datum-core-api["Datum API"]@{shape: procs}
     project-api-servers-a["Project A - Virt API Server"]
-    project-api-servers-b["Project A - Virt API Server"]
+    project-api-servers-b["Project B - Virt API Server"]
 
     datum-core-api <--> project-api-servers-a
     datum-core-api <--> project-api-servers-b
