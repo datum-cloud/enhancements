@@ -143,15 +143,15 @@ proposal will be implemented, this is the place to discuss them.
 - Managed by a connector controller. This may be a daemon on a user controlled
   machine, or internal control plane software.
 - Defines capabilities and settings supported by the connector. For example:
-  - `masque`: Supports MASQUE connections (QUIC, HTTP3, MASQUE protocols).
-  - `http2`: Supports HTTP2 connections, useful for clients that don't support
+  - `MASQUE`: Supports MASQUE connections (QUIC, HTTP3, MASQUE protocols).
+  - `HTTP2`: Supports HTTP2 connections, useful for clients that don't support
     QUIC/HTTP3.
-  - `connectTCP`: Supports accepting HTTP CONNECT requests.
-  - `connectUDP`: Supports accepting HTTP CONNECT-UDP requests.
-  - `connectIP`: Supports accepting HTTP CONNECT-IP requests.
-  - `otel`: Supports requesting OTEL (Metrics, Traces, Logs) to be pushed back
+  - `CONNECT-TCP`: Supports accepting HTTP CONNECT requests.
+  - `CONNECT-UDP`: Supports accepting HTTP CONNECT-UDP requests.
+  - `CONNECT-IP`: Supports accepting HTTP CONNECT-IP requests.
+  - `OTEL`: Supports requesting OTEL (Metrics, Traces, Logs) to be pushed back
     over the requesting stream.
-  - `health`: Supports requesting health information via the [health/v1][grpc-health]
+  - `GRPC_HEALTH`: Supports requesting health information via the [health/v1][grpc-health]
     service API.
 - Capabilities are defined explicitly in the API structure. Each capability may
   have additional settings that can be defined.
@@ -169,29 +169,32 @@ metadata:
   namespace: default
 spec:
   connectorClassName: datum-connect
+  # Sparse list of capabilities. If a capability is omitted, it will not be
+  # known as available for the connector.
   capabilities:
-    masque:
-      # Enables QUIC listener that handles MASQUE protocols
+    # Enables QUIC listener that handles MASQUE protocols
+    - type: MASQUE
       enabled: true
-    http2:
-      # No HTTP2 listener
+    # No HTTP2 listener. Can also simply be omitted from the capabilities list.
+    - type: HTTP2
       enabled: false
-    connectTCP:
+    - type: CONNECT-TCP
       enabled: true
-    connectUDP:
+    - type: CONNECT-UDP
       enabled: true
-    connectIP:
+    - type: CONNECT-IP
       enabled: true
-      settings:
+      connectIP:
         mtu: 1400
-    otel:
-      metrics:
-        enabled: true
-      traces:
-        enabled: false
-      logs:
-        enabled: true
-    health:
+    - type: OTEL
+      otel:
+        metrics:
+          enabled: true
+        traces:
+          enabled: false
+        logs:
+          enabled: true
+    - type: GRPC_HEALTH
       enabled: true
   connectionDetails:
     type: PublicKey
