@@ -196,12 +196,6 @@ spec:
           enabled: true
     - type: GRPC_HEALTH
       enabled: true
-  connectionDetails:
-    type: PublicKey
-    publicKey:
-      value: 2ovpybgj3snjmchns44pfn6dbwmdiu4ogfd66xyu72ghexllv6hq
-      relayServers:
-        - https://use1-1.relay.n0.iroh.iroh.link
 status:
   capabilities:
     masque:
@@ -238,6 +232,12 @@ status:
       reason: ConnectorReady
       status: "True"
       type: Ready
+  connectionDetails:
+    type: PublicKey
+    publicKey:
+      value: 2ovpybgj3snjmchns44pfn6dbwmdiu4ogfd66xyu72ghexllv6hq
+      relayServers:
+        - https://use1-1.relay.n0.iroh.iroh.link
 ```
 
 [grpc-health]: https://github.com/grpc/grpc-proto/blob/master/grpc/health/v1/health.proto
