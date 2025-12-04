@@ -198,7 +198,7 @@ spec:
       enabled: true
 status:
   capabilities:
-    masque:
+    - type: MASQUE
       conditions:
         - lastTransitionTime: "2025-11-19T14:57:03Z"
           message: The connector is ready to accept MASQUE requests
@@ -206,7 +206,7 @@ status:
           reason: ListenerReady
           status: "True"
           type: Ready
-    connectIP:
+    - type: CONNECT-IP
       conditions:
         - lastTransitionTime: "2025-11-19T14:57:03Z"
           message: The connector does not support CONNECT-IP
@@ -214,7 +214,7 @@ status:
           reason: NotSupportedByVersion
           status: "False"
           type: Ready
-    otel:
+    - type: OTEL
       conditions:
         - lastTransitionTime: "2025-11-19T14:57:03Z"
           message: The connector has established an OTLP connection and is publishing telemetry.
@@ -236,8 +236,7 @@ status:
     type: PublicKey
     publicKey:
       value: 2ovpybgj3snjmchns44pfn6dbwmdiu4ogfd66xyu72ghexllv6hq
-      relayServers:
-        - https://use1-1.relay.n0.iroh.iroh.link
+      discoveryMode: DNS
 ```
 
 [grpc-health]: https://github.com/grpc/grpc-proto/blob/master/grpc/health/v1/health.proto
