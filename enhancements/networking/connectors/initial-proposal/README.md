@@ -235,8 +235,13 @@ status:
   connectionDetails:
     type: PublicKey
     publicKey:
-      value: 2ovpybgj3snjmchns44pfn6dbwmdiu4ogfd66xyu72ghexllv6hq
+      id: 2ovpybgj3snjmchns44pfn6dbwmdiu4ogfd66xyu72ghexllv6hq
       discoveryMode: DNS
+      homeRelay: https://use1-1.relay.n0.iroh.iroh.link
+      addresses:
+        - 151.113.91.155
+        - a64a:948d:36c5:8933:7368:e5cf:cd3f:baab
+
 ```
 
 [grpc-health]: https://github.com/grpc/grpc-proto/blob/master/grpc/health/v1/health.proto
