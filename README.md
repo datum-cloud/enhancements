@@ -53,14 +53,14 @@ slack](https://slack.datum.net/)!
   community.
 
 [Code of Conduct]:
-    https://datum-community.slack.com/docs/T07UKR149V3/F07VBF5717A
+    https://www.datum.net/handbook/policy/code-of-conduct/
 
 ## Questions or Feedback
 
-- Use the [Issues](https://github.com/datum-cloud/enhancements/issues) section
-  for anything you’d like to discuss.
+- Ask for [help](https://github.com/orgs/datum-cloud/discussions/categories/troubleshooting) in discussions
+  for any issues or troubleshooting support.
 - Label your issue (e.g., `enhancement`) for better visibility.
-- Reach out on our [community slack](https://slack.datum.net/)!
+- Reach out on our [community discord](https://link.datum.net/discord)!
 
 ---
 
