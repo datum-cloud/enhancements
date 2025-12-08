@@ -20,23 +20,20 @@ slack](https://slack.datum.net/)!
 
 ## How to Propose an Enhancement
 
-1. **Open a New Issue**
-   - Head to the [Issues](https://github.com/datum-cloud/enhancements/issues)
+1. **Submit a feature request**
+   - Head to the [Discussions Feature Request](https://github.com/orgs/datum-cloud/discussions/categories/feature-requests)
      section.
-   - Select **New Issue**, then describe your idea as clearly as possible.
+   - Select **New Discussion**, then describe your idea as clearly as possible.
 2. **Provide Details**
    - Include background, visuals, or references to help everyone understand your
      proposal.
 3. **Discuss & Refine**
    - Collaborate with maintainers and community members to refine details of the
      enhancement
-   - Formalize an [enhancement document](./enhancements/template) in the
-     relevant section of the repo. The location of the document can be decided
-     in the issue tracking the enhancement.
 
 ## Tracking Progress
 
-- We use a [GitHub Project][github-project] to show the **roadmap** of
+- We use a [GitHub Project][https://github.com/orgs/datum-cloud/projects/22] to show the **roadmap** of
   enhancements.
 - Each proposal moves from `Backlog` to `In Progress` and finally `Completed`.
 - Follow specific issues or pull requests to get notified about updates.
@@ -45,7 +42,7 @@ slack](https://slack.datum.net/)!
 
 ## Contributing
 
-- We welcome pull requests to help define improvements and enhancements
+- We welcome any and all help define [improvements and enhancements](https://github.com/orgs/datum-cloud/discussions/categories/contributing). 
 
 ## Code of Conduct
 
