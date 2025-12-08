@@ -33,7 +33,7 @@ slack](https://slack.datum.net/)!
 
 ## Tracking Progress
 
-- We use a [GitHub Project][https://github.com/orgs/datum-cloud/projects/22] to show the **roadmap** of
+- We use a [GitHub Project](https://github.com/orgs/datum-cloud/projects/22) to show the **roadmap** of
   enhancements.
 - Each proposal moves from `Backlog` to `In Progress` and finally `Completed`.
 - Follow specific issues or pull requests to get notified about updates.
