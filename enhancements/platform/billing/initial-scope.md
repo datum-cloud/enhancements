@@ -258,6 +258,9 @@ expected to shift as we get alignment around the functionality offered.
 
 ### Service Catalog
 
+- **Services** must be configured by **Service Providers** to register the
+  services that will be available to their **Consumers**.
+
 - **Service Pricing** must be configured for each **Service** a **Service
   Provider** is offering to their **Consumer**(s). Pricing must be configured
   for one-time charges, recurring charges, and usage based charges. Usage based
