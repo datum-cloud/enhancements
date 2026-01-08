@@ -158,10 +158,11 @@ the platform would expect at the completion of this enhancement.
   enabled for **Consumers**.
 - A **Service Provider** can charge a **Consumer** for a **Service** using
   one-time charges, recurring-charges, or usage-based charges.
-- A **Service Provider** is able to configure usage reported by the
-  **Telemetry** system to be billed to a **Consumer**.
+- A **Service Provider** is able to configure usage reported by a **Service** to
+  be billed to a **Consumer**.
 - A **Consumer** is able to create a billing account for their organization and
-  attach a payment profile that configures how they should be billed.
+  attach a payment profile that configures how the organization should be
+  billed.
 - A **Consumer** is able to configure the contact details for the billing
   account to ensure billing notifications are routed to the correct contact.
 - A **Consumer** is able to attach a project to a billing account so any usage
