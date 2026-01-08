@@ -122,11 +122,8 @@ List the specific goals of the Enhancement. What is it trying to achieve? How wi
 know that this has succeeded?
 -->
 
-- Define requirements for functionality that needs to be enabled to support
+- Define requirements for functionality that needs to be available to support
   billing consumer's of Datum Cloud services
-- Identify dependencies on other systems / capabilities that need to be built
-  into Milo to enable billing on Datum Cloud
-- Get alignment around what we're billing for, how consumers will be billed, and
 
 ### Non-Goals
 
