@@ -80,6 +80,7 @@ template.
     - [Goals](#goals)
     - [Non-Goals](#non-goals)
   - [Glossary](#glossary)
+  - [Functional Requirements](#functional-requirements)
   - [Proposal](#proposal)
     - [Billing](#billing)
       - [Out of Scope](#out-of-scope)
@@ -160,6 +161,32 @@ readers may find helpful.
   service offered by a **Service Provider**.
 - **Service**: A discrete service that is offered to **Consumer**(s) by a
   **Service Provider** (e.g. *Datum Cloud DNS*)
+
+## Functional Requirements
+
+This functional requirements provide clarity over functionality various users of
+the platform would expect at the completion of this enhancement.
+
+- A **Service Provider** can register a **Service** and configure the pricing
+  that can be used to charge **Consumers**. The **Service Provider** can also
+  configure every feature available with from the **Service** that may be
+  enabled for **Consumers**.
+- A **Service Provider** can charge a **Consumer** for a **Service** using
+  one-time charges, recurring-charges, or usage-based charges.
+- A **Service Provider** is able to configure usage reported by the
+  **Telemetry** system to be billed to a **Consumer**.
+- A **Consumer** is able to create a billing account for their organization and
+  attach a payment profile that configures how they should be billed.
+- A **Consumer** is able to attach a project to a billing account so any usage
+  consumed by the project is billed correctly.
+- A **Service Provider** is able to create multiple offers that **Consumers**
+  can choose from to get access to **Services** (e.g. *Free*, *Pro*,
+  *Enterprise*). An offer may provide access to multiple **Services** sold as a
+  single offer and may offer a sub-set of features available with a service.
+- A **Consumer** is able to view all publicly available offers so they can
+  choose the best one that meets their needs.
+- A **Consumer** will be invoiced at the end of each month that includes all
+  charges from **Services** they consumed.
 
 ## Proposal
 
