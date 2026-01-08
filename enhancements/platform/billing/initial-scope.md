@@ -81,17 +81,6 @@ template.
     - [Non-Goals](#non-goals)
   - [Glossary](#glossary)
   - [Functional Requirements](#functional-requirements)
-  - [Proposal](#proposal)
-    - [Billing](#billing)
-      - [Out of Scope](#out-of-scope)
-    - [Telemetry](#telemetry)
-      - [In Scope](#in-scope-1)
-      - [Out of Scope](#out-of-scope-1)
-    - [Service Catalog](#service-catalog)
-    - [Price Book](#price-book)
-    - [Quota](#quota)
-    - [User Stories](#user-stories)
-  - [Implementation History](#implementation-history)
 
 ## Summary
 
@@ -208,7 +197,7 @@ the platform would expect at the completion of this enhancement.
 - All billing resources will be auditable with the activity system so **Service
   Providers** and **Consumers** can audit the state of the system over time.
 
-## Proposal
+<!-- ## Proposal -->
 
 <!--
 This is where we get down to the specifics of what the proposal actually is.
@@ -219,15 +208,15 @@ The "Design Details" section below is for the real
 nitty-gritty.
 -->
 
-This proposal section covers the functionality or concepts that have been
+<!-- This proposal section covers the functionality or concepts that have been
 identified as in scope or out of scope of this enhancement. This list is
-expected to shift as we get alignment around the functionality offered.
+expected to shift as we get alignment around the functionality offered. -->
 
-### Billing
+<!-- ### Billing -->
 
 <!-- omit from toc -->
-#### In Scope
-
+<!-- #### In Scope -->
+<!--
 - **Billing Accounts** are organization-level resources that define how an
   organization expects to be billed for **Services**. Organization admins will
   be required to create at least one billing account when setting up an
@@ -330,7 +319,7 @@ expected to shift as we get alignment around the functionality offered.
   there's an active entitlement for the service. This _may_ require us to add
   support for feature flagging in the quota system.
 
-### User Stories
+### User Stories -->
 
 <!--
 Detail the things that people will be able to do if this Enhancement is implemented.
@@ -687,7 +676,7 @@ For each of them, fill in the following information by copying the below templat
 
 <!-- #### What steps should be taken if SLOs are not being met to determine the problem? -->
 
-## Implementation History
+<!-- ## Implementation History -->
 
 <!--
 Major milestones in the lifecycle of a Enhancement should be tracked in this section.
