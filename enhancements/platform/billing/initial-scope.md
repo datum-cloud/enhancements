@@ -91,7 +91,6 @@ template.
     - [Price Book](#price-book)
     - [Quota](#quota)
     - [User Stories](#user-stories)
-      - [Define service pricing](#define-service-pricing)
   - [Implementation History](#implementation-history)
 
 ## Summary
@@ -186,7 +185,9 @@ the platform would expect at the completion of this enhancement.
   *Enterprise*). An offer may provide access to multiple **Services** sold as a
   single offer and may offer a sub-set of features available with a service.
 - A **Consumer** is able to view all publicly available offers so they can
-  choose the best one that meets their needs.
+  choose the best one that meets their needs. A **Consumer** is able to purchase
+  an offer allowing them to access the service. A **Consumer** is able to cancel
+  their services at any time.
 - A **Consumer** will be invoiced at the end of each month that includes all
   charges from **Services** they consumed. **Consumers** will be able to
   retrieve all of their invoices and download them in PDF format.
@@ -202,6 +203,8 @@ the platform would expect at the completion of this enhancement.
   refund may be partial or a full refund of the payment.
 - A **Service Provider** can write-off an invoice as bed-debt in case of
   non-payment.
+- A **Service Provider** can configure payment retry logic and escalation for
+  overdue payments.
 - All billing resources will be auditable with the activity system so **Service
   Providers** and **Consumers** can audit the state of the system over time.
 
@@ -336,7 +339,7 @@ the system. The goal here is to make this feel real for users without getting
 bogged down.
 -->
 
-#### Define service pricing
+<!-- #### Define service pricing -->
 
 <!-- #### Story 2 -->
 
