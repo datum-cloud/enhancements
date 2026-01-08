@@ -177,6 +177,8 @@ the platform would expect at the completion of this enhancement.
   **Telemetry** system to be billed to a **Consumer**.
 - A **Consumer** is able to create a billing account for their organization and
   attach a payment profile that configures how they should be billed.
+- A **Consumer** is able to configure the contact details for the billing
+  account to ensure billing notifications are routed to the correct contact.
 - A **Consumer** is able to attach a project to a billing account so any usage
   consumed by the project is billed correctly.
 - A **Service Provider** is able to create multiple offers that **Consumers**
@@ -186,7 +188,22 @@ the platform would expect at the completion of this enhancement.
 - A **Consumer** is able to view all publicly available offers so they can
   choose the best one that meets their needs.
 - A **Consumer** will be invoiced at the end of each month that includes all
-  charges from **Services** they consumed.
+  charges from **Services** they consumed. **Consumers** will be able to
+  retrieve all of their invoices and download them in PDF format.
+- A **Service Provider** can charge the payment profile configured for a
+  **Consumer**'s billing account for any outstanding invoices. Payments must
+  automatically be reconciled against invoices.
+- A **Consumer** should be able to view all payment history for their billing
+  account, including successful and failed payments.
+- A **Service Provider** can suspend a **Consumer**'s billing account if they do
+  not pay their bills on time. A **Consumer**'s billing contacts should receive
+  a notification before a billing account is suspended for non-payment.
+- A **Service Provider** can issue a refund for a **Consumer**'s payment. A
+  refund may be partial or a full refund of the payment.
+- A **Service Provider** can write-off an invoice as bed-debt in case of
+  non-payment.
+- All billing resources will be auditable with the activity system so **Service
+  Providers** and **Consumers** can audit the state of the system over time.
 
 ## Proposal
 
