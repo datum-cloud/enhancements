@@ -306,7 +306,11 @@ Controller responsibilities:
 
 DNSZone Controller
 - Ensure provider zone exists (Master/Native for effective Primary; Slave for effective Secondary).
-- Program records from `DNSRecordSet` only when effective role is Primary.
+- Records:
+  - When effective role is Primary, program provider state from `DNSRecordSet`.
+  - When effective role is Secondary, ingest imported zone data from the transfer plane and
+    materialize a read-only record inventory (e.g., controller-owned `DNSRecordSet` objects or
+    internal canonical records). User-initiated record mutations are rejected.
 - Derive and set `status.role`:
   - `Secondary` if an associated `ZoneTransfer` with `role: Secondary` exists and is Ready.
   - `Primary` otherwise.
