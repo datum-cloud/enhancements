@@ -186,25 +186,62 @@ Controller responsibilities:
   - Set `OwnerReference` on `TSIGKey` to parent `DNSZone`.
   - Set `OwnerReference` on generated `Secret` to the `TSIGKey` (not on BYO `Secret`).
 
-#### 2) `DNSZone` (updated CRD)
+#### 2) `ZoneTransfer` (new CRD)
 
-Purpose: Represents an authoritative DNS zone served by Datum.
+Purpose: Represents a zone transfer configuration associated with a `DNSZone`.
+Supports both importing from an upstream primary (Secondary behavior) and
+exporting transfers from a Datum primary to external secondaries.
 
-Supports:
-- Primary: Datum is the source of truth.
-- Secondary: Datum mirrors an upstream primary via AXFR/IXFR (TSIG required).
+Spec overview:
 
-DNS‑native fields:
-- `role`: `Primary` | `Secondary`
-- `masters`: upstream primaries for Secondary zones
-- `transfer`: transfer configuration (presence implies transfers are configured)
+```yaml
+apiVersion: dns.datum.net/v1alpha1
+kind: ZoneTransfer
+metadata:
+  name: example-com-import
+spec:
+  zoneRef:
+    name: example-com
+    # namespace: default
+  # Discriminator indicating the DNS role this transfer config represents
+  role: Secondary # or Primary
+  # Exactly one of 'secondary' or 'primary' must be specified, matching 'role'
+  secondary:
+    masters:
+      - 198.51.100.10
+      - 198.51.100.11
+    tsigKeyRef:
+      name: example-com-upstream
+  # primary:
+  #   tsigKeyRef:
+  #     name: example-com-xfr
+```
 
 Rules:
-- `role=Secondary`: `masters` required; `transfer.tsigKeyRef` required.
-- `role=Primary`: `masters` must be empty; `transfer` optional but if present,
-  `transfer.tsigKeyRef` is required (recommended to enforce).
+- `spec.role` is required and must be `Primary` or `Secondary`.
+- Each `ZoneTransfer` must specify exactly one of `secondary` or `primary`,
+  and it must match `spec.role`.
+- At most one `ZoneTransfer` with `role: Secondary` per `DNSZone` (v1).
+- At most one `ZoneTransfer` with `role: Primary` per `DNSZone` (v1).
+- `secondary` requires non-empty `masters` and a `tsigKeyRef`.
+- `primary` requires a `tsigKeyRef`.
+- `spec.zoneRef` must reference a `DNSZone` in the same namespace.
 
-Spec skeleton:
+Status (illustrative):
+
+```yaml
+status:
+  conditions:
+  - type: Ready
+    status: "True"
+  lastSyncSerial: 2025012301
+  lastSyncTime: "2026-01-08T12:00:00Z"
+  lastError: ""
+```
+
+Examples:
+
+Primary zone (no transfers):
 
 ```yaml
 apiVersion: dns.datum.net/v1alpha1
@@ -214,72 +251,87 @@ metadata:
 spec:
   domainName: example.com
   dnsZoneClassName: datum-edge
-  role: Primary # or Secondary
-  # Secondary-only:
-  # masters:
-  #   - 198.51.100.10
-  #   - 198.51.100.11
-  # Transfer configuration:
-  # - Primary: optional; if present, enables outbound AXFR/IXFR from Datum
-  # - Secondary: required; used when pulling from masters
-  # transfer:
-  #   tsigKeyRef:
-  #     name: example-com-xfr
 ```
 
-Examples:
-
-Primary zone (default, no transfers):
+Enable outbound transfers for a primary:
 
 ```yaml
+apiVersion: dns.datum.net/v1alpha1
+kind: ZoneTransfer
+metadata:
+  name: example-com-export
 spec:
-  domainName: example.com
-  dnsZoneClassName: datum-edge
+  zoneRef:
+    name: example-com
   role: Primary
-```
-
-Primary zone with outbound transfers enabled:
-
-```yaml
-spec:
-  domainName: example.com
-  dnsZoneClassName: datum-edge
-  role: Primary
-  transfer:
+  primary:
     tsigKeyRef:
       name: example-com-xfr
 ```
 
-Secondary zone (TSIG required; transfers required):
+Configure a secondary (pull from upstream):
 
 ```yaml
+apiVersion: dns.datum.net/v1alpha1
+kind: DNSZone
+metadata:
+  name: example-com
 spec:
   domainName: example.com
   dnsZoneClassName: datum-edge
+---
+apiVersion: dns.datum.net/v1alpha1
+kind: ZoneTransfer
+metadata:
+  name: example-com-import
+spec:
+  zoneRef:
+    name: example-com
   role: Secondary
-  masters:
-    - 198.51.100.10
-    - 198.51.100.11
-  transfer:
+  secondary:
+    masters:
+      - 198.51.100.10
+      - 198.51.100.11
     tsigKeyRef:
       name: example-com-upstream
 ```
 
+#### 3) `DNSZone` (updated CRD)
+
+Purpose: Represents an authoritative DNS zone served by Datum.
+The desired role is not configured directly on the spec; instead, the effective
+role is derived from the presence (or absence) of an associated `ZoneTransfer` with `role: Secondary`.
+
 Controller responsibilities:
 
 DNSZone Controller
-- `role=Primary`:
-  - Ensure provider zone exists as Master/Native per class.
-  - If `spec.transfer` present: resolve Ready `TSIGKey`, read `status.tsigKeyID`,
-    and configure PowerDNS to allow AXFR/IXFR using that key
-    (maps to PDNS primary-side TSIG wiring: `master_tsig_key_ids` / TSIG-ALLOW-AXFR).
-- `role=Secondary`:
+- Ensure provider zone exists (Master/Native for effective Primary; Slave for effective Secondary).
+- Program records from `DNSRecordSet` only when effective role is Primary.
+- Derive and set `status.role`:
+  - `Secondary` if an associated `ZoneTransfer` with `role: Secondary` exists and is Ready.
+  - `Primary` otherwise.
+- Track zone status/conditions.
+
+ZoneTransfer Controller
+- `role: Secondary` (Secondary behavior):
   - Ensure provider zone exists as Slave.
-  - Configure `masters[]`.
-  - Require `spec.transfer.tsigKeyRef`; resolve Ready `TSIGKey`, read `status.tsigKeyID`,
-    and configure PowerDNS to pull using that key
-    (maps to PDNS secondary-side TSIG wiring: `slave_tsig_key_ids`).
-  - Track transfer health in status/conditions (serial, last sync, last error).
+  - Configure `masters[]` and TSIG pull (maps to PDNS `slave_tsig_key_ids`).
+  - Track transfer health in `ZoneTransfer.status` (serial, last sync, last error).
+- `role: Primary` (Primary outbound transfers):
+  - Ensure provider zone exists as Master/Native.
+  - Resolve Ready `TSIGKey`, read `status.tsigKeyID`, and configure PDNS to allow AXFR/IXFR using that key
+    (maps to PDNS primary-side TSIG wiring: `master_tsig_key_ids` / TSIG-ALLOW-AXFR).
+  - Track readiness in `ZoneTransfer.status`.
+
+Record visibility and role switching:
+- Effective Secondary (`ZoneTransfer` with `role: Secondary` present and Ready) is read-only from a records perspective:
+  - Mutations via `DNSRecordSet` are rejected.
+  - A read-only record inventory reflecting the imported zone is exposed (API/UI design TBD).
+- Switching roles is lifecycle-driven:
+  - Secondary → Primary: delete the `ZoneTransfer` with `role: Secondary`. Adopt the currently imported data
+    as the initial source-of-truth; subsequent mutations are allowed.
+  - Primary → Secondary: create a `ZoneTransfer` with `role: Secondary`, `secondary.masters`, and `secondary.tsigKeyRef`.
+    Mutations are disabled; imported data becomes authoritative.
 
 Transfer Plane Runtime:
 - `xfr1.datumdomains.net` maps to a static IP (LB / reserved address).
@@ -291,14 +343,20 @@ Security Model:
 - TSIG is the DNS-layer authorization mechanism.
 - Secondary zones always require TSIG to avoid IP‑trust; simplifies multi‑tenant safety.
 - Default deny:
-  - No outbound transfers unless `role=Primary` and `transfer` present.
-  - No secondary imports unless `role=Secondary` + `masters[]` + `transfer.tsigKeyRef`.
+  - No outbound transfers unless a `ZoneTransfer` with `role: Primary` exists and is Ready.
+  - No secondary imports unless a `ZoneTransfer` with `role: Secondary` exists and is Ready.
 
 Invariants / Validation Rules:
-- `role=Secondary`: `masters` required; `transfer` required; `transfer.tsigKeyRef` required.
-- `role=Primary`: `masters` must be empty; if `transfer` present then `transfer.tsigKeyRef` required.
+- `spec.role` must be set to `Primary` or `Secondary`.
+- Each `ZoneTransfer` must specify exactly one of `secondary` or `primary`, matching `spec.role`.
+- At most one `ZoneTransfer` with `role: Secondary` per `DNSZone` (v1).
+- At most one `ZoneTransfer` with `role: Primary` per `DNSZone` (v1).
+- `secondary` requires non-empty `masters` and a `tsigKeyRef`.
+- `primary` requires a `tsigKeyRef`.
+- When a `ZoneTransfer` with `role: Secondary` is Ready for a `DNSZone`, `DNSRecordSet` mutations for that zone are not allowed.
 - All `TSIGKeyRef`s must point to a Ready `TSIGKey`.
 - TSIG `Secret`s must contain `name`, `algorithm`, `secret`.
+- `TSIGKey.spec.zoneRef` must reference a `DNSZone` in the same namespace (cross-namespace refs disallowed).
 
 ## Production Readiness Review Questionnaire
 
@@ -438,7 +496,25 @@ TBD
 
 ## Alternatives
 
-TBD
+- Embed transfer configuration directly on `DNSZone` with role-specific blocks.
+  - Shape:
+    - `spec.role: Primary|Secondary`
+    - `spec.primary.transfer.tsigKeyRef` (optional, enables outbound transfers)
+    - `spec.secondary.masters[]` + `spec.secondary.transfer.tsigKeyRef` (required)
+  - Pros:
+    - Single resource expresses zone intent; easy discovery (“open the zone”).
+    - Fewer objects to manage for simple cases.
+    - Role is explicit in spec without derivation.
+  - Cons:
+    - Couples transfer lifecycle and status to the zone; harder to promote/demote via independent lifecycles.
+    - Validation becomes more complex (mutual exclusivity of primary/secondary blocks, mutation rules).
+    - Difficult to prevent accidental “multiple transfers” semantics or to support future multiple profiles.
+    - Mixes concerns (serving vs transfer orchestration) in one CRD.
+  - Decision:
+    - Use a separate `ZoneTransfer` CRD per `DNSZone` with `role: Primary|Secondary`.
+      This cleanly separates transfer lifecycle, enables default‑deny by absence,
+      supports clearer ownership and status, and keeps `DNSZone` focused on serving/records. Revisit embedding
+      only if future requirements strongly favor inline configuration over lifecycle separation.
 
 ## Infrastructure Needed (Optional)
 
