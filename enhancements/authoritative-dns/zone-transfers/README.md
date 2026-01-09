@@ -144,7 +144,6 @@ Semantics:
     `DNSZone` to enable garbage collection when the zone is deleted.
 - `spec.keyName` required and immutable:
   - DNS TSIG wire key name (provider-visible). Not coupled to the Secret resource name.
-  - For generated `Secret`, the controller sets the secret's `name` field (wire name) to `spec.keyName`.
 - `spec.secretRef` omitted:
   - Controller generates secret material and creates/manages a `Secret` named deterministically.
 - `spec.secretRef` provided:
