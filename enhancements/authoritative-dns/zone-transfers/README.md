@@ -125,9 +125,10 @@ kind: TSIGKey
 metadata:
   name: example-com-xfr
 spec:
-  zoneRef:
+  dnsZoneRef:
     name: example-com
     # namespace: default  # optional; defaults to same namespace as TSIGKey
+  keyName: datum-example-com-xfr
   algorithm: hmac-sha256
   # optional (BYO secret):
   # secretRef:
@@ -135,12 +136,16 @@ spec:
 ```
 
 Semantics:
-- `spec.zoneRef` required:
+- `spec.dnsZoneRef` required:
   - Must reference an existing `DNSZone` (same namespace unless explicitly set).
   - Controller derives provider class/configuration from the parent `DNSZone`
     (e.g., `dnsZoneClassName`) and reconciles TSIG state accordingly.
   - Controller sets `OwnerReference` on the `TSIGKey` pointing to the parent
     `DNSZone` to enable garbage collection when the zone is deleted.
+- `spec.keyName` required and immutable:
+  - DNS TSIG wire key name (provider-visible). Not coupled to the Secret resource name.
+  - For BYO `Secret`, the secret's `name` field (wire name) should equal `spec.keyName`.
+  - For generated `Secret`, the controller sets the secret's `name` field (wire name) to `spec.keyName`.
 - `spec.secretRef` omitted:
   - Controller generates secret material and creates/manages a `Secret` named deterministically.
 - `spec.secretRef` provided:
@@ -150,7 +155,7 @@ Deterministic Secret naming (generated mode):
 - `<tsigKey.metadata.name>-tsig` (e.g., `example-com-xfr-tsig`)
 
 TSIG Secret schema (canonical):
-- Keys: `name` (wire key name), `algorithm` (e.g., `hmac-sha256`), `secret` (shared secret value)
+- Keys: `name` (wire key name; should equal `spec.keyName`), `algorithm` (e.g., `hmac-sha256`), `secret` (shared secret value)
 
 Example:
 
@@ -185,6 +190,9 @@ Controller responsibilities:
 - Ownership and GC:
   - Set `OwnerReference` on `TSIGKey` to parent `DNSZone`.
   - Set `OwnerReference` on generated `Secret` to the `TSIGKey` (not on BYO `Secret`).
+- Validate `keyName` consistency:
+  - Ensure the secret schema `name` (wire name) matches `spec.keyName` (BYO and generated).
+  - Ensure the provider TSIG key wire name equals `spec.keyName`; reconcile if drift is detected.
 
 #### 2) `ZoneTransfer` (new CRD)
 
@@ -200,7 +208,7 @@ kind: ZoneTransfer
 metadata:
   name: example-com-import
 spec:
-  zoneRef:
+  dnsZoneRef:
     name: example-com
     # namespace: default
   # Discriminator indicating the DNS role this transfer config represents
@@ -225,7 +233,7 @@ Rules:
 - At most one `ZoneTransfer` with `role: Primary` per `DNSZone` (v1).
 - `secondary` requires non-empty `masters` and a `tsigKeyRef`.
 - `primary` requires a `tsigKeyRef`.
-- `spec.zoneRef` must reference a `DNSZone` in the same namespace.
+- `spec.dnsZoneRef` must reference a `DNSZone` in the same namespace.
 
 Status (illustrative):
 
@@ -261,7 +269,7 @@ kind: ZoneTransfer
 metadata:
   name: example-com-export
 spec:
-  zoneRef:
+  dnsZoneRef:
     name: example-com
   role: Primary
   primary:
@@ -285,7 +293,7 @@ kind: ZoneTransfer
 metadata:
   name: example-com-import
 spec:
-  zoneRef:
+  dnsZoneRef:
     name: example-com
   role: Secondary
   secondary:
@@ -360,7 +368,7 @@ Invariants / Validation Rules:
 - When a `ZoneTransfer` with `role: Secondary` is Ready for a `DNSZone`, `DNSRecordSet` mutations for that zone are not allowed.
 - All `TSIGKeyRef`s must point to a Ready `TSIGKey`.
 - TSIG `Secret`s must contain `name`, `algorithm`, `secret`.
-- `TSIGKey.spec.zoneRef` must reference a `DNSZone` in the same namespace (cross-namespace refs disallowed).
+- `TSIGKey.spec.dnsZoneRef` must reference a `DNSZone` in the same namespace (cross-namespace refs disallowed).
 
 ## Production Readiness Review Questionnaire
 
