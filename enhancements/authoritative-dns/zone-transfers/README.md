@@ -214,8 +214,9 @@ spec:
   # Exactly one of 'secondary' or 'primary' must be specified, matching 'role'
   secondary:
     masters:
-      - 198.51.100.10
-      - 198.51.100.11
+      - address: 198.51.100.10
+      - address: 198.51.100.11
+        port: 5353
     tsigKeyRef:
       name: example-com-upstream
   # primary:
@@ -230,6 +231,8 @@ Rules:
 - At most one `ZoneTransfer` with `role: Secondary` per `DNSZone` (v1).
 - At most one `ZoneTransfer` with `role: Primary` per `DNSZone` (v1).
 - `secondary` requires non-empty `masters` and a `tsigKeyRef`.
+  - `masters[*].address` is required (IPv4/IPv6 or hostname).
+  - `masters[*].port` is optional; defaults to 53; valid range 1–65535.
 - `primary` requires a `tsigKeyRef`.
 - `spec.dnsZoneRef` must reference a `DNSZone` in the same namespace.
 
@@ -296,8 +299,9 @@ spec:
   role: Secondary
   secondary:
     masters:
-      - 198.51.100.10
-      - 198.51.100.11
+      - address: 198.51.100.10
+      - address: 198.51.100.11
+        port: 5353
     tsigKeyRef:
       name: example-com-upstream
 ```
