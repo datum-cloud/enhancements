@@ -36,7 +36,7 @@ using TSIG. The initial provider backend is PowerDNS.
 The design is DNS‑native and Kubernetes‑idiomatic by separating:
 - user intent (CustomResourceDefinitions),
 - secret material (Kubernetes `Secret` objects), and
-- provider plumbing (opaque provider IDs in `.status`).
+- provider plumbing (provider-specific identifiers and computed names in `.status`).
 
 Transfers occur on a dedicated transfer plane. Anycast edge nameservers continue
 to serve DNS from replicated canonical state and do not perform transfer
@@ -97,38 +97,55 @@ N/A
 
 ### Risks and Mitigations
 
-- Misconfiguration of TSIG keys → mitigate via `TSIGKey` schema validation and
+- Misconfiguration of TSIG keys → mitigate via `DNSZoneTsigKey` schema validation and
   provider reconciliation; surface readiness and conditions.
 - Transfer plane exposure → restrict endpoints, require TSIG, optionally use
   Cloud NAT for stable egress IP.
-- Multi‑tenant safety → default deny; explicit `transfer` and Ready `TSIGKey`
-  required for any transfer activity.
+- Multi‑tenant safety → default deny with explicit transfer intent and per-zone TSIG key name isolation:
+  - Transfers are only enabled when a `ZoneTransfer` exists (explicit intent) and its referenced `DNSZoneTsigKey` is Ready.
+  - `DNSZoneTsigKey` is zone-scoped and its computed key name must match the zone domain (apex or subdomain),
+    preventing accidental cross-tenant/cross-zone key name reuse.
 
 ## Design Details
 
 ### APIs
 
-#### 1) `TSIGKey` (new CRD)
+#### 1) `DNSZoneTsigKey` (new CRD)
 
-Purpose: Represents a DNS TSIG key used to authenticate zone transfers.
+Purpose: Represents a DNS TSIG key used to authenticate zone transfers for a single `DNSZone`.
 The controller either:
 - Generates secret material and creates a `Secret` (default), or
 - Uses an existing `Secret` (BYO) without mutating it.
 
-The controller provisions the PowerDNS TSIG key and exposes its opaque ID in `status.tsigKeyID`.
+The controller provisions the PowerDNS TSIG key and exposes the computed TSIG key name
+(FQDN) in `status.tsigKeyName`.
+
+Why zone-scoped (initially):
+- Limits blast radius: a compromised/misused key affects only one zone.
+- Keeps ownership and lifecycle simple and safe: keys are garbage-collected with the zone.
+- Avoids cross-zone sharing semantics while we converge on API ergonomics and tenancy boundaries.
+- Leaves room for the future: we can later introduce a more global/shared key object (e.g., a `DNSTsigKey`)
+  and optionally allow `ZoneTransfer` to reference either the zone-scoped or shared variant.
 
 Minimal Spec:
 
 ```yaml
 apiVersion: dns.datum.net/v1alpha1
-kind: TSIGKey
+kind: DNSZoneTsigKey
 metadata:
   name: example-com-xfr
 spec:
   dnsZoneRef:
+    # LocalObjectReference to the DNSZone
     name: example-com
-    # namespace: default  # optional; defaults to same namespace as TSIGKey
-  keyName: datum-example-com-xfr
+  # DNS TSIG wire key name. Can be either:
+  # - a fully-qualified domain name (FQDN), OR
+  # - a relative name / subdomain, in which case the zone name is appended.
+  #
+  # Examples for zone `example.com`:
+  # - "xfr.example.com" (FQDN form)
+  # - "xfr" or "xfr.transfer" (relative form; becomes "xfr.example.com" / "xfr.transfer.example.com")
+  keyName: xfr
   algorithm: hmac-sha256
   # optional (BYO secret):
   # secretRef:
@@ -140,20 +157,26 @@ Semantics:
   - Must reference an existing `DNSZone` (same namespace unless explicitly set).
   - Controller derives provider class/configuration from the parent `DNSZone`
     (e.g., `dnsZoneClassName`) and reconciles TSIG state accordingly.
-  - Controller sets `OwnerReference` on the `TSIGKey` pointing to the parent
+  - Controller sets `ControllerReference` on the `DNSZoneTsigKey` pointing to the parent
     `DNSZone` to enable garbage collection when the zone is deleted.
 - `spec.keyName` required and immutable:
   - DNS TSIG wire key name (provider-visible). Not coupled to the Secret resource name.
+  - The controller always computes a wire key name as an FQDN; a trailing `.` is optional.
+  - The computed FQDN must match the zone domain: it must be either the zone apex or a subdomain of `DNSZone.spec.domainName`.
+  - `spec.keyName` may be either:
+    - an FQDN (with or without a trailing `.`), used as-is, or
+    - a relative name / subdomain, in which case the controller appends the zone name to form an FQDN
+      (e.g., `xfr` + `example.com` → `xfr.example.com` or `xfr.example.com.`).
 - `spec.secretRef` omitted:
   - Controller generates secret material and creates/manages a `Secret` named deterministically.
 - `spec.secretRef` provided:
   - Controller reads existing `Secret` (must exist), validates schema, and never overwrites secret material.
 
 Deterministic Secret naming (generated mode):
-- `<tsigKey.metadata.name>-tsig` (e.g., `example-com-xfr-tsig`)
+- `<dnsZoneTsigKey.metadata.name>` (e.g., `example-com-xfr`)
 
 TSIG Secret schema (canonical):
-- Keys: `name` (wire key name; should equal `spec.keyName`), `algorithm` (e.g., `hmac-sha256`), `secret` (shared secret value)
+- Keys: `secret` (shared secret value)
 
 Example:
 
@@ -161,11 +184,9 @@ Example:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: example-com-xfr-tsig
+  name: example-com-xfr
 type: Opaque
 stringData:
-  name: datum-example-com-xfr
-  algorithm: hmac-sha256
   secret: <shared-secret>
 ```
 
@@ -173,8 +194,8 @@ Status:
 
 ```yaml
 status:
-  secretName: example-com-xfr-tsig
-  tsigKeyID: "b7b4c8a2-..."
+  secretName: example-com-xfr
+  tsigKeyName: xfr.example.com.
   conditions:
   - type: Ready
     status: "True"
@@ -184,13 +205,12 @@ Controller responsibilities:
 - Resolve or generate `Secret`.
 - Validate secret schema.
 - Create/ensure PowerDNS TSIG key exists and matches secret material.
-- Write `status.tsigKeyID` and conditions.
+- Write `status.tsigKeyName` and conditions.
 - Ownership and GC:
-  - Set `OwnerReference` on `TSIGKey` to parent `DNSZone`.
-  - Set `OwnerReference` on generated `Secret` to the `TSIGKey` (not on BYO `Secret`).
+  - Set `ControllerReference` on `DNSZoneTsigKey` to parent `DNSZone`.
+  - Set `ControllerReference` on generated `Secret` to the `DNSZoneTsigKey` (not on BYO `Secret`).
 - Validate `keyName` consistency:
-  - Ensure the secret schema `name` (wire name) matches `spec.keyName` (BYO and generated).
-  - Ensure the provider TSIG key wire name equals `spec.keyName`; reconcile if drift is detected.
+  - Ensure the provider TSIG key wire name equals the computed wire name for `spec.keyName`; reconcile if drift is detected.
 
 #### 2) `ZoneTransfer` (new CRD)
 
@@ -218,9 +238,11 @@ spec:
       - address: 198.51.100.11
         port: 5353
     tsigKeyRef:
+      kind: DNSZoneTsigKey
       name: example-com-upstream
   # primary:
   #   tsigKeyRef:
+  #     kind: DNSZoneTsigKey
   #     name: example-com-xfr
 ```
 
@@ -275,6 +297,7 @@ spec:
   role: Primary
   primary:
     tsigKeyRef:
+      kind: DNSZoneTsigKey
       name: example-com-xfr
 ```
 
@@ -303,6 +326,7 @@ spec:
       - address: 198.51.100.11
         port: 5353
     tsigKeyRef:
+      kind: DNSZoneTsigKey
       name: example-com-upstream
 ```
 
@@ -333,7 +357,7 @@ ZoneTransfer Controller
   - Track transfer health in `ZoneTransfer.status` (serial, last sync, last error).
 - `role: Primary` (Primary outbound transfers):
   - Ensure provider zone exists as Master/Native.
-  - Resolve Ready `TSIGKey`, read `status.tsigKeyID`, and configure PDNS to allow AXFR/IXFR using that key
+  - Resolve Ready `DNSZoneTsigKey`, read `status.tsigKeyName`, and configure PDNS to allow AXFR/IXFR using that key
     (maps to PDNS primary-side TSIG wiring: `master_tsig_key_ids` / TSIG-ALLOW-AXFR).
   - Track readiness in `ZoneTransfer.status`.
 
@@ -368,9 +392,10 @@ Invariants / Validation Rules:
 - `secondary` requires non-empty `masters` and a `tsigKeyRef`.
 - `primary` requires a `tsigKeyRef`.
 - When a `ZoneTransfer` with `role: Secondary` is Ready for a `DNSZone`, `DNSRecordSet` mutations for that zone are not allowed.
-- All `TSIGKeyRef`s must point to a Ready `TSIGKey`.
-- TSIG `Secret`s must contain `name`, `algorithm`, `secret`.
-- `TSIGKey.spec.dnsZoneRef` must reference a `DNSZone` in the same namespace (cross-namespace refs disallowed).
+- `tsigKeyRef.kind` must be supported (for v1alpha1: `DNSZoneTsigKey`).
+- `tsigKeyRef.name` must point to a Ready TSIG key object.
+- TSIG `Secret`s must contain `secret`.
+- `DNSZoneTsigKey.spec.dnsZoneRef` must reference a `DNSZone` in the same namespace (cross-namespace refs disallowed).
 
 ## Production Readiness Review Questionnaire
 
@@ -509,6 +534,39 @@ TBD
 TBD
 
 ## Alternatives
+
+### Alternative: type-specific TSIG key reference field (`dnsZoneTsigKeyRef`)
+
+Instead of a generic `tsigKeyRef`, `ZoneTransfer` could use a type-specific field that bakes in the
+target kind.
+
+Illustrative shape:
+
+```yaml
+apiVersion: dns.datum.net/v1alpha1
+kind: ZoneTransfer
+metadata:
+  name: example-com-import
+spec:
+  dnsZoneRef:
+    name: example-com
+  role: Secondary
+  secondary:
+    masters:
+      - address: 198.51.100.10
+    dnsZoneTsigKeyRef:
+      name: example-com-upstream
+```
+
+Pros:
+- Simple UX and strong validation (field name implies the target kind).
+- Easier to generate docs/UI and avoid “kind/version” typos.
+
+Cons:
+- Harder to extend to future TSIG key object kinds without adding new fields or changing the API.
+
+Decision:
+- Use the generic `tsigKeyRef` for v1alpha1. Revisit if we decide we want a type-specific field for ergonomics.
 
 - Embed transfer configuration directly on `DNSZone` with role-specific blocks.
   - Shape:
