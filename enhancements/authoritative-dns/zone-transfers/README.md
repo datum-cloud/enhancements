@@ -237,10 +237,12 @@ spec:
       - address: 198.51.100.10
       - address: 198.51.100.11
         port: 5353
-    dnsZoneTsigKeyRef:
+    tsigKeyRef:
+      kind: DNSZoneTsigKey
       name: example-com-upstream
   # primary:
-  #   dnsZoneTsigKeyRef:
+  #   tsigKeyRef:
+  #     kind: DNSZoneTsigKey
   #     name: example-com-xfr
 ```
 
@@ -250,10 +252,10 @@ Rules:
   and it must match `spec.role`.
 - At most one `ZoneTransfer` with `role: Secondary` per `DNSZone` (v1).
 - At most one `ZoneTransfer` with `role: Primary` per `DNSZone` (v1).
-- `secondary` requires non-empty `masters` and a `dnsZoneTsigKeyRef`.
+- `secondary` requires non-empty `masters` and a `tsigKeyRef`.
   - `masters[*].address` is required (IPv4/IPv6 or hostname).
   - `masters[*].port` is optional; defaults to 53; valid range 1–65535.
-- `primary` requires a `dnsZoneTsigKeyRef`.
+- `primary` requires a `tsigKeyRef`.
 - `spec.dnsZoneRef` must reference a `DNSZone` in the same namespace.
 
 Status (illustrative):
@@ -294,7 +296,8 @@ spec:
     name: example-com
   role: Primary
   primary:
-    dnsZoneTsigKeyRef:
+    tsigKeyRef:
+      kind: DNSZoneTsigKey
       name: example-com-xfr
 ```
 
@@ -322,7 +325,8 @@ spec:
       - address: 198.51.100.10
       - address: 198.51.100.11
         port: 5353
-    dnsZoneTsigKeyRef:
+    tsigKeyRef:
+      kind: DNSZoneTsigKey
       name: example-com-upstream
 ```
 
@@ -364,7 +368,7 @@ Record visibility and role switching:
 - Switching roles is lifecycle-driven:
   - Secondary → Primary: delete the `ZoneTransfer` with `role: Secondary`. Adopt the currently imported data
     as the initial source-of-truth; subsequent mutations are allowed.
-  - Primary → Secondary: create a `ZoneTransfer` with `role: Secondary`, `secondary.masters`, and `secondary.dnsZoneTsigKeyRef`.
+  - Primary → Secondary: create a `ZoneTransfer` with `role: Secondary`, `secondary.masters`, and `secondary.tsigKeyRef`.
     Mutations are disabled; imported data becomes authoritative.
 
 Transfer Plane Runtime:
@@ -385,10 +389,11 @@ Invariants / Validation Rules:
 - Each `ZoneTransfer` must specify exactly one of `secondary` or `primary`, matching `spec.role`.
 - At most one `ZoneTransfer` with `role: Secondary` per `DNSZone` (v1).
 - At most one `ZoneTransfer` with `role: Primary` per `DNSZone` (v1).
-- `secondary` requires non-empty `masters` and a `dnsZoneTsigKeyRef`.
-- `primary` requires a `dnsZoneTsigKeyRef`.
+- `secondary` requires non-empty `masters` and a `tsigKeyRef`.
+- `primary` requires a `tsigKeyRef`.
 - When a `ZoneTransfer` with `role: Secondary` is Ready for a `DNSZone`, `DNSRecordSet` mutations for that zone are not allowed.
-- All `dnsZoneTsigKeyRef`s must point to a Ready `DNSZoneTsigKey`.
+- `tsigKeyRef.kind` must be supported (for v1alpha1: `DNSZoneTsigKey`).
+- `tsigKeyRef.name` must point to a Ready TSIG key object.
 - TSIG `Secret`s must contain `secret`.
 - `DNSZoneTsigKey.spec.dnsZoneRef` must reference a `DNSZone` in the same namespace (cross-namespace refs disallowed).
 
@@ -530,10 +535,10 @@ TBD
 
 ## Alternatives
 
-### Alternative: generic TSIG key reference type
+### Alternative: type-specific TSIG key reference field (`dnsZoneTsigKeyRef`)
 
-Instead of a type-specific reference field like `dnsZoneTsigKeyRef`, `ZoneTransfer` could use a
-single generic reference where the caller specifies the target API group/version/kind.
+Instead of a generic `tsigKeyRef`, `ZoneTransfer` could use a type-specific field that bakes in the
+target kind.
 
 Illustrative shape:
 
@@ -549,29 +554,25 @@ spec:
   secondary:
     masters:
       - address: 198.51.100.10
-    tsigKeyRef:
-      apiGroup: dns.datum.net
-      apiVersion: v1alpha1
-      kind: DNSZoneTsigKey
+    dnsZoneTsigKeyRef:
       name: example-com-upstream
-      # namespace: default  # optional; defaults to same namespace as the ZoneTransfer
 ```
 
 Pros:
-- One field supports future TSIG key object kinds (e.g., a shared/global key) without adding new fields.
+- Simple UX and strong validation (field name implies the target kind).
+- Easier to generate docs/UI and avoid “kind/version” typos.
 
 Cons:
-- Heavier UX and weaker validation: users must supply `apiGroup`/`apiVersion`/`kind` correctly.
-- More surface area for versioning mistakes and harder discoverability in docs/UI.
+- Harder to extend to future TSIG key object kinds without adding new fields or changing the API.
 
 Decision:
-- Use a type-specific field (`dnsZoneTsigKeyRef`) for v1alpha1. Revisit if/when we introduce a shared/global TSIG key kind.
+- Use the generic `tsigKeyRef` for v1alpha1. Revisit if we decide we want a type-specific field for ergonomics.
 
 - Embed transfer configuration directly on `DNSZone` with role-specific blocks.
   - Shape:
     - `spec.role: Primary|Secondary`
-    - `spec.primary.transfer.dnsZoneTsigKeyRef` (optional, enables outbound transfers)
-    - `spec.secondary.masters[]` + `spec.secondary.transfer.dnsZoneTsigKeyRef` (required)
+    - `spec.primary.transfer.tsigKeyRef` (optional, enables outbound transfers)
+    - `spec.secondary.masters[]` + `spec.secondary.transfer.tsigKeyRef` (required)
   - Pros:
     - Single resource expresses zone intent; easy discovery (“open the zone”).
     - Fewer objects to manage for simple cases.
