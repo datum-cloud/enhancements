@@ -501,6 +501,21 @@ For each of them, fill in the following information by copying the below templat
 
 #### What steps should be taken if SLOs are not being met to determine the problem?
 
+## Architecture Design Records (ADRs)
+
+<!--
+Use this section to log major architectural design decisions that we make
+against the development of the enhancement. Using the ADR process outputs a
+collection of architectural decision records. This creates the decision log. The
+decision log creates the project context as well as an implementation and design
+information log. 
+
+ADRs might include:
+- Selected components
+- Selected platforms and infrastructure
+- Design patterns and anti-patterns
+-->
+
 ## Implementation History
 
 <!--
