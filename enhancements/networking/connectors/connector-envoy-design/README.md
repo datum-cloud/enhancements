@@ -66,12 +66,12 @@ a clear path to extend to CONNECT-UDP.
 **Data:**
 - iroh NodeID (public key)
 - home relay URL
-- observed addresses
+- observed addresses (address + port)
 - device metadata/labels
 
 **Actions:**
 - Create `Connector` (spec) for this device.
-- Patch `Connector.status.connectionDetails` with NodeID + relay + addresses.
+- Patch `Connector.status.connectionDetails` with NodeID + relay + addresses (address + port).
 
 #### 2) Control plane publishes discovery records
 **Responsible:** Control Plane Controller
@@ -353,7 +353,7 @@ implied by the CONNECT method for the MVP.
 ### Discovery Publishing
 
 The device agent updates `status.connectionDetails` with its NodeID (public key),
-home relay, and observed addresses. The control plane controller publishes DNS TXT
+home relay, and observed addresses (address + port). The control plane controller publishes DNS TXT
 records (or equivalent discovery data) from those details so peers can dial by
 NodeID.
 

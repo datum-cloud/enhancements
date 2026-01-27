@@ -239,8 +239,10 @@ status:
       discoveryMode: DNS
       homeRelay: https://use1-1.relay.n0.iroh.iroh.link
       addresses:
-        - 151.113.91.155
-        - a64a:948d:36c5:8933:7368:e5cf:cd3f:baab
+        - address: 151.113.91.155
+          port: 443
+        - address: a64a:948d:36c5:8933:7368:e5cf:cd3f:baab
+          port: 443
 
 ```
 
