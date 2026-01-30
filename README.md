@@ -53,8 +53,8 @@ repository. If you're not sure where it should go, ask us in [GitHub Discussions
 
 ## Questions or Feedback
 
-- Use the [Issues](https://github.com/datum-cloud/enhancements/issues) section
-  for anything you’d like to discuss.
+- Ask for [help](https://github.com/orgs/datum-cloud/discussions/categories/troubleshooting) in discussions
+  for any issues or troubleshooting support.
 - Label your issue (e.g., `enhancement`) for better visibility.
 - Reach out on our [Discord](https://link.datum.net/discord)!
 
