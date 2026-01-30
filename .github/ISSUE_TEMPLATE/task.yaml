@@ -1,0 +1,42 @@
+name: Task Issue
+description: Define a piece of actionable work that needs to be completed.
+type: Task
+body:
+  - type: textarea
+    attributes:
+      label: "Summary"
+      description: |
+        Provide a concise overview of the task that needs to be completed.
+      placeholder: "Brief description of what this task aims to accomplish."
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Goals"
+      description: |
+        What specific outcomes do you want to achieve with this task?
+      placeholder: "List the key goals of this task."
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Non-Goals"
+      description: |
+        What is explicitly out of scope for this task?
+      placeholder: "Clarify what this task will NOT address to set clear boundaries."
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: "Notes / Additional Context"
+      description: Provide any additional information or context that would be useful for this task.
+      placeholder: ""
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: "Acceptance Criteria"
+      description: What's required to consider this task complete?
+      placeholder: "Provide clear requirements on what must be completed to consider this task completed."
+    validations:
+      required: false
