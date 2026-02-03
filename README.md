@@ -15,8 +15,7 @@ meaningful improvements that benefit everyone in our community.
 
 If your idea doesn’t fall under these categories (like minor fixes or small
 feature requests), please submit it directly to the relevant project’s
-repository. If you're not sure where it should go, ask us on our [community
-slack](https://slack.datum.net/)!
+repository. If you're not sure where it should go, ask us in [GitHub Discussions](https://link.datum.net/discussions) or [Discord](https://link.datum.net/discord)!
 
 ## How to Propose an Enhancement
 
@@ -49,18 +48,15 @@ slack](https://slack.datum.net/)!
 
 ## Code of Conduct
 
-- Please read our [Code of Conduct] to ensure a friendly and inclusive
+- Please read our [Code of Conduct](https://discord.com/channels/1420159806496440412/1420181333170196510) to ensure a friendly and inclusive
   community.
-
-[Code of Conduct]:
-    https://www.datum.net/handbook/policy/code-of-conduct/
 
 ## Questions or Feedback
 
 - Ask for [help](https://github.com/orgs/datum-cloud/discussions/categories/troubleshooting) in discussions
   for any issues or troubleshooting support.
 - Label your issue (e.g., `enhancement`) for better visibility.
-- Reach out on our [community discord](https://link.datum.net/discord)!
+- Reach out on our [Discord](https://link.datum.net/discord)!
 
 ---
 
