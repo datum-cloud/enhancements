@@ -239,8 +239,10 @@ status:
       discoveryMode: DNS
       homeRelay: https://use1-1.relay.n0.iroh.iroh.link
       addresses:
-        - 151.113.91.155
-        - a64a:948d:36c5:8933:7368:e5cf:cd3f:baab
+        - address: 151.113.91.155
+          port: 443
+        - address: a64a:948d:36c5:8933:7368:e5cf:cd3f:baab
+          port: 443
 
 ```
 
@@ -358,7 +360,9 @@ The Datum Connect application will be expanded to:
 - Register a `Connector` with the Datum control plane, in a target project and
   namespace, which will allow discovery of the connector, and enable platform
   features to target endpoints available behind the connector.
-- Create a `Lease` for the connector, and maintain periodic heartbeats.
+- The connector controller creates the `Lease`, and the desktop agent keeps it
+  active by updating its expiration. The connector then watches the lease and
+  updates readiness accordingly.
 - Maintain zero or more `ConnectorAdvertisements`, to let the platform and other
   services know what connections the connector can facilitate.
 - Maintain zero or more `HTTPProxy` resources with backends that are accessed
