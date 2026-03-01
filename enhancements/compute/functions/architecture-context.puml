@@ -1,0 +1,30 @@
+@startuml architecture-context
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+!include ../../datum-theme.puml
+
+Person(developer, "Developer", "Deploys serverless functions")
+Person(end_user, "End User", "Sends HTTP requests to functions")
+
+System(functions, "Functions", "Serverless compute with scale-to-zero")
+
+System_Boundary(compute, "Compute Services") {
+    System(workload, "Workload", "Manages instance lifecycle, placement, and scaling")
+}
+
+System_Boundary(networking, "Networking Services") {
+    System(gateway, "Gateway", "Routes HTTP traffic to function backends")
+}
+
+System_Ext(registry, "Container Registry", "Stores function container images")
+
+Rel_D(developer, functions, "Deploys Function", "datumctl/API")
+Rel_D(end_user, gateway, "HTTP requests", "HTTPS")
+
+Rel_L(gateway, functions, "Routes to backend", "HTTPRoute backendRef")
+Rel_R(functions, workload, "Generates Workload", "API")
+Rel(functions, registry, "Pushes images", "OCI")
+Rel(workload, registry, "Pulls images", "OCI")
+
+SHOW_LEGEND()
+@enduml

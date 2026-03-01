@@ -1,0 +1,40 @@
+@startuml architecture-control-plane
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include ../../datum-theme.puml
+
+title Functions - Control Plane Architecture
+
+System_Boundary(consumer_cp, "Consumer Control Plane") {
+    Container_Ext(gateway, "Gateway", "Gateway API", "Accepts external traffic")
+    Container_Ext(httproute, "HTTPRoute", "Gateway API", "Routes to Function backend")
+    Container(function, "Function", "CRD", "User-facing serverless resource")
+    Container_Ext(service_endpoint, "ServiceEndpoint", "Service Connect", "Private IP for connectivity")
+}
+
+System_Boundary(service_cp, "Functions Service Control Plane") {
+    Container(controller, "Function Controller", "Go", "Watches Functions, generates Workloads")
+    Container_Ext(workload, "Workload", "CRD", "Manages instance lifecycle")
+    Container_Ext(service_pub, "ServicePublication", "Service Connect", "Exposes Workload privately")
+    Container_Ext(instance, "Instance", "Unikraft", "Function execution environment")
+}
+
+' Gateway API routing (within consumer)
+Rel_U(gateway, httproute, "Attaches", "parentRef")
+Rel_R(httproute, function, "References", "backendRef")
+Rel_D(function, service_endpoint, "Resolves to", "status.endpoint")
+
+' Cross-control-plane: controller watches consumer
+Rel_L(controller, function, "Watches & updates", "direct API access")
+
+' Service control plane internal
+Rel_R(controller, workload, "Generates", "owner ref")
+Rel_D(controller, service_pub, "Creates")
+Rel_D(workload, instance, "Manages", "scale 0-N")
+Rel_L(service_pub, workload, "Load balances to")
+
+' Data plane connectivity
+Rel_L(service_pub, service_endpoint, "Connected via", "Service Connect")
+
+SHOW_LEGEND()
+@enduml
