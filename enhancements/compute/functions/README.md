@@ -12,13 +12,14 @@ latest-milestone: "v0.1"
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
+  - [Developer Experience](#developer-experience)
+  - [User Stories](#user-stories)
+  - [Security](#security)
   - [Building on Workload](#building-on-workload)
   - [Unikraft Runtime](#unikraft-runtime)
   - [Control Plane Architecture](#control-plane-architecture)
   - [Artifact Discovery and Revisions](#artifact-discovery-and-revisions)
   - [Private Connectivity via Service Connect](#private-connectivity-via-service-connect)
-  - [User Stories](#user-stories)
-  - [Developer Experience](#developer-experience)
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Future Work](#future-work)
@@ -75,6 +76,106 @@ created.
 <p align="center">
   <img src="./architecture-context.png" alt="System Context" />
 </p>
+
+### Developer Experience
+
+> [!NOTE]
+> The detailed UX for Functions is still being worked through. This section
+> outlines the high-level vision for how developers will deploy and manage
+> functions.
+
+**Deployment workflows:**
+
+- **Git-driven (recommended)**: Developers connect a GitHub repository to their
+  project. When they push code, the platform automatically builds and deploys
+  the function. This is the primary workflow for teams with existing CI/CD
+  practices.
+
+- **Direct upload**: For quick iterations or simpler use cases, developers can
+  upload code directly through the Portal or CLI without setting up a Git
+  connection.
+
+**Management capabilities:**
+
+- **Revision history**: View all deployed versions with timestamps and artifact
+  digests. One-click rollback to any previous version.
+
+- **Logs and invocations**: See recent invocations, response times, and errors.
+  Access logs for debugging without leaving the Portal.
+
+- **Scaling visibility**: Monitor current instance count, see when scale-to-zero
+  activates, and understand cold start frequency.
+
+- **Health status**: At-a-glance view of whether the function is healthy,
+  deploying, or experiencing errors.
+
+**CLI experience:**
+
+```bash
+# Deploy from current directory
+datum functions deploy my-function
+
+# View recent logs
+datum functions logs my-function
+
+# List revisions and rollback
+datum functions revisions my-function
+datum functions rollback my-function --revision=rev-2
+
+# Invoke for testing
+datum functions invoke my-function --data '{"test": true}'
+```
+
+The goal is for developers to go from code to running function in under a
+minute, with clear feedback at each step and easy access to logs when things go
+wrong.
+
+### User Stories
+
+#### Deploy a Function
+
+As a developer, I want to deploy an API endpoint without configuring
+infrastructure. I create a Function pointing to a Repository, and when artifacts
+appear in that Repository, they're deployed automatically. No network
+configuration, instance sizing, or placement decisions required.
+
+#### Automatic Redeploy on New Artifacts
+
+As a developer, I want my function to automatically redeploy when new artifacts
+are pushed to the Repository. Whether I push directly, use Build Service, or
+have CI push artifacts, the function picks up changes automatically.
+
+#### Rollback to Previous Version
+
+As a developer, I want to roll back my function to a previous version when a
+deployment causes issues. I select a previous FunctionRevision, and the platform
+immediately routes traffic to that version. The rollback is deterministic
+because artifacts are immutable.
+
+#### Scale to Zero When Idle
+
+As a developer, I want my function to scale to zero when not receiving traffic
+to minimize costs. The function automatically scales down after an idle period
+and scales back up when traffic arrives.
+
+#### Route Traffic via Gateway
+
+As a developer, I want to expose my function via an HTTPRoute so it's accessible
+through my project's Gateway.
+
+### Security
+
+Functions are not directly accessible from the internet. To expose a function
+publicly, developers create a route through their project's Gateway. This
+provides a single point of control for access policies:
+
+- **Authentication**: Gateway supports OIDC, Basic Auth, and API keys
+- **IP restrictions**: Allow or deny traffic based on IP address ranges
+- **Rate limiting**: Protect functions from traffic spikes
+
+For private access between a consumer's applications and their functions,
+Service Connect provides secure connectivity without exposing traffic to the
+public internet.
 
 ### Building on Workload
 
@@ -209,92 +310,6 @@ This capability is being designed as part of the [Service Connect
 enhancement][service-connect-enhancement]. See the Future Work section for
 details on Consumer Service Publications.
 
-### User Stories
-
-#### Deploy a Function
-
-As a developer, I want to deploy an API endpoint without configuring
-infrastructure. I create a Function pointing to a Repository, and when artifacts
-appear in that Repository, they're deployed automatically. No network
-configuration, instance sizing, or placement decisions required.
-
-#### Automatic Redeploy on New Artifacts
-
-As a developer, I want my function to automatically redeploy when new artifacts
-are pushed to the Repository. Whether I push directly, use Build Service, or
-have CI push artifacts, the function picks up changes automatically.
-
-#### Rollback to Previous Version
-
-As a developer, I want to roll back my function to a previous version when a
-deployment causes issues. I select a previous FunctionRevision, and the platform
-immediately routes traffic to that version. The rollback is deterministic
-because artifacts are immutable.
-
-#### Scale to Zero When Idle
-
-As a developer, I want my function to scale to zero when not receiving traffic
-to minimize costs. The function automatically scales down after an idle period
-and scales back up when traffic arrives.
-
-#### Route Traffic via Gateway
-
-As a developer, I want to expose my function via an HTTPRoute so it's accessible
-through my project's Gateway.
-
-### Developer Experience
-
-> [!NOTE]
-> The detailed UX for Functions is still being worked through. This section
-> outlines the high-level vision for how developers will deploy and manage
-> functions.
-
-**Deployment workflows:**
-
-- **Git-driven (recommended)**: Developers connect a GitHub repository to their
-  project. When they push code, the platform automatically builds and deploys
-  the function. This is the primary workflow for teams with existing CI/CD
-  practices.
-
-- **Direct upload**: For quick iterations or simpler use cases, developers can
-  upload code directly through the Portal or CLI without setting up a Git
-  connection.
-
-**Management capabilities:**
-
-- **Revision history**: View all deployed versions with timestamps and artifact
-  digests. One-click rollback to any previous version.
-
-- **Logs and invocations**: See recent invocations, response times, and errors.
-  Access logs for debugging without leaving the Portal.
-
-- **Scaling visibility**: Monitor current instance count, see when scale-to-zero
-  activates, and understand cold start frequency.
-
-- **Health status**: At-a-glance view of whether the function is healthy,
-  deploying, or experiencing errors.
-
-**CLI experience:**
-
-```bash
-# Deploy from current directory
-datum functions deploy my-function
-
-# View recent logs
-datum functions logs my-function
-
-# List revisions and rollback
-datum functions revisions my-function
-datum functions rollback my-function --revision=rev-2
-
-# Invoke for testing
-datum functions invoke my-function --data '{"test": true}'
-```
-
-The goal is for developers to go from code to running function in under a
-minute, with clear feedback at each step and easy access to logs when things go
-wrong.
-
 ### Notes/Constraints/Caveats
 
 - **Automatic Placement**: MVP supports only automatic placement. Region
@@ -339,6 +354,11 @@ phases will expand Functions based on customer feedback:
 - **Access consumer resources**: Enable functions to securely connect to
   databases, APIs, and other resources running in the consumer's environment via
   Service Connect (reverse direction)
+
+**Identity:**
+
+- **Function identity**: Assign identities to functions for authenticating with
+  external services and APIs without embedding credentials in code
 
 **Performance:**
 
