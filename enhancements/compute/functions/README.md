@@ -170,6 +170,22 @@ This model provides:
 - **Overlapping IP support**: NAT handles address conflicts between consumers
 - **Consistent pattern**: All managed services use the same connectivity model
 
+#### Future: Accessing Consumer Resources
+
+Many serverless workloads need to access backend resources—databases, internal
+APIs, caches, or message queues—running in the consumer's own environment. The
+initial Service Connect design enables consumers to reach their Functions, but
+not the reverse direction.
+
+A future phase of Service Connect will enable Functions to securely access
+consumer resources. Consumers will explicitly publish services they want
+Functions to reach, maintaining full control over what is exposed. This provides
+a secure, managed alternative to public endpoints or complex network peering.
+
+This capability is being designed as part of the [Service Connect
+enhancement][service-connect-enhancement]. See the Future Work section for
+details on Consumer Service Publications.
+
 ### User Stories
 
 #### Deploy a Simple API
@@ -194,9 +210,10 @@ through my project's Gateway.
 
 - **Automatic Placement**: MVP supports only automatic placement. Region
   selection is planned for a future phase.
-- **Stateless Only**: Functions are designed for stateless workloads. Once
-  Workload gains VPC connectivity, Functions will be able to integrate with
-  external storage services (databases, caches, object storage).
+- **Stateless Only**: Functions are designed for stateless workloads. Functions
+  can integrate with external services via public endpoints initially. A future
+  Service Connect enhancement will enable secure, private access to consumer
+  resources (databases, caches, internal APIs) without requiring public exposure.
 - **HTTP-Only Triggers**: MVP supports HTTP triggers only. Cron and event
   triggers are planned for future phases.
 
@@ -239,3 +256,7 @@ Have Function controller manage instances directly without Workload.
 
 **Rejected because:** Duplicates infrastructure already built in Workload. Loses
 benefits of Workload's placement, scaling, and runtime management.
+
+<!-- References -->
+[workload-enhancement]: ../workloads/README.md
+[service-connect-enhancement]: ../../platform/service-connect/README.md
