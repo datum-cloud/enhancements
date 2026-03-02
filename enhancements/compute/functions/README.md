@@ -15,10 +15,13 @@ latest-milestone: "v0.1"
   - [Building on Workload](#building-on-workload)
   - [Unikraft Runtime](#unikraft-runtime)
   - [Control Plane Architecture](#control-plane-architecture)
+  - [Artifact Discovery and Revisions](#artifact-discovery-and-revisions)
   - [Private Connectivity via Service Connect](#private-connectivity-via-service-connect)
   - [User Stories](#user-stories)
+  - [Developer Experience](#developer-experience)
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
+- [Future Work](#future-work)
 - [Dependencies](#dependencies)
 - [Alternatives](#alternatives)
   - [Extend Workload Resource](#extend-workload-resource)
@@ -60,8 +63,14 @@ infrastructure decisions automatically.
 ## Proposal
 
 Functions introduces a `Function` resource that abstracts infrastructure
-complexity. Developers specify their container image and port; the platform
-handles everything else.
+complexity. Developers reference a Repository in the Registry Service; the
+platform handles everything else.
+
+The Function controller watches the Repository for new artifacts and deploys
+them automatically. Functions is artifact-source agnostic—CI pipelines, GitHub
+Actions, or manual `oras push` all work identically. This decoupling keeps
+Functions focused on deployment while allowing flexibility in how artifacts are
+created.
 
 <p align="center">
   <img src="./architecture-context.png" alt="System Context" />
@@ -111,17 +120,17 @@ approach—building on Workload rather than implementing compute from scratch.
 
 ### Unikraft Runtime
 
-Functions achieves sub-50ms cold starts through Unikraft unikernels integrated
-at the Workload layer. Unikraft provides:
+Functions achieves sub-50ms cold starts through Unikraft unikernels. Unikraft
+provides:
 
 - **Minimal images**: 1-10MB unikernels vs 100MB+ containers
 - **Fast boot**: 10-50ms cold starts via snapshot/restore
 - **VM isolation**: MicroVMs provide hardware-level security and full isolation
 - **Multi-language**: Go, Node.js, Python, Rust support
 
-The Workload controller handles Unikraft configuration transparently. Function
-users provide standard container images; the platform optimizes them for the
-Unikraft runtime automatically.
+The Workload controller handles Unikraft runtime execution via Firecracker
+MicroVMs. Functions consumes Workload—it doesn't own Unikraft directly. This
+separation allows other services to use the Unikraft runtime independently.
 
 ### Control Plane Architecture
 
@@ -145,6 +154,20 @@ This direct access pattern (rather than federation-based sync) provides:
 
 Authentication uses service identity with PolicyBindings created automatically
 when consumers enable the Functions service.
+
+### Artifact Discovery and Revisions
+
+Functions automatically detects new code in Registry and deploys it. Developers
+push code (directly or via CI), and Functions handles the rest—no manual
+deployment steps required.
+
+Each deployment creates a **revision**—an immutable record of that version.
+Revisions enable:
+
+- **Immutable history**: Every deployed version is recorded
+- **Instant rollback**: Revert to any previous version with one click
+- **Audit trail**: Track what was deployed and when
+- **Canary deploys** (future): Route traffic across multiple versions
 
 ### Private Connectivity via Service Connect
 
@@ -188,12 +211,25 @@ details on Consumer Service Publications.
 
 ### User Stories
 
-#### Deploy a Simple API
+#### Deploy a Function
 
 As a developer, I want to deploy an API endpoint without configuring
-infrastructure. I create a Function with my container image, and within seconds
-it's deployed and accessible. No network configuration, instance sizing, or
-placement decisions required.
+infrastructure. I create a Function pointing to a Repository, and when artifacts
+appear in that Repository, they're deployed automatically. No network
+configuration, instance sizing, or placement decisions required.
+
+#### Automatic Redeploy on New Artifacts
+
+As a developer, I want my function to automatically redeploy when new artifacts
+are pushed to the Repository. Whether I push directly, use Build Service, or
+have CI push artifacts, the function picks up changes automatically.
+
+#### Rollback to Previous Version
+
+As a developer, I want to roll back my function to a previous version when a
+deployment causes issues. I select a previous FunctionRevision, and the platform
+immediately routes traffic to that version. The rollback is deterministic
+because artifacts are immutable.
 
 #### Scale to Zero When Idle
 
@@ -205,6 +241,59 @@ and scales back up when traffic arrives.
 
 As a developer, I want to expose my function via an HTTPRoute so it's accessible
 through my project's Gateway.
+
+### Developer Experience
+
+> [!NOTE]
+> The detailed UX for Functions is still being worked through. This section
+> outlines the high-level vision for how developers will deploy and manage
+> functions.
+
+**Deployment workflows:**
+
+- **Git-driven (recommended)**: Developers connect a GitHub repository to their
+  project. When they push code, the platform automatically builds and deploys
+  the function. This is the primary workflow for teams with existing CI/CD
+  practices.
+
+- **Direct upload**: For quick iterations or simpler use cases, developers can
+  upload code directly through the Portal or CLI without setting up a Git
+  connection.
+
+**Management capabilities:**
+
+- **Revision history**: View all deployed versions with timestamps and artifact
+  digests. One-click rollback to any previous version.
+
+- **Logs and invocations**: See recent invocations, response times, and errors.
+  Access logs for debugging without leaving the Portal.
+
+- **Scaling visibility**: Monitor current instance count, see when scale-to-zero
+  activates, and understand cold start frequency.
+
+- **Health status**: At-a-glance view of whether the function is healthy,
+  deploying, or experiencing errors.
+
+**CLI experience:**
+
+```bash
+# Deploy from current directory
+datum functions deploy my-function
+
+# View recent logs
+datum functions logs my-function
+
+# List revisions and rollback
+datum functions revisions my-function
+datum functions rollback my-function --revision=rev-2
+
+# Invoke for testing
+datum functions invoke my-function --data '{"test": true}'
+```
+
+The goal is for developers to go from code to running function in under a
+minute, with clear feedback at each step and easy access to logs when things go
+wrong.
 
 ### Notes/Constraints/Caveats
 
@@ -223,23 +312,54 @@ through my project's Gateway.
 |------|------------|
 | Cold start latency | Unikraft snapshot/restore targets sub-50ms P95 |
 | Scale-from-zero delays | Queue requests during cold start; target <100ms scale decision |
-| Unikraft build failures | Provide tested base images; clear error messages for unsupported configurations |
+| Artifact discovery latency | Poll interval tunable; webhook acceleration in future phase |
+| Registry Service unavailable | Functions caches last-known-good revision; graceful degradation |
+
+## Future Work
+
+The MVP focuses on HTTP-triggered functions with automatic placement. Future
+phases will expand Functions based on customer feedback:
+
+**Triggers:**
+
+- **Cron triggers**: Schedule functions to run on a schedule (e.g., nightly
+  reports, cleanup jobs)
+- **Event triggers**: Invoke functions in response to platform events (e.g., new
+  file in storage, message in queue)
+
+**Deployment:**
+
+- **Region selection**: Allow developers to deploy functions to specific regions
+  for compliance or latency requirements
+- **Canary deploys**: Gradually shift traffic between revisions to reduce
+  deployment risk
+
+**Connectivity:**
+
+- **Access consumer resources**: Enable functions to securely connect to
+  databases, APIs, and other resources running in the consumer's environment via
+  Service Connect (reverse direction)
+
+**Performance:**
+
+- **Webhook-based deployment**: Replace polling with webhooks for faster
+  artifact detection and deployment
 
 ## Dependencies
 
-- **Compute (Workload)**: Functions generates Workload resources. The Workload
-  controller handles instance lifecycle, placement, and runtime configuration
-  including Unikraft integration.
+Functions builds on other platform services:
 
-- **Unikraft Runtime**: Workload integrates Unikraft for unikernel builds,
-  snapshot/restore, and Firecracker MicroVM execution. This is transparent to
-  Function users.
+- **Registry**: Stores function code and container images. Functions
+  automatically detects and deploys new versions when they appear in Registry.
 
-- **Networking (Gateway)**: Gateway routes HTTP traffic to Function backends via
-  HTTPRoute resources.
+- **Workload**: Runs function instances. Functions uses Workload under the hood
+  for fast cold starts and automatic scaling.
 
-- **Service Connect**: Provides private connectivity between consumer
-  applications and Functions running in the service control plane.
+- **Gateway**: Routes HTTP traffic to functions. Developers expose functions to
+  the internet by creating routes through their project's Gateway.
+
+- **Service Connect**: Provides private connectivity between a consumer's
+  applications and their functions without exposing traffic to the internet.
 
 ## Alternatives
 
@@ -260,3 +380,4 @@ benefits of Workload's placement, scaling, and runtime management.
 <!-- References -->
 [workload-enhancement]: ../workloads/README.md
 [service-connect-enhancement]: ../../platform/service-connect/README.md
+[registry-enhancement]: ../../platform/registry/README.md
