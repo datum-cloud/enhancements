@@ -15,6 +15,7 @@ latest-milestone: "v0.1"
   - [Developer Experience](#developer-experience)
   - [User Stories](#user-stories)
   - [Security](#security)
+  - [Connectivity](#connectivity)
   - [Artifact Discovery and Revisions](#artifact-discovery-and-revisions)
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
@@ -162,21 +163,36 @@ and scales back up when traffic arrives.
 #### Route Traffic via Gateway
 
 As a developer, I want to expose my function via an HTTPRoute so it's accessible
-through my project's Gateway.
+through a Gateway in my project.
 
 ### Security
 
 Functions are not directly accessible from the internet. To expose a function
-publicly, developers create a route through their project's Gateway. This
+publicly, developers create a route through a Gateway in their project. This
 provides a single point of control for access policies:
 
 - **Authentication**: Gateway supports OIDC, Basic Auth, and API keys
 - **IP restrictions**: Allow or deny traffic based on IP address ranges
 - **Rate limiting**: Protect functions from traffic spikes
 
-For private access between a consumer's applications and their functions,
-Service Connect provides secure connectivity without exposing traffic to the
-public internet.
+### Connectivity
+
+Functions support two access patterns depending on who needs to reach them:
+
+**Public access via Gateway**: For functions that serve external users—APIs,
+webhooks, or web endpoints—developers create routes through a Gateway. The
+Gateway handles TLS termination, authentication, and traffic management. This is
+the standard path for internet-facing functions.
+
+**Private access via Service Connect**: For functions called by other
+applications within the same project—backend services, scheduled jobs, or
+internal APIs—Service Connect provides direct connectivity without traversing
+the public internet. Functions get a private DNS name and IP address that only
+the developer's other workloads can reach.
+
+Most functions use one or both patterns. A function might serve public API
+requests through Gateway while also being called privately by a background
+worker.
 
 ### Artifact Discovery and Revisions
 
@@ -381,7 +397,7 @@ Functions builds on other platform services:
   for fast cold starts and automatic scaling.
 
 - **Gateway**: Routes HTTP traffic to functions. Developers expose functions to
-  the internet by creating routes through their project's Gateway.
+  the internet by creating routes through a Gateway in their project.
 
 - **Service Connect**: Provides private connectivity between a consumer's
   applications and their functions without exposing traffic to the internet.
