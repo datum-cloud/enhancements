@@ -15,13 +15,14 @@ latest-milestone: "v0.1"
   - [Developer Experience](#developer-experience)
   - [User Stories](#user-stories)
   - [Security](#security)
+  - [Artifact Discovery and Revisions](#artifact-discovery-and-revisions)
+  - [Notes/Constraints/Caveats](#notesconstraintscaveats)
+  - [Risks and Mitigations](#risks-and-mitigations)
+- [Design Details](#design-details)
   - [Building on Workload](#building-on-workload)
   - [Unikraft Runtime](#unikraft-runtime)
   - [Control Plane Architecture](#control-plane-architecture)
-  - [Artifact Discovery and Revisions](#artifact-discovery-and-revisions)
   - [Private Connectivity via Service Connect](#private-connectivity-via-service-connect)
-  - [Notes/Constraints/Caveats](#notesconstraintscaveats)
-  - [Risks and Mitigations](#risks-and-mitigations)
 - [Future Work](#future-work)
 - [Dependencies](#dependencies)
 - [Alternatives](#alternatives)
@@ -177,6 +178,44 @@ For private access between a consumer's applications and their functions,
 Service Connect provides secure connectivity without exposing traffic to the
 public internet.
 
+### Artifact Discovery and Revisions
+
+Functions automatically detects new code in Registry and deploys it. Developers
+push code (directly or via CI), and Functions handles the rest—no manual
+deployment steps required.
+
+Each deployment creates a **revision**—an immutable record of that version.
+Revisions enable:
+
+- **Immutable history**: Every deployed version is recorded
+- **Instant rollback**: Revert to any previous version with one click
+- **Audit trail**: Track what was deployed and when
+- **Canary deploys** (future): Route traffic across multiple versions
+
+### Notes/Constraints/Caveats
+
+- **Automatic Placement**: MVP supports only automatic placement. Region
+  selection is planned for a future phase.
+- **Stateless Only**: Functions are designed for stateless workloads. Functions
+  can integrate with external services via public endpoints initially. A future
+  Service Connect enhancement will enable secure, private access to consumer
+  resources (databases, caches, internal APIs) without requiring public exposure.
+- **HTTP-Only Triggers**: MVP supports HTTP triggers only. Cron and event
+  triggers are planned for future phases.
+
+### Risks and Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| Cold start latency | Unikraft snapshot/restore targets sub-50ms P95 |
+| Scale-from-zero delays | Queue requests during cold start; target <100ms scale decision |
+| Artifact discovery latency | Poll interval tunable; webhook acceleration in future phase |
+| Registry Service unavailable | Functions caches last-known-good revision; graceful degradation |
+
+## Design Details
+
+This section covers the technical architecture and implementation approach.
+
 ### Building on Workload
 
 Rather than building compute capabilities from scratch, Functions generates
@@ -256,20 +295,6 @@ This direct access pattern (rather than federation-based sync) provides:
 Authentication uses service identity with PolicyBindings created automatically
 when consumers enable the Functions service.
 
-### Artifact Discovery and Revisions
-
-Functions automatically detects new code in Registry and deploys it. Developers
-push code (directly or via CI), and Functions handles the rest—no manual
-deployment steps required.
-
-Each deployment creates a **revision**—an immutable record of that version.
-Revisions enable:
-
-- **Immutable history**: Every deployed version is recorded
-- **Instant rollback**: Revert to any previous version with one click
-- **Audit trail**: Track what was deployed and when
-- **Canary deploys** (future): Route traffic across multiple versions
-
 ### Private Connectivity via Service Connect
 
 Because Workloads run in the service control plane, [Service
@@ -309,26 +334,6 @@ a secure, managed alternative to public endpoints or complex network peering.
 This capability is being designed as part of the [Service Connect
 enhancement][service-connect-enhancement]. See the Future Work section for
 details on Consumer Service Publications.
-
-### Notes/Constraints/Caveats
-
-- **Automatic Placement**: MVP supports only automatic placement. Region
-  selection is planned for a future phase.
-- **Stateless Only**: Functions are designed for stateless workloads. Functions
-  can integrate with external services via public endpoints initially. A future
-  Service Connect enhancement will enable secure, private access to consumer
-  resources (databases, caches, internal APIs) without requiring public exposure.
-- **HTTP-Only Triggers**: MVP supports HTTP triggers only. Cron and event
-  triggers are planned for future phases.
-
-### Risks and Mitigations
-
-| Risk | Mitigation |
-|------|------------|
-| Cold start latency | Unikraft snapshot/restore targets sub-50ms P95 |
-| Scale-from-zero delays | Queue requests during cold start; target <100ms scale decision |
-| Artifact discovery latency | Poll interval tunable; webhook acceleration in future phase |
-| Registry Service unavailable | Functions caches last-known-good revision; graceful degradation |
 
 ## Future Work
 
