@@ -1,0 +1,55 @@
+' Datum Cloud C4 Theme (Modern Style)
+' Based on brand guidelines: https://www.datum.net/brand/color
+'
+' IMPORTANT: Set !$NEW_C4_STYLE = 1 BEFORE including C4 libraries in your diagram.
+' This theme should be included AFTER C4 library includes.
+
+' Brand Colors
+!$DATUM_MIDNIGHT_FJORD = "#0C1D31"
+!$DATUM_AURORA_MOSS = "#E6F59F"
+!$DATUM_CANYON_CLAY = "#BF9595"
+!$DATUM_PINE_FORGE = "#4D6356"
+!$DATUM_BLUSH_QUARTZ = "#ECD0D0"
+!$DATUM_GLACIER_MIST = "#F6F6F5"
+!$DATUM_GLACIER_MIST_DARK = "#E8E7E4"
+
+' Element Background Colors - Internal (vibrant pastels)
+!$DATUM_BG_PERSON = "#F5D5D5"
+!$DATUM_BG_SYSTEM = "#D5E5F5"
+!$DATUM_BG_CONTAINER = "#D5F5E0"
+!$DATUM_BG_COMPONENT = "#F5F0D5"
+
+' Element Background Colors - External (muted/grayed)
+!$DATUM_BG_EXT_PERSON = "#E8E0E0"
+!$DATUM_BG_EXT_SYSTEM = "#E0E8EC"
+!$DATUM_BG_EXT_CONTAINER = "#E0ECE4"
+!$DATUM_BG_EXT_COMPONENT = "#ECE8E0"
+
+' Person elements - Canyon Clay accents, pink background
+UpdateElementStyle("person", $bgColor=$DATUM_BG_PERSON, $borderColor=$DATUM_CANYON_CLAY, $fontColor=$DATUM_MIDNIGHT_FJORD)
+UpdateElementStyle("external_person", $bgColor=$DATUM_BG_EXT_PERSON, $borderColor=$DATUM_PINE_FORGE, $fontColor=$DATUM_PINE_FORGE)
+
+' System elements - blue background
+UpdateElementStyle("system", $bgColor=$DATUM_BG_SYSTEM, $borderColor=$DATUM_MIDNIGHT_FJORD, $fontColor=$DATUM_MIDNIGHT_FJORD)
+UpdateElementStyle("external_system", $bgColor=$DATUM_BG_EXT_SYSTEM, $borderColor=$DATUM_PINE_FORGE, $fontColor=$DATUM_PINE_FORGE)
+
+' Container elements - green background
+UpdateElementStyle("container", $bgColor=$DATUM_BG_CONTAINER, $borderColor=$DATUM_MIDNIGHT_FJORD, $fontColor=$DATUM_MIDNIGHT_FJORD)
+UpdateElementStyle("external_container", $bgColor=$DATUM_BG_EXT_CONTAINER, $borderColor=$DATUM_PINE_FORGE, $fontColor=$DATUM_PINE_FORGE)
+
+' Component elements - yellow background
+UpdateElementStyle("component", $bgColor=$DATUM_BG_COMPONENT, $borderColor=$DATUM_MIDNIGHT_FJORD, $fontColor=$DATUM_MIDNIGHT_FJORD)
+UpdateElementStyle("external_component", $bgColor=$DATUM_BG_EXT_COMPONENT, $borderColor=$DATUM_PINE_FORGE, $fontColor=$DATUM_PINE_FORGE)
+
+' Boundary styling - subtle Glacier Mist background
+UpdateBoundaryStyle("system", $bgColor=$DATUM_GLACIER_MIST, $borderColor=$DATUM_MIDNIGHT_FJORD, $fontColor=$DATUM_MIDNIGHT_FJORD)
+UpdateBoundaryStyle("container", $bgColor=$DATUM_GLACIER_MIST, $borderColor=$DATUM_MIDNIGHT_FJORD, $fontColor=$DATUM_MIDNIGHT_FJORD)
+UpdateBoundaryStyle("enterprise", $bgColor=$DATUM_GLACIER_MIST, $borderColor=$DATUM_MIDNIGHT_FJORD, $fontColor=$DATUM_MIDNIGHT_FJORD)
+
+' Relationship styling
+UpdateRelStyle("", $textColor=$DATUM_MIDNIGHT_FJORD, $lineColor=$DATUM_MIDNIGHT_FJORD)
+
+' Legend inherits from element styles via skinparam
+skinparam LegendBackgroundColor $DATUM_GLACIER_MIST
+skinparam LegendBorderColor $DATUM_MIDNIGHT_FJORD
+skinparam LegendFontColor $DATUM_MIDNIGHT_FJORD
