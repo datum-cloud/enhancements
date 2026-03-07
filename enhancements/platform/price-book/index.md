@@ -83,7 +83,7 @@ template.
 
 
 ## Summary
-
+A simple set of rules can be established that makes a pricebook useful for almost all services, eliminating the need for one-off pricing and billing.
 <!--
 This section is incredibly important for producing high-quality, user-focused
 documentation such as release notes or a development roadmap. It should be
@@ -105,13 +105,53 @@ updates.
 
 
 ## Motivation
-
+This provides predictable, understandable pricing for customers while avoiding exceptions that slow down sales and create billing disputes.
 <!--
 This section is for explicitly listing the motivation, goals, and non-goals of
 this Enhancement.  Describe why the change is important and the benefits to users.
 -->
 
-### Goals
+## Goals
+Define a set of pricing rules that can be applied consistently across services, eliminating the need for custom pricing and billing logic.
+### Rules 
+#### Tier Structure
+Tiered pricing balances fairness and simplicity by charging customers based on consumption or commitment while maintaining a consistent, scalable pricing model.  
+##### Bottom Tier
+- [ ] Must always start at `0`
+- [ ] Must define a stop value (unless it is the only tier)
+
+##### Middle Tier(s)
+- [ ] Must define a start value equal to the stop value of the tier directly below it
+- [ ] Must define a stop value less than the tier above it
+- [ ] Multiple middle tiers may exist
+
+##### Top Tier
+- [ ] Must define a start value equal to the stop value of the tier directly below it
+- [ ] Must have a hard upper limit **or** be set to extend to infinity
+
+##### Single-Tier Case
+- [ ] If only one tier exists, it must follow both the **Bottom Tier** and **Top Tier** rules
+
+#### Region Structure (Labels)
+
+- [ ] Regions represent a coverage area, which may be geographic
+- [ ] Pricing tiers may be defined independently for each region
+- [ ] Regions must not overlap
+- [ ] Region definitions may be Datum-defined or customer-specific
+
+##### Shared Usage Across Regions
+If usage is shared across multiple regions, the following rules apply:
+
+- [ ] All participating regions must have identical tier structures (same start and stop values)
+- [ ] All participating regions must have identical prices per tier
+- [ ] A percentage-based usage limit may be applied to a region, with penalties for exceeding the limit  
+  - Example: With a global delivery rate of `$0.01/GB`, if APAC traffic exceeds `10%` of total usage, a penalty rate of `$0.03/GB` applies to the excess usage
+
+#### Addons
+Add rules for associated services like WAF -> Proxy
+
+#### Linked Pricing 
+Add rules for linked pricing  RQPS -> GBT. 
 
 <!--
 List the specific goals of the Enhancement. What is it trying to achieve? How will we
