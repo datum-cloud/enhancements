@@ -932,9 +932,14 @@ v1 delivers the minimum viable fraud prevention pipeline with a narrow, concrete
 **Providers and what they consume:**
 
 MaxMind minFraud Score plan ($0.02/query):
-- **Input**: `ipAddress`, `emailAddress`, `emailDomain`, `userAgent` (optional)
+- **Input (v1)**: `ipAddress` → `device.ip_address`, `emailAddress` → `email.address`,
+  `emailDomain` → `email.domain`, `userAgent` → `device.user_agent`,
+  `acceptLanguage` → `device.accept_language`. All fields are optional per MaxMind's
+  API -- none are required. The API accepts many more fields (billing address, payment
+  info, order details, etc.) that can be added to the ConfigMap as they become available.
 - **Output**: `risk_score` float (0.01-99), mapped to 0-100 scale by the adapter
-- **What it tells us**: IP reputation, email newness/disposability, proxy/VPN detection
+- **What it tells us**: IP reputation, email newness/disposability, proxy/VPN detection,
+  anonymous network detection
 - **Failure policy**: FailOpen (don't block sign-ups if MaxMind is down)
 
 moov-io/watchman (self-hosted, free):
