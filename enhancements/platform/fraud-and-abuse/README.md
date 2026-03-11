@@ -486,44 +486,60 @@ Providers with no `dependsOn` and no `inputFrom` behave exactly as if all
 providers in the stage run concurrently -- the DAG model is a superset of
 the simple concurrent model, not a replacement.
 
-#### Fraud Input ConfigMap
+#### Data Sources
 
-Input data for fraud evaluation is stored in a ConfigMap rather than directly on the
-FraudEvaluation spec. This keeps the data schema flexible -- any key-value pair can
-be added without CRD changes -- and separates collected data from evaluation results.
+Rather than requiring a separate resource (ConfigMap, webhook, etc.) to feed input
+data into the fraud pipeline, the fraud controller assembles its input by querying
+existing platform data sources at evaluation time. This avoids creating a second
+data path for information the platform already has.
 
-The namespace for input ConfigMaps is controller configuration (e.g. a flag or
-environment variable on the fraud controller), not part of the FraudPolicy API.
-The actions-server and fraud controller both read this config to know where to
-create and find ConfigMaps. The FraudEvaluation references its ConfigMap via
-`spec.inputRef`.
+The FraudPolicy declares which data sources the controller should query:
 
 ```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: user-12345-fraud-input
-  namespace: fraud-system
-  ownerReferences:
-    - apiVersion: fraud.miloapis.com/v1alpha1
-      kind: FraudEvaluation
-      name: user-12345
-data:
-  ipAddress: "203.0.113.42"
-  emailAddress: "jane@example.com"
-  emailDomain: "example.com"
-  firstName: "Jane"
-  lastName: "Doe"
-  userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
-  acceptLanguage: "en-US,en;q=0.9"
-  # Arbitrary additional fields can be added without schema changes
-  # deviceFingerprint: "mxm_abc123"
+spec:
+  dataSources:
+    # Read user profile fields (email, name) from the User resource
+    - type: User
+
+    # Read IP, user-agent, etc. from the most recent audit log entry for the user.
+    # Requires the cloud portal to pass through client IP and user-agent headers
+    # so they appear in audit log data.
+    - type: AuditLog
 ```
 
-Built-in provider adapters know which ConfigMap keys they need (e.g. MaxMind reads
-`ipAddress`, `emailAddress`, `emailDomain`; watchman reads `firstName`, `lastName`).
-Unknown keys are ignored. This means new data sources can be added to the ConfigMap
-and consumed by future providers without changing the fraud controller or CRDs.
+At evaluation time, the controller queries each configured data source, merges the
+results into a single input map, and passes it to the provider pipeline. If a data
+source is unavailable or returns no data, the fields it would have provided are
+simply absent from the input -- providers handle missing fields gracefully.
+
+**v1 data sources:**
+
+| Source | Fields provided | Notes |
+|---|---|---|
+| `User` | `emailAddress`, `emailDomain`, `firstName`, `lastName` | Read from User spec |
+| `AuditLog` | `ipAddress`, `userAgent`, `acceptLanguage` | From most recent audit log entry for the user. Requires cloud portal to forward client IP/user-agent. Available within ~30s of first user action after registration. |
+
+**How it works for a new registration:**
+
+1. User registers → Zitadel creates User resource.
+2. User's first action (e.g. listing orgs) generates an audit log entry with
+   client IP and user-agent (once cloud portal passes these through).
+3. FraudEvaluation is triggered. The controller reads the User resource for
+   profile fields and queries the audit log API for the most recent entry
+   to get IP/user-agent.
+4. The merged input is passed to the provider pipeline.
+
+**Future data sources** can be added without changing the FraudEvaluation CRD or
+provider adapters -- just add a new `type` to the data source list:
+- `BillingProfile` -- billing address, payment country
+- `DeviceFingerprint` -- client-side device data
+- `Custom` -- arbitrary webhook or API endpoint
+
+This approach has several advantages:
+- **No extra resources per user** -- no ConfigMaps to create, manage, or GC.
+- **Leverages existing platform data** -- audit logs are already being collected.
+- **Always fresh** -- data is read at evaluation time, not snapshotted at creation.
+- **Extensible** -- new sources are additive, not a schema change.
 
 #### FraudEvaluation
 
@@ -559,14 +575,6 @@ spec:
   policyRef:
     name: default
     resourceVersion: "12345"
-
-  # Reference to a ConfigMap containing the fraud input data.
-  # The ConfigMap holds arbitrary key-value pairs that providers consume.
-  # This keeps input data flexible (no fixed schema) and separates it
-  # from the evaluation resource itself.
-  inputRef:
-    name: user-12345-fraud-input
-    namespace: fraud-system
 
 status:
   # Evaluation phase: Pending, Running, Completed, Error
@@ -735,7 +743,7 @@ Load active FraudPolicy
 Create or update FraudEvaluation (phase: Pending)
     │
     ▼
-Read input ConfigMap (via spec.inputRef)
+Query data sources (User resource, audit log API)
     │
     ▼
 ┌─── For each stage in order ───────────────────────────┐
@@ -890,28 +898,25 @@ Provider resilience is a first-class concern. Each FraudProvider configures:
 
 ### Input Data Model
 
-Input data is stored as key-value pairs in a ConfigMap referenced by the
-FraudEvaluation. The keys below are conventions used by the built-in provider
-adapters. Since the ConfigMap is freeform, additional keys can be added for
-custom providers without schema changes.
+Input data is assembled at evaluation time by querying the data sources declared
+in the FraudPolicy (see [Data Sources](#data-sources)). The controller merges
+fields from each source into a single input map using well-known keys:
 
-**Well-known ConfigMap keys:**
-
-| Field | Source | Description |
+| Field | Data Source | Description |
 |---|---|---|
-| `ipAddress` | HTTP request | User's IP address at registration |
-| `emailAddress` | Registration form | User's email address |
-| `emailDomain` | Derived | Domain portion of email address |
-| `firstName` | Registration form | User's first name (for sanctions screening) |
-| `lastName` | Registration form | User's last name (for sanctions screening) |
-| `userAgent` | HTTP request | Browser/client user agent string |
-| `acceptLanguage` | HTTP request | Accept-Language header |
-| `deviceFingerprint` | Client SDK | Opaque device fingerprint payload (future) |
+| `ipAddress` | AuditLog | User's IP address from most recent audit entry |
+| `emailAddress` | User | User's email address |
+| `emailDomain` | User (derived) | Domain portion of email address |
+| `firstName` | User | User's first name (for sanctions screening) |
+| `lastName` | User | User's last name (for sanctions screening) |
+| `userAgent` | AuditLog | Browser/client user agent string |
+| `acceptLanguage` | AuditLog | Accept-Language header |
+| `deviceFingerprint` | DeviceFingerprint (future) | Opaque device fingerprint payload |
 
 For **built-in provider types** (maxmind, watchman), the controller's adapter reads
-the keys it needs from the ConfigMap and constructs the provider-specific API request.
+the keys it needs from the input map and constructs the provider-specific API request.
 Unknown keys are ignored. For future **webhook** providers, the controller would send
-the ConfigMap data (or a configured subset) as a JSON body.
+the input map (or a configured subset) as a JSON body.
 
 ### v1 Implementation Scope
 
@@ -929,7 +934,7 @@ MaxMind minFraud Score plan ($0.02/query):
   `emailDomain` → `email.domain`, `userAgent` → `device.user_agent`,
   `acceptLanguage` → `device.accept_language`. All fields are optional per MaxMind's
   API -- none are required. The API accepts many more fields (billing address, payment
-  info, order details, etc.) that can be added to the ConfigMap as they become available.
+  info, order details, etc.) that can be added as data sources become available.
 - **Output**: `risk_score` float (0.01-99), mapped to 0-100 scale by the adapter
 - **What it tells us**: IP reputation, email newness/disposability, proxy/VPN detection,
   anonymous network detection
@@ -1065,9 +1070,8 @@ ctrl.NewControllerManagedBy(mgr).
 When a FraudEvaluation is created or queued for re-evaluation, the controller:
 
 1. Loads the active FraudPolicy.
-2. Reads the input ConfigMap referenced by `spec.inputRef`.
-3. For re-evaluations, updates the ConfigMap with the latest available data.
-4. Executes the provider pipeline using the ConfigMap data.
+2. Queries configured data sources (User resource, audit log API) to assemble input.
+3. Executes the provider pipeline using the merged input.
 4. Based on the result:
    - **NONE**: No action. The user proceeds through the normal approval flow.
    - **REVIEW**: Emits a `FraudThresholdExceeded` event. Operator reviews the
@@ -1098,13 +1102,10 @@ mgr.GetFieldIndexer().IndexField(ctx,
 )
 ```
 
-### Zitadel Integration
+### Zitadel and Audit Log Integration
 
-The fraud evaluation pipeline is triggered from data that originates in the Zitadel
-authentication flow. The `auth-provider-zitadel` actions server is the first point of
-contact when a user registers and is where HTTP-level metadata (IP, user-agent, etc.)
-is available. The actions server creates the input ConfigMap and FraudEvaluation
-together during user registration.
+The fraud controller does not require changes to the Zitadel actions-server. Instead,
+it assembles input data from existing platform resources:
 
 **Registration event flow with fraud evaluation:**
 
@@ -1121,62 +1122,55 @@ together during user registration.
 │                                                                  │
 │  1. Validate HMAC signature                                      │
 │  2. Extract user data (email, name) from event payload           │
-│  3. [NEW] Extract HTTP metadata from request context:            │
-│     - X-Forwarded-For / RemoteAddr → IP address                  │
-│     - User-Agent header                                          │
-│     - Accept-Language header                                     │
-│  4. Create Milo User resource (registrationApproval: Pending)    │
-│  5. [NEW] Create input ConfigMap in fraud-system namespace:      │
-│     - ipAddress, userAgent, acceptLanguage from HTTP context      │
-│     - emailAddress, firstName, lastName from event payload        │
-│  6. [NEW] Create FraudEvaluation with inputRef → ConfigMap       │
+│  3. Create Milo User resource                                    │
+└─────────────────────────┬────────────────────────────────────────┘
+                          │
+                          ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  User's first action (e.g. list orgs/projects)                   │
+│  Cloud portal forwards client IP + user-agent headers            │
+│  Audit log entry is created (~<30s)                              │
 └─────────────────────────┬────────────────────────────────────────┘
                           │
                           ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │  Milo core control plane                                         │
 │                                                                  │
-│  FraudEvaluation controller detects new FraudEvaluation          │
-│  1. Reads input ConfigMap via spec.inputRef                      │
-│  2. Executes FraudPolicy pipeline using ConfigMap data           │
-│  3. Writes FraudEvaluation status                                │
-│  4. Takes enforcement action if configured                       │
+│  FraudEvaluation controller detects new User                     │
+│  1. Creates FraudEvaluation for the user                         │
+│  2. Queries data sources:                                        │
+│     - User resource → email, firstName, lastName                 │
+│     - Audit log API → ipAddress, userAgent from latest entry     │
+│  3. Merges input and executes FraudPolicy pipeline               │
+│  4. Writes FraudEvaluation status                                │
+│  5. Takes enforcement action if configured                       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Why a ConfigMap for input data**: The input data is fraud-specific context, not core
-user data. A ConfigMap keeps the User resource clean, allows arbitrary key-value pairs
-without CRD schema changes, and makes the input inspectable and auditable. The
-ConfigMap is owned by the FraudEvaluation (via ownerReference) so it is garbage
-collected when the evaluation is deleted.
+**Prerequisite**: The cloud portal must forward the client's real IP address and
+user-agent to the API so they appear in audit log entries. Currently audit logs
+show the server-side user-agent (`axios/1.13.5`) instead of the client's browser.
+This is a cloud portal fix, not a fraud system concern, but is required for
+IP/user-agent based fraud scoring to be meaningful.
 
-**Who populates the ConfigMap for each trigger type:**
+**Timing**: Audit log data is available within ~30 seconds of user activity. The
+fraud controller can either:
+- Wait for the first audit log entry before running the pipeline (simple, slight delay)
+- Run immediately with whatever data is available and re-evaluate when audit data
+  appears (faster initial response, two evaluations)
 
-| Trigger | ConfigMap populated by |
-|---|---|
-| `UserCreated` event | actions-server (has HTTP context) |
-| `Scheduled` | fraud controller (reads latest User spec fields) |
-| `DataChange` | fraud controller (reads updated User fields) |
-| `Manual` | fraud controller (reads current state) |
+For v1, waiting for the first audit entry is simpler and acceptable since the
+delay (~30s) is negligible and no enforcement action would occur before then.
 
-For re-evaluations, the fraud controller updates the existing ConfigMap with the
-latest available data before executing the pipeline. Fields like `ipAddress` and
-`userAgent` are only meaningful at registration time and are left as-is; the
-controller only refreshes fields that have a current source (e.g. `emailAddress`
-from the User spec).
-
-**Device fingerprinting**: For v1, device fingerprint data is not captured at the
-Zitadel level. MaxMind's device tracking requires a JavaScript tag on the registration
-page that communicates directly with MaxMind. The resulting device ID would be added
-as a `deviceFingerprint` key in the input ConfigMap by the actions-server when device
-fingerprinting is enabled. This requires frontend changes to the registration flow
-that are outside the scope of the backend API design but should be planned for.
+**Device fingerprinting**: For v1, device fingerprint data is not captured. MaxMind's
+device tracking requires a JavaScript tag on the registration page that communicates
+directly with MaxMind. This would be exposed as a future `DeviceFingerprint` data
+source type. Requires frontend changes outside the scope of this enhancement.
 
 **Authentication webhook enhancement**: The existing `authn-webhook` in
-auth-provider-zitadel returns `registrationApproval` status in TokenReview responses.
-This can be extended to also check whether a FraudEvaluation exists with a DEACTIVATE
-decision, providing defense-in-depth even if the UserDeactivation has not yet been
-processed.
+auth-provider-zitadel handles TokenReview responses. This can be extended to also
+check whether a FraudEvaluation exists with a DEACTIVATE decision, providing
+defense-in-depth even if the UserDeactivation has not yet been processed.
 
 ## Production Readiness Review Questionnaire
 
