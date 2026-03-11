@@ -321,9 +321,6 @@ kind: FraudPolicy
 metadata:
   name: default
 spec:
-  # Namespace where fraud input ConfigMaps are created and read from.
-  inputNamespace: fraud-system
-
   # Pipeline stages execute in order. Each stage references one or more providers.
   # Within a stage, providers form a DAG: providers with no dependencies run
   # concurrently, providers with dependsOn wait for their dependencies to complete
@@ -495,15 +492,11 @@ Input data for fraud evaluation is stored in a ConfigMap rather than directly on
 FraudEvaluation spec. This keeps the data schema flexible -- any key-value pair can
 be added without CRD changes -- and separates collected data from evaluation results.
 
-The namespace for input ConfigMaps is configured on the FraudPolicy:
-
-```yaml
-spec:
-  inputNamespace: fraud-system
-```
-
-The actions-server (or fraud controller on re-evaluation) creates the ConfigMap in
-this namespace. The FraudEvaluation references it via `spec.inputRef`.
+The namespace for input ConfigMaps is controller configuration (e.g. a flag or
+environment variable on the fraud controller), not part of the FraudPolicy API.
+The actions-server and fraud controller both read this config to know where to
+create and find ConfigMaps. The FraudEvaluation references its ConfigMap via
+`spec.inputRef`.
 
 ```yaml
 apiVersion: v1
@@ -972,8 +965,6 @@ kind: FraudPolicy
 metadata:
   name: default
 spec:
-  inputNamespace: fraud-system
-
   stages:
     - name: risk-analysis
       providers:
