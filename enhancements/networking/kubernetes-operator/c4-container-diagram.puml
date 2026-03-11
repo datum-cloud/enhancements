@@ -1,0 +1,21 @@
+@startuml c4-container-diagram
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+Person(external_user, "External User", "Accesses services via custom domain or Datum Cloud URL")
+
+System_Boundary(k8s, "Kubernetes Cluster") {
+    Container(operator, "datum-cloud-operator", "Go", "Watches Gateway/Ingress resources, provisions Datum Cloud resources, manages connector lifecycle")
+    Container(connector, "datum-connect serve", "Rust", "Maintains outbound tunnel to Datum Cloud, proxies requests to cluster services")
+    Container(services, "Application Services", "Various", "User workloads exposed via Gateway or Ingress")
+}
+
+System_Ext(datum_cloud, "Datum Cloud", "Edge network and control plane for secure service exposure")
+
+Rel_D(external_user, datum_cloud, "HTTPS request", "HTTPS")
+Rel_D(datum_cloud, connector, "Routes request", "QUIC")
+Rel_L(connector, services, "Forwards request", "HTTP")
+Rel(operator, datum_cloud, "Creates Gateway, HTTPProxy resources", "HTTPS")
+Rel(operator, connector, "Deploys", "HTTPS")
+
+SHOW_LEGEND()
+@enduml
