@@ -1,0 +1,35 @@
+@startuml architecture-context
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+!include ../../datum-theme.puml
+
+Person(developer, "Developer", "Builds and deploys serverless functions")
+Person(end_user, "End User", "Invokes functions via HTTP")
+
+System(functions, "Functions", "Runs code on demand with automatic scaling")
+
+System_Ext(registry, "Registry", "Stores function code and container images")
+System_Ext(build, "Build", "Packages source code into deployable artifacts")
+System_Ext(source, "GitHub", "Hosts source code repositories")
+
+System_Boundary(compute, "Compute Services") {
+  System_Ext(workload, "Workload", "Runs function instances across infrastructure")
+}
+
+System_Boundary(networking, "Networking Services") {
+  System_Ext(gateway, "Gateway", "Handles incoming web traffic")
+}
+
+Rel_D(developer, functions, "Creates Function")
+Rel_L(developer, registry, "Uploads code directly", "Portal/CLI")
+Rel_D(end_user, gateway, "HTTP requests")
+
+Rel_L(gateway, functions, "Routes requests")
+Rel_R(functions, workload, "Deploys instances")
+Rel_U(functions, registry, "Detects new versions")
+Rel_L(workload, registry, "Downloads code")
+Rel_U(developer, source, "Pushes code", "git")
+Rel_L(source, build, "Triggers build")
+Rel(build, registry, "Publishes built artifacts")
+SHOW_LEGEND()
+@enduml
