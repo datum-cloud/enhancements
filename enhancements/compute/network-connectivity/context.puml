@@ -1,0 +1,27 @@
+@startuml context
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title gVPC Workload Connectivity - System Context
+
+Person(client, "End User", "Sends requests to workloads running on Datum")
+
+System_Ext(edge, "Datum Edge", "Anycast LB with WAF, rate limiting, and DDoS protection")
+
+System_Ext(gvpc, "Galactic VPC", "SRv6-based overlay network providing encrypted, SLA-aware connectivity")
+
+System(compute, "Compute Platform", "Schedules and runs workloads (functions, containers, VMs) with network interface attachment")
+
+Person(platform_ops, "Platform Operator", "Manages workload placement and network configuration")
+
+System_Ext(runtimes, "Workload Runtimes", "Unikraft unikernels, Firecracker microVMs, containers, etc.")
+
+Rel_R(client, edge, "Sends requests", "HTTPS / Anycast IP")
+Rel_R(edge, gvpc, "Routes traffic into", "SRv6 encap")
+Rel_D(gvpc, compute, "Delivers packets to workloads", "Network interface")
+Rel_L(compute, runtimes, "Runs workloads on", "VMM / container runtime")
+Rel_L(platform_ops, compute, "Configures placement", "API")
+Rel_U(platform_ops, gvpc, "Manages networks", "NetworkAttachment")
+
+SHOW_LEGEND()
+@enduml

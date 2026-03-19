@@ -1,0 +1,23 @@
+@startuml traffic-flow-cold-start
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Traffic Flow - Cold Start (VM Sleeping)
+
+System_Boundary(worker_boundary, "Worker Node") {
+    Container(dpu, "BlueField DPU", "XDP on ARM", "Detects traffic for sleeping VM")
+    Container(wake_daemon, "Wake Daemon", "Go on DPU ARM", "Orchestrates VM lifecycle")
+    Container(packet_queue, "Packet Queue", "NFQUEUE / AF_XDP", "Holds packets during 3-14ms boot")
+    Container(firecracker, "Firecracker", "VMM", "Starts unikernel from snapshot")
+    Container(vm, "Unikernel", "Unikraft", "Function instance")
+}
+
+Rel_R(dpu, wake_daemon, "2. Signals wake", "BPF ring buffer event")
+Rel_D(dpu, packet_queue, "1. Redirects SYN", "VM is in sleeping_vms map")
+Rel_D(wake_daemon, firecracker, "3. Resume VM", "Firecracker API (~3-14ms)")
+Rel_R(firecracker, vm, "4. VM boots")
+Rel_L(wake_daemon, dpu, "5. Updates map", "Removes from sleeping_vms")
+Rel_R(packet_queue, vm, "6. Releases packets", "NF_ACCEPT / reinject")
+
+SHOW_LEGEND()
+@enduml

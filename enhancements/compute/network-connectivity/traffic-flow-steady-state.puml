@@ -1,0 +1,27 @@
+@startuml traffic-flow-steady-state
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Traffic Flow - Steady State (VM Running)
+
+System_Boundary(edge_boundary, "Datum Edge") {
+    Container(lb, "Anycast LB", "L4", "Client entry point")
+}
+
+System_Boundary(gvpc_boundary, "gVPC Fabric") {
+    Container(edge_node, "Edge Node", "VPP", "SRv6 encap")
+    Container(core, "SRv6 Core", "VPP", "Segment routing")
+}
+
+System_Boundary(worker_boundary, "Worker Node") {
+    Container(dpu, "BlueField DPU", "eSwitch", "Hardware fast-path")
+    Container(vm, "Workload", "Function / Container / VM", "Workload instance")
+}
+
+Rel_R(lb, edge_node, "Forwards request")
+Rel_R(edge_node, core, "SRv6 transport")
+Rel_D(core, dpu, "Delivers to worker")
+Rel_R(dpu, vm, "Direct to VF", "Hardware path, zero proxy overhead")
+
+SHOW_LEGEND()
+@enduml
