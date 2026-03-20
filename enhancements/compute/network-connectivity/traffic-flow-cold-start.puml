@@ -1,23 +1,39 @@
 @startuml traffic-flow-cold-start
-!$NEW_C4_STYLE = 1
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include ../../datum-theme-sequence.puml
 
-title Traffic Flow - Cold Start (VM Sleeping)
+title Traffic Flow - Cold Start (Scale from Zero)
 
-System_Boundary(worker_boundary, "Worker Node") {
-    Container(dpu, "BlueField DPU", "XDP on ARM", "Detects traffic for sleeping VM")
-    Container(wake_daemon, "Wake Daemon", "Go on DPU ARM", "Orchestrates VM lifecycle")
-    Container(packet_queue, "Packet Queue", "NFQUEUE / AF_XDP", "Holds packets during 3-14ms boot")
-    Container(firecracker, "Firecracker", "VMM", "Starts unikernel from snapshot")
-    Container(vm, "Unikernel", "Unikraft", "Function instance")
-}
+participant "BlueField DPU\n(XDP on ARM)" as dpu
+participant "Packet Queue\n(NFQUEUE / AF_XDP)" as queue
+participant "Wake Daemon\n(DPU ARM)" as daemon
+participant "Firecracker\n(VMM)" as vmm
+participant "Workload" as vm
 
-Rel_R(dpu, wake_daemon, "2. Signals wake", "BPF ring buffer event")
-Rel_D(dpu, packet_queue, "1. Redirects SYN", "VM is in sleeping_vms map")
-Rel_D(wake_daemon, firecracker, "3. Resume VM", "Firecracker API (~3-14ms)")
-Rel_R(firecracker, vm, "4. VM boots")
-Rel_L(wake_daemon, dpu, "5. Updates map", "Removes from sleeping_vms")
-Rel_R(packet_queue, vm, "6. Releases packets", "NF_ACCEPT / reinject")
+note over dpu: Packet arrives for\nsleeping workload
 
-SHOW_LEGEND()
+dpu -> dpu: Check sleeping_vms\nBPF hash map
+
+== Parallel: Queue + Wake ==
+
+dpu -> queue: Redirect SYN packet\n(hold in kernel memory)
+dpu -> daemon: Signal wake event\n(BPF ring buffer)
+
+== Boot Workload (~3-14ms) ==
+
+daemon -> vmm: Resume from snapshot\n(Firecracker API)
+vmm -> vm: VM boots
+
+vm --> daemon: Ready signal
+
+== Release Traffic ==
+
+daemon -> dpu: Remove from sleeping_vms map
+queue -> vm: Release queued packets\n(NF_ACCEPT / reinject)
+
+note over dpu, vm: Subsequent packets flow\ndirectly via eSwitch\nhardware fast-path
+
+vm --> dpu: Response follows\nnormal steady-state path
+
+note right of queue: Total cold-start latency:\n3-14ms (boot time only).\nClient never retransmits.
+
 @enduml
