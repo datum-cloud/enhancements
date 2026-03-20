@@ -3,11 +3,10 @@
 
 participant "BlueField DPU\n(XDP on ARM)" as dpu
 participant "Packet Queue\n(NFQUEUE / AF_XDP)" as queue
-participant "Wake Daemon\n(DPU ARM)" as daemon
-participant "Firecracker\n(VMM)" as vmm
-participant "Workload" as vm
+participant "Wake Daemon" as daemon
+participant "Instance" as instance
 
-note over dpu: Packet arrives for\nsleeping workload
+note over dpu: Packet arrives for\nsleeping instance
 
 dpu -> dpu: Check sleeping_vms\nBPF hash map
 
@@ -16,21 +15,20 @@ dpu -> dpu: Check sleeping_vms\nBPF hash map
 dpu -> queue: Redirect SYN packet\n(hold in kernel memory)
 dpu -> daemon: Signal wake event\n(BPF ring buffer)
 
-== Boot Workload (~3-14ms) ==
+== Boot Instance (~3-14ms) ==
 
-daemon -> vmm: Resume from snapshot\n(Firecracker API)
-vmm -> vm: VM boots
+daemon -> instance: Resume from snapshot\n(e.g. Unikraft proxy_wake_instance)
 
-vm --> daemon: Ready signal
+instance --> daemon: Ready signal
 
 == Release Traffic ==
 
 daemon -> dpu: Remove from sleeping_vms map
-queue -> vm: Release queued packets\n(NF_ACCEPT / reinject)
+queue -> instance: Release queued packets\n(NF_ACCEPT / reinject)
 
-note over dpu, vm: Subsequent packets flow\ndirectly via eSwitch\nhardware fast-path
+note over dpu, instance: Subsequent packets flow\ndirectly via eSwitch\nhardware fast-path
 
-vm --> dpu: Response follows\nnormal steady-state path
+instance --> dpu: Response follows\nnormal steady-state path
 
 note right of queue: Total cold-start latency:\n3-14ms (boot time only).\nClient never retransmits.
 

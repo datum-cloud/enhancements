@@ -8,7 +8,7 @@ System_Ext(gvpc, "Galactic VPC Fabric", "SRv6-based overlay network with path co
 System_Boundary(worker_boundary, "Worker Node") {
     Container(dpu, "BlueField DPU", "DOCA / eBPF", "Hardware eSwitch, XDP on ARM cores, packet steering")
     Container(ovs, "OVS Bridge", "Open vSwitch", "Software bridge with hardware flow offload to eSwitch")
-    Container(wake_daemon, "Wake Daemon", "Go", "Receives wake signals from eBPF, triggers workload lifecycle")
+    Container(wake_daemon, "Wake Daemon", "", "Receives wake signals from eBPF, triggers instance lifecycle")
     Container(instance, "Instance", "Function / Container / VM", "Single deployment of a workload, attached to gVPC network interface")
 }
 

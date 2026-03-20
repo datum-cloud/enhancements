@@ -495,9 +495,27 @@ networking.
 
 <<[UNRESOLVED @julia]>>
 Unikraft's existing virtio-net/TAP integration works well for the `standard`
-NetworkInterfaceClass. If there is future demand for `performance` class
-functions, evaluate whether VF passthrough (SR-IOV via VFIO) can be supported
-in the Firecracker fork. This is not a blocker for initial integration.
+NetworkInterfaceClass. For wake-on-traffic integration, Unikraft has proposed
+a C library API for instance lifecycle control:
+
+```c
+// Look up a specific backend node by UUID
+enum result proxy_lookup_node(char *node_uuid, struct conn* c_out);
+// Wake a sleeping instance
+enum result proxy_wake_instance(const struct conn* c);
+// Close a connection
+enum result proxy_close(struct conn* c_out);
+```
+
+The wake daemon would call `proxy_wake_instance` (or a simplified "bump by
+UUID" variant) when eBPF detects traffic for a sleeping instance. Open
+questions:
+
+- Can this API be exposed as a gRPC/REST service rather than a C library with
+  IPC, to avoid tight coupling between the wake daemon and Unikraft's
+  controller process?
+- How does the wake daemon discover which instances are on which nodes? Push
+  (Unikraft registers instances) vs pull (daemon queries Unikraft)?
 <<[/UNRESOLVED]>>
 
 ## Alternatives
