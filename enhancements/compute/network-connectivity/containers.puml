@@ -6,9 +6,9 @@ System_Ext(edge, "Datum Edge", "Anycast LB, WAF, rate limiting, DDoS protection"
 System_Ext(gvpc, "Galactic VPC Fabric", "SRv6-based overlay network with path computation engine")
 
 System_Boundary(worker_boundary, "Worker Node") {
-    Container(dpu, "BlueField DPU", "DOCA / eBPF", "Hardware eSwitch, XDP on ARM cores, packet steering")
+    Container(dpu, "BlueField DPU", "DOCA", "Hardware eSwitch, OVS flow offload, packet steering")
     Container(ovs, "OVS Bridge", "Open vSwitch", "Software bridge with hardware flow offload to eSwitch")
-    Container(wake_daemon, "Wake Daemon", "", "Receives wake signals from eBPF, triggers instance lifecycle")
+    Container(wake_daemon, "Wake Daemon", "", "Receives flow miss from OVS, triggers instance lifecycle")
     Container(instance, "Instance", "Function / Container / VM", "Single deployment of a workload, attached to gVPC network interface")
 }
 
@@ -17,8 +17,8 @@ Rel_R(gvpc, dpu, "Delivers to worker", "SRv6 decap")
 Rel_D(dpu, ovs, "Offloads flow rules", "eSwitch hardware")
 Rel_L(ovs, instance, "Forwards via TAP", "standard class")
 Rel_D(dpu, instance, "Steers to VF", "performance class")
-Rel_R(dpu, wake_daemon, "Signals wake", "BPF ring buffer")
-Rel_D(wake_daemon, instance, "Starts/resumes", "VMM API")
+Rel_R(ovs, wake_daemon, "Flow miss", "sleeping instance")
+Rel_D(wake_daemon, instance, "Starts/resumes", "Runtime wake API")
 
 SHOW_LEGEND()
 @enduml

@@ -21,7 +21,7 @@ latest-milestone: "v0.1"
   - [NetworkInterfaceClass](#networkinterfaceclass)
   - [Traffic Flow: Steady State](#traffic-flow-steady-state)
   - [Traffic Flow: Cold Start (Scale from Zero)](#traffic-flow-cold-start-scale-from-zero)
-  - [Proxyless Wake-on-Traffic](#proxyless-wake-on-traffic)
+  - [Wake-on-Traffic via OVS Flow Miss](#wake-on-traffic-via-ovs-flow-miss)
   - [Inter-Workload Connectivity](#inter-workload-connectivity)
   - [Demand-Driven Regional Placement](#demand-driven-regional-placement)
   - [BlueField DPU Integration](#bluefield-dpu-integration)
@@ -110,9 +110,8 @@ inter-workload networking. This is the wrong approach for three reasons:
   [gVPC enhancement][gvpc-enhancement] covers the broader network architecture
 - Hardware-offloading [Segment Routing over IPv6 (SRv6)][srv6] endpoint
   functions in P4/[DOCA Pipeline Language (DPL)][dpl] on BlueField -- the
-  initial implementation uses [eXpress Data Path (XDP)][xdp] on
-  [Data Processing Unit (DPU)][dpu] ARM cores with hardware offload as a future
-  optimization
+  initial implementation uses software-based SRv6 processing with hardware
+  offload as a future optimization
 
 ## Proposal
 
@@ -132,14 +131,14 @@ specified by the NetworkInterfaceClass -- either through OVS-offloaded flow
 rules or directly to a VF via the eSwitch hardware fast-path.
 
 For workloads that support scale-from-zero (such as [Unikraft][unikraft]
-functions), an [eXpress Data Path (XDP)][xdp] program on the
-[Data Processing Unit (DPU)][dpu] ARM cores detects traffic for idle instances
-and signals a wake daemon, which triggers the
-[Virtual Machine Monitor (VMM)][firecracker] to resume the workload. Packets are
-held in a kernel queue ([Netfilter Queue / NFQUEUE][nfqueue]) or
-[Address Family XDP (AF_XDP)][af-xdp] buffer during the boot window, then
-released directly to the workload. The client never experiences a TCP
-retransmit.
+functions), the [OVS][ovs] flow miss path handles wake-on-traffic. When a
+packet arrives for a sleeping instance, there is no matching flow rule in OVS.
+The packet hits the OVS slow path, where a wake daemon detects the sleeping
+instance, triggers the [Virtual Machine Monitor (VMM)][firecracker] to resume
+it, and holds the packet until the instance is ready. Once booted, OVS installs
+a flow rule and offloads it to the [Data Processing Unit (DPU)][dpu] eSwitch
+hardware -- subsequent packets bypass software entirely. The client never
+experiences a TCP retransmit.
 
 <p align="center">
   <img src="./containers.png" alt="Container Diagram" />
@@ -209,25 +208,18 @@ available instance.
   OVS-offloaded virtio-net path works with their existing network stack and
   provides the density needed for serverless workloads.
 
-- **BlueField XDP runs in native mode on ARM cores, not hardware-offloaded.**
-  XDP programs execute on the DPU's ARM subsystem, not in the eSwitch silicon.
-  This is sufficient for control-plane operations (wake signaling, map lookups)
-  but not for line-rate data-plane processing. Steady-state traffic uses
-  eSwitch flow rules ([DOCA][doca-sdk] Flow or OVS offload) for
-  hardware-accelerated delivery.
+- **OVS flow miss path handles scale-from-zero natively.** When a packet
+  arrives for a sleeping instance, there is no OVS flow rule for it. The packet
+  hits the OVS slow path, where the wake daemon can trigger the instance boot
+  and hold the packet until the instance is ready. This avoids the need for
+  eBPF/XDP programs for wake-on-traffic detection.
 
 - **SRv6 on BlueField requires custom P4/DPL development.** SRv6 is not a
-  native DOCA Flow tunnel type like
+  native [DOCA][doca-sdk] Flow tunnel type like
   [Virtual Extensible LAN (VXLAN)][vxlan]. The flex parser supports SRv6 header
   recognition, and encapsulation/decapsulation can be built in DPL, but this is
   custom work. [Arrcus][arrcus-srv6] has demonstrated production SRv6 on
   BlueField-3 (with SoftBank for 5G edge breakout), confirming feasibility.
-
-- **No production platform does proxyless scale-from-zero at the NIC level
-  today.** [Koyeb][koyeb-scale-to-zero] comes closest with
-  [Extended Berkeley Packet Filter (eBPF)][ebpf]-based idle detection but uses
-  drop-and-retransmit (not packet buffering). This architecture combines proven
-  primitives (XDP, NFQUEUE, AF_XDP, Firecracker snapshots) in a novel way.
 
 - **Scale-from-zero is opt-in per workload type.** Long-running workloads
   (databases, always-on services) do not use the wake-on-traffic path. The DPU
@@ -239,7 +231,7 @@ available instance.
 |------|--------|------------|
 | SR-IOV VF pool exhaustion on high-demand nodes | Workloads requesting `performance` class cannot be scheduled | Limit VF pool size per node (e.g., 32-64); scheduler treats VFs as a finite resource and bin-packs accordingly |
 | OVS software path latency is too high for some workloads | ~10-50 microsecond overhead vs SR-IOV may not meet SLA for latency-sensitive workloads | NetworkInterfaceClass lets those workloads opt into SR-IOV; most workloads (serverless, batch) are insensitive to this delta |
-| NFQUEUE packet hold introduces kernel dependency | Tight coupling to Linux netfilter subsystem | AF_XDP on DPU ARM cores is a pure-userspace fallback that avoids netfilter entirely |
+| OVS slow path adds latency during cold start | First packet for a sleeping instance goes through software OVS | OVS buffers the packet during the 3-14ms boot window; this is a one-time cost per cold start, not steady-state |
 | SRv6 DPL development takes longer than expected | Delays hardware-path optimization | Start with SRv6 on VPP (software) at edge nodes; BlueField hardware offload is an optimization, not a blocker |
 | gVPC is not ready when first workloads need to ship | Launch is blocked | Define a minimal gVPC milestone; the full gVPC feature set is not needed for day-one workloads |
 
@@ -342,54 +334,48 @@ arrives:
 
 The cold start sequence:
 
-1. **Packet arrives at DPU.** The XDP program (running on DPU ARM cores) checks
-   the `sleeping_vms` BPF hash map. The destination IP matches a sleeping
-   instance.
+1. **Packet arrives at OVS with no matching flow rule.** For a sleeping
+   instance, the platform has either removed the OVS flow rules or installed a
+   rule that directs traffic to the wake daemon. The packet enters the OVS slow
+   path.
 
-2. **Packet is queued.** The XDP program redirects the packet to either:
-   - **NFQUEUE**: Packet stays in kernel memory. A userspace daemon issues
-     `NF_ACCEPT` to release it once the VM is ready. The packet never leaves
-     the kernel data path.
-   - **AF_XDP socket**: Packet is redirected to a userspace buffer on the DPU
-     ARM cores. The daemon reinjects it after boot.
+2. **Wake daemon receives the packet.** The daemon identifies the target
+   instance, determines it is sleeping, and holds the packet in memory.
 
-3. **Wake signal fires.** The XDP program writes an event to a BPF ring buffer
-   (`BPF_RB_FORCE_WAKEUP` for immediate notification). The wake daemon receives
-   the event in microseconds.
+3. **Instance resumes.** The wake daemon calls the runtime's wake API (e.g.,
+   Unikraft's `proxy_wake_instance`) to restore the instance from a memory
+   snapshot. For Unikraft functions, boot completes in 3-14ms.
 
-4. **VM resumes.** The wake daemon calls the VMM API (e.g., Firecracker) to
-   restore the workload from a memory snapshot. For Unikraft functions, boot
-   completes in 3-14ms.
-
-5. **Map updated, packets released.** The daemon removes the instance from
-   `sleeping_vms`. Queued packets are released to the now-running workload. The
-   NFQUEUE rule is removed or the eSwitch flow rule is updated to direct
-   future traffic through the hardware fast-path.
+4. **Flow rule installed, packet released.** Once the instance is ready, the
+   daemon installs an OVS flow rule for the instance and releases the held
+   packet. OVS offloads the new flow rule to the DPU's eSwitch hardware --
+   subsequent packets bypass software entirely and take the hardware fast-path.
 
 **Why not drop the SYN and rely on TCP retransmit?** TCP's initial retransmit
-timer is 1 second (RFC 6298). Unikraft boots in 3-14ms. Dropping the SYN adds
-1000ms of latency for a 4ms boot -- a 250x penalty that wastes the entire value
-of fast boot times. Packet queuing preserves the sub-20ms cold start experience.
+timer is 1 second ([RFC 6298][rfc-6298]). Unikraft boots in 3-14ms. Dropping
+the SYN adds 1000ms of latency for a 4ms boot -- a 250x penalty that wastes
+the entire value of fast boot times. Holding the packet in the OVS slow path
+preserves the sub-20ms cold start experience.
 
-### Proxyless Wake-on-Traffic
+### Wake-on-Traffic via OVS Flow Miss
 
-The wake-on-traffic system replaces per-runtime proxy responsibilities with
-platform-level DPU capabilities:
+The wake-on-traffic system uses OVS's existing flow miss mechanism rather than
+custom eBPF programs. This is the same pattern used by Knative's activator,
+applied at the OVS layer instead of HTTP:
 
-| Proxy responsibility | Proxyless replacement | Where it runs |
-|---------------------|----------------------|---------------|
-| Traffic detection | XDP program checks `sleeping_vms` BPF map | DPU ARM cores |
-| Request buffering | NFQUEUE (kernel memory) or AF_XDP (DPU userspace) | DPU ARM cores |
-| Wake signal | BPF ring buffer event to wake daemon | DPU ARM cores |
-| Idle detection | eBPF packet counters per instance, cooldown logic in daemon | DPU ARM cores |
-| TCP connection hold | NFQUEUE holds packet in kernel; VM resumes with TCP state intact via snapshot | DPU + VMM |
-| Load balancing | gVPC fabric + eSwitch flow rules | Hardware path |
+| Responsibility | How OVS handles it |
+|---------------|-------------------|
+| Traffic detection | No flow rule for sleeping instance; packet enters OVS slow path |
+| Packet buffering | Wake daemon holds packet in memory during boot (~3-14ms) |
+| Wake signal | Daemon calls runtime wake API (e.g., Unikraft `proxy_wake_instance`) |
+| Idle detection | Daemon monitors OVS flow statistics; no traffic = idle |
+| Steady-state forwarding | OVS flow rule offloaded to DPU eSwitch hardware |
 
-All wake-on-traffic logic runs on the DPU's ARM cores, consuming zero host CPU.
-The host CPU is reserved entirely for running workloads. This model is
-runtime-agnostic -- any workload that supports snapshot/restore can use the same
-wake-on-traffic path, regardless of whether it's a Unikraft unikernel, a
-Firecracker microVM, or a future runtime.
+This approach avoids the complexity of eBPF/XDP programs, NFQUEUE, and AF_XDP
+by leveraging OVS infrastructure that is already in the data path for the
+`standard` NetworkInterfaceClass. The wake daemon is a control-plane component
+that only handles the first packet during a cold start -- it is never in the
+steady-state data path.
 
 ### Inter-Workload Connectivity
 
@@ -414,15 +400,16 @@ per-workload networking configuration.
 
 ### Demand-Driven Regional Placement
 
-The DPU's traffic monitoring capabilities feed the placement system:
+OVS flow statistics and the wake daemon's traffic observations feed the
+placement system:
 
-1. **eBPF counters per source region** track where traffic originates.
+1. **OVS flow counters** track traffic volume per instance and source region.
 2. The platform's scheduler observes traffic patterns and identifies regions
    where local instances would reduce latency.
 3. New instances are scheduled in high-traffic regions. gVPC provides
    connectivity immediately -- no additional network configuration required.
 4. When traffic subsides, instances in low-traffic regions scale to zero. The
-   DPU continues monitoring for future demand.
+   wake daemon continues monitoring for future demand via OVS flow miss.
 
 gVPC handles the "long-haul" case: when a request arrives at a region without a
 local instance, the fabric routes it to the nearest region that has one. The
@@ -430,7 +417,7 @@ user experiences higher latency but the request still succeeds.
 
 ### BlueField DPU Integration
 
-The DPU serves three roles in this architecture:
+The DPU serves two roles in this architecture:
 
 **1. Hardware traffic steering (steady state)**
 
@@ -438,17 +425,9 @@ For `standard` class interfaces, OVS offloads flow rules to the eSwitch so that
 established flows are forwarded in hardware without ARM core or host CPU
 involvement. For `performance` class interfaces, [DOCA][doca-sdk] Flow or OVS
 programs eSwitch rules that forward packets directly from the network port to
-the workload's VF.
+the instance's VF.
 
-**2. Wake-on-traffic signaling (cold start)**
-
-XDP programs on the ARM cores detect packets for sleeping workloads and signal
-the wake daemon. This is a control-plane operation -- low throughput, latency
-sensitive. Native XDP on ARM cores is sufficient; hardware offload is not
-needed. The wake daemon is configured per workload type to call the appropriate
-VMM API.
-
-**3. SRv6 edge processing**
+**2. SRv6 edge processing**
 
 The DPU performs SRv6 encapsulation/decapsulation at the worker node boundary.
 Initially this runs on [Vector Packet Processing (VPP)][vpp] software colocated
@@ -471,7 +450,7 @@ runtimes:
 
 **What the platform provides:**
 - Network fabric (gVPC) and automatic workload attachment
-- Traffic steering and wake-on-traffic (DPU + eBPF)
+- Traffic steering and wake-on-traffic (OVS + wake daemon)
 - Idle detection and scale-to-zero decisions
 - Workload scheduling and regional placement
 - Edge services (WAF, rate limiting, DDoS protection)
@@ -484,7 +463,7 @@ runtimes:
 
 **What the runtime does NOT need to provide:**
 - Traffic proxy or edge integration -- the platform handles connectivity
-- Idle detection logic -- the platform's eBPF counters track traffic
+- Idle detection logic -- the platform monitors OVS flow statistics
 - Custom networking between workloads -- gVPC handles inter-workload
   communication
 
@@ -566,10 +545,10 @@ detection; gVPC handles transport.
 - Datum cannot evolve wake-on-traffic behavior independently -- it depends on
   each runtime's proxy release cycle.
 - Each new workload type requires a new proxy integration.
-- The proxy duplicates capabilities that the DPU provides more efficiently
-  (traffic counting, packet steering).
-- Moving wake-on-traffic to the DPU is architecturally aligned with where
-  Datum is heading for all workload types.
+- The proxy duplicates capabilities that OVS and the platform already provide
+  (traffic counting, flow management, packet steering).
+- Moving wake-on-traffic to the platform layer is architecturally aligned with
+  where Datum is heading for all workload types.
 
 ## Open Questions
 
@@ -593,18 +572,13 @@ detection; gVPC handles transport.
    VFs. Should this be exposed as a distinct NetworkInterfaceClass (e.g.,
    `accelerated`) or treated as an implementation detail of `performance`?
 
-5. **NFQUEUE vs AF_XDP for packet hold.** NFQUEUE is simpler (packet stays in
-   kernel memory) but couples to Linux netfilter. AF_XDP is more portable and
-   runs entirely on DPU ARM cores but requires packet reinjection logic. Which
-   is the right default?
-
-6. **SRv6 on DPU timeline.** Should v1 run SRv6 encapsulation/decapsulation in
+5. **SRv6 on DPU timeline.** Should v1 run SRv6 encapsulation/decapsulation in
    VPP software on the host, with DPU hardware offload as a v2 optimization?
    Or should we invest in DPL/P4 development from the start?
 
-7. **Scheduling signals.** How does the placement system consume eBPF traffic
-   counters from the DPU? Direct API from DPU ARM cores to the scheduler, or
-   metrics pipeline via OpenTelemetry?
+6. **Scheduling signals.** How does the placement system consume OVS flow
+   statistics for demand-driven placement? Direct API from the wake daemon to
+   the scheduler, or metrics pipeline via OpenTelemetry?
 
 ## Implementation History
 
