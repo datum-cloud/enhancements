@@ -6,7 +6,7 @@ participant "Anycast LB" as lb <<External>>
 participant "Edge Node" as edge <<External>>
 participant "SRv6 Core" as core <<External>>
 participant "BlueField DPU" as dpu
-participant "Workload" as vm
+participant "Instance" as instance
 
 client -> lb: HTTPS request via anycast IP
 lb -> edge: Forward after WAF / rate limiting
@@ -14,10 +14,10 @@ lb -> edge: Forward after WAF / rate limiting
 edge -> core: SRv6 encapsulation\n(segment list from PCE)
 core -> dpu: Route via optimal path\n(SRv6 decap at worker)
 
-dpu -> vm: Deliver to VF via eSwitch\n(hardware fast-path)
-note right of dpu: Zero proxy overhead.\nPacket goes directly\nfrom eSwitch to VF.
+dpu -> instance: Deliver via OVS offloaded flow\nor direct to VF
+note right of dpu: Steady-state traffic uses\nhardware-offloaded path.\nNo software in the loop.
 
-vm --> dpu: Response
+instance --> dpu: Response
 dpu --> core: SRv6 encap (reverse path)
 core --> edge: Route back
 edge --> lb: Forward

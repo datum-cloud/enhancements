@@ -245,14 +245,14 @@ The system has four layers, each with clear responsibilities:
 |-------|-----------|----------------|
 | **Edge** | Anycast LB + WAF | Client-facing traffic reception, DDoS protection, rate limiting |
 | **Fabric** | gVPC SRv6 Core | Encrypted, SLA-aware transport between edge and worker nodes |
-| **Node** | BlueField DPU | Traffic steering, wake-on-traffic signaling, NetworkInterfaceClass implementation |
+| **Node** | BlueField DPU + OVS | Hardware traffic steering, OVS flow offload, NetworkInterfaceClass implementation |
 | **Workload** | VMM + Runtime | Workload execution (Firecracker + Unikraft for functions, other VMMs for other types) |
 
-The edge and fabric layers are fully workload-agnostic. The node layer provides
-workload-type-specific behaviors (scale-from-zero for functions, always-on
-steering for databases) through configurable eBPF programs and implements the
-NetworkInterfaceClass abstraction. The workload layer is pluggable -- any
-runtime that exposes a network interface can attach to gVPC.
+The edge and fabric layers are fully workload-agnostic. The node layer
+implements the NetworkInterfaceClass abstraction and provides
+workload-type-specific behaviors (scale-from-zero via OVS flow miss for
+functions, always-on hardware steering for databases). The workload layer is
+pluggable -- any runtime that exposes a network interface can attach to gVPC.
 
 ### NetworkInterfaceClass
 
@@ -309,10 +309,10 @@ paths with no software proxy:
    pre-programmed the segment list based on the destination worker node and
    traffic class.
 4. SRv6 core routes the packet through the optimal path.
-5. The destination worker's BlueField DPU decapsulates and steers the packet
-   directly to the workload's virtual function via the eSwitch hardware
-   fast-path.
-6. The workload processes the request and responds. The response follows the
+5. The destination worker's BlueField DPU decapsulates the packet. For
+   `standard` class, OVS forwards via TAP using a hardware-offloaded flow rule.
+   For `performance` class, the eSwitch steers directly to the instance's VF.
+6. The instance processes the request and responds. The response follows the
    reverse path.
 
 <p align="center">
@@ -391,7 +391,8 @@ SRv6 fabric, regardless of workload type:
 - The local DPU encapsulates the packet with SRv6 headers.
 - The gVPC fabric routes the packet to workload B's worker node, potentially
   in a different region.
-- The destination DPU decapsulates and delivers to workload B's VF.
+- The destination DPU decapsulates and delivers to workload B via its
+  NetworkInterface (OVS/TAP or VF depending on class).
 
 This enables composition patterns across workload types: a function calls a
 database, a function calls another function, a container calls a cache. All
@@ -487,8 +488,8 @@ enum result proxy_close(struct conn* c_out);
 ```
 
 The wake daemon would call `proxy_wake_instance` (or a simplified "bump by
-UUID" variant) when eBPF detects traffic for a sleeping instance. Open
-questions:
+UUID" variant) when an OVS flow miss indicates traffic for a sleeping instance.
+Open questions:
 
 - Can this API be exposed as a gRPC/REST service rather than a C library with
   IPC, to avoid tight coupling between the wake daemon and Unikraft's
@@ -518,9 +519,9 @@ pushes timelines.
 
 ### Drop SYN and Rely on TCP Retransmit
 
-The approach used by [Koyeb][koyeb-scale-to-zero]: eBPF drops the first SYN
-packet, signals a wake daemon, and relies on TCP's retransmit mechanism to
-deliver the next attempt after the VM has booted.
+The approach used by [Koyeb][koyeb-scale-to-zero]: drop the first SYN packet,
+signal a wake daemon, and rely on TCP's retransmit mechanism to deliver the
+next attempt after the VM has booted.
 
 **Why we rejected this:**
 - TCP's initial retransmit timer is 1 second (RFC 6298). Unikraft boots in
@@ -607,18 +608,14 @@ detection; gVPC handles transport.
 [doca-sdk]: https://developer.nvidia.com/networking/doca
 [arrcus-srv6]: https://arrcus.com/solutions/mup
 [rfc-6298]: https://datatracker.ietf.org/doc/html/rfc6298
-[af-xdp]: https://docs.kernel.org/networking/af_xdp.html
-[ebpf]: https://ebpf.io/what-is-ebpf/
 [dpl]: https://docs.nvidia.com/doca/sdk/doca-pipeline-language-services-guide/index.html
 [dpu]: https://blogs.nvidia.com/blog/whats-a-dpu-data-processing-unit/
 [bluefield]: https://www.nvidia.com/en-us/networking/products/data-processing-unit/
-[nfqueue]: https://netfilter.org/projects/libnetfilter_queue/
 [sriov]: https://docs.kernel.org/PCI/pci-iov-howto.html
 [srv6]: https://www.segment-routing.net/
 [unikraft]: https://unikraft.org/
 [firecracker]: https://firecracker-microvm.github.io/
 [vpp]: https://fd.io/
-[xdp]: https://www.iovisor.org/technology/xdp
 [tap]: https://docs.kernel.org/networking/tuntap.html
 [virtio]: https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html
 [vfio]: https://docs.kernel.org/driver-api/vfio.html
