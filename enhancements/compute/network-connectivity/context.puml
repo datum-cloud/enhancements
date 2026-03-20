@@ -2,8 +2,6 @@
 !$NEW_C4_STYLE = 1
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
 
-title gVPC Workload Connectivity - System Context
-
 Person(client, "End User", "Sends requests to workloads running on Datum")
 
 System_Ext(edge, "Datum Edge", "Anycast LB with WAF, rate limiting, and DDoS protection")

@@ -1,8 +1,6 @@
 @startuml traffic-flow-cold-start
 !include ../../datum-theme-sequence.puml
 
-title Traffic Flow - Cold Start (Scale from Zero)
-
 participant "BlueField DPU\n(XDP on ARM)" as dpu
 participant "Packet Queue\n(NFQUEUE / AF_XDP)" as queue
 participant "Wake Daemon\n(DPU ARM)" as daemon

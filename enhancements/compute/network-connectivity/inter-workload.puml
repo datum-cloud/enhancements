@@ -2,26 +2,18 @@
 !$NEW_C4_STYLE = 1
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
 
-title Inter-Workload Connectivity via gVPC
-
 System_Boundary(region_a, "Region A - Worker Node") {
     Container(vm_a, "Workload A", "Function", "API handler")
-    Container(dpu_a, "BlueField DPU", "eSwitch", "SRv6 encap / VF steering")
 }
 
-System_Boundary(gvpc_boundary, "Shared gVPC Network") {
-    Container(fabric, "SRv6 Fabric", "VPP Core", "Provides connectivity between all attached workloads")
-}
+System_Ext(gvpc, "Galactic VPC", "SRv6-based overlay providing encrypted connectivity between all attached workloads")
 
 System_Boundary(region_b, "Region B - Worker Node") {
-    Container(dpu_b, "BlueField DPU", "eSwitch", "SRv6 decap / VF steering")
     Container(vm_b, "Workload B", "Database", "Managed data store")
 }
 
-Rel_D(vm_a, dpu_a, "Sends packet", "virtio-net")
-Rel_R(dpu_a, fabric, "Encapsulates", "SRv6")
-Rel_R(fabric, dpu_b, "Routes to destination", "SRv6 segment list")
-Rel_D(dpu_b, vm_b, "Delivers to VF", "Hardware path")
+Rel_R(vm_a, gvpc, "Sends packet", "Private IP via network interface")
+Rel_R(gvpc, vm_b, "Delivers packet", "Routed via SRv6 segment list")
 
 SHOW_LEGEND()
 @enduml

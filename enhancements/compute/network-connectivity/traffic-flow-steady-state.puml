@@ -1,8 +1,6 @@
 @startuml traffic-flow-steady-state
 !include ../../datum-theme-sequence.puml
 
-title Traffic Flow - Steady State (VM Running)
-
 participant "Client" as client <<Person>>
 participant "Anycast LB" as lb <<External>>
 participant "Edge Node" as edge <<External>>

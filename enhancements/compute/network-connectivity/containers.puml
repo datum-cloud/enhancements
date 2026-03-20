@@ -2,36 +2,23 @@
 !$NEW_C4_STYLE = 1
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
 
-title gVPC Workload Connectivity - Container Diagram
-
-System_Boundary(edge_boundary, "Datum Edge") {
-    Container(anycast_lb, "Anycast LB", "L4 Load Balancer", "Receives client traffic via anycast IP, consistent hashing")
-    Container(waf, "WAF / Protection", "Edge Services", "Rate limiting, DDoS protection, request filtering")
-}
-
-System_Boundary(gvpc_boundary, "Galactic VPC Fabric") {
-    Container(pce, "Path Computation Engine", "Controller", "Computes optimal SRv6 segment lists per tenant and traffic class")
-    Container(edge_node, "Edge Node", "VPP + WireGuard", "Terminates tunnels, performs SRv6 encap/decap at worker nodes")
-    Container(srv6_core, "SRv6 Core", "VPP Routers", "Fully meshed core nodes providing SRv6 transport")
-}
+System_Ext(edge, "Datum Edge", "Anycast LB, WAF, rate limiting, DDoS protection")
+System_Ext(gvpc, "Galactic VPC Fabric", "SRv6-based overlay network with path computation engine")
 
 System_Boundary(worker_boundary, "Worker Node") {
-    Container(dpu, "BlueField DPU", "DOCA / eBPF", "Hardware eSwitch, XDP on ARM cores, packet steering to VFs")
-    Container(wake_daemon, "Wake Daemon", "Go", "Receives wake signals from eBPF, triggers workload lifecycle via VMM API")
-    Container(vmm, "VMM", "Firecracker / Other", "Runs workloads with virtio-net or VF passthrough")
-    Container(workload, "Workload", "Function / Container / VM", "Executes user workload, attached to gVPC network interface")
+    Container(dpu, "BlueField DPU", "DOCA / eBPF", "Hardware eSwitch, XDP on ARM cores, packet steering")
+    Container(ovs, "OVS Bridge", "Open vSwitch", "Software bridge with hardware flow offload to eSwitch")
+    Container(wake_daemon, "Wake Daemon", "Go", "Receives wake signals from eBPF, triggers workload lifecycle")
+    Container(instance, "Instance", "Function / Container / VM", "Single deployment of a workload, attached to gVPC network interface")
 }
 
-Rel_R(anycast_lb, waf, "Forwards", "L4")
-Rel_D(waf, edge_node, "Sends to gVPC", "Encapsulated")
-Rel_R(edge_node, srv6_core, "Transports via", "SRv6 segments")
-Rel_D(pce, edge_node, "Programs paths", "Segment lists")
-Rel_D(pce, srv6_core, "Programs paths", "Segment lists")
-Rel_D(srv6_core, dpu, "Delivers to worker", "SRv6 decap")
+Rel_D(edge, gvpc, "Routes traffic into", "SRv6 encap")
+Rel_R(gvpc, dpu, "Delivers to worker", "SRv6 decap")
+Rel_D(dpu, ovs, "Offloads flow rules", "eSwitch hardware")
+Rel_L(ovs, instance, "Forwards via TAP", "standard class")
+Rel_D(dpu, instance, "Steers to VF", "performance class")
 Rel_R(dpu, wake_daemon, "Signals wake", "BPF ring buffer")
-Rel_R(wake_daemon, vmm, "Starts/resumes workload", "API")
-Rel_R(vmm, workload, "Hosts", "virtio-net / VF")
-Rel_D(dpu, workload, "Steers to VF", "SR-IOV / eSwitch")
+Rel_D(wake_daemon, instance, "Starts/resumes", "VMM API")
 
 SHOW_LEGEND()
 @enduml
