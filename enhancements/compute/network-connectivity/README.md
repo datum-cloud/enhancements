@@ -211,8 +211,7 @@ available instance.
 - **OVS flow miss path handles scale-from-zero natively.** When a packet
   arrives for a sleeping instance, there is no OVS flow rule for it. The packet
   hits the OVS slow path, where the wake daemon can trigger the instance boot
-  and hold the packet until the instance is ready. This avoids the need for
-  eBPF/XDP programs for wake-on-traffic detection.
+  and hold the packet until the instance is ready.
 
 - **SRv6 on BlueField requires custom P4/DPL development.** SRv6 is not a
   native [DOCA][doca-sdk] Flow tunnel type like
@@ -359,9 +358,9 @@ preserves the sub-20ms cold start experience.
 
 ### Wake-on-Traffic via OVS Flow Miss
 
-The wake-on-traffic system uses OVS's existing flow miss mechanism rather than
-custom eBPF programs. This is the same pattern used by Knative's activator,
-applied at the OVS layer instead of HTTP:
+The wake-on-traffic system uses OVS's existing flow miss mechanism. This is the
+same pattern used by Knative's activator, applied at the OVS layer instead of
+HTTP:
 
 | Responsibility | How OVS handles it |
 |---------------|-------------------|
@@ -371,9 +370,9 @@ applied at the OVS layer instead of HTTP:
 | Idle detection | Daemon monitors OVS flow statistics; no traffic = idle |
 | Steady-state forwarding | OVS flow rule offloaded to DPU eSwitch hardware |
 
-This approach avoids the complexity of eBPF/XDP programs, NFQUEUE, and AF_XDP
-by leveraging OVS infrastructure that is already in the data path for the
-`standard` NetworkInterfaceClass. The wake daemon is a control-plane component
+This approach leverages OVS infrastructure that is already in the data path for
+the `standard` NetworkInterfaceClass. The wake daemon is a control-plane
+component
 that only handles the first packet during a cold start -- it is never in the
 steady-state data path.
 
