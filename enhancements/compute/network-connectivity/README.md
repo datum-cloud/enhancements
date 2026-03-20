@@ -18,6 +18,7 @@ latest-milestone: "v0.1"
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
   - [Architecture Overview](#architecture-overview)
+  - [NetworkInterfaceClass](#networkinterfaceclass)
   - [Traffic Flow: Steady State](#traffic-flow-steady-state)
   - [Traffic Flow: Cold Start (Scale from Zero)](#traffic-flow-cold-start-scale-from-zero)
   - [Proxyless Wake-on-Traffic](#proxyless-wake-on-traffic)
@@ -115,17 +116,25 @@ inter-workload networking. This is the wrong approach for three reasons:
 
 ## Proposal
 
-Workloads connect to gVPC through a network interface attached to their VM's
-[TAP device][tap], which the DPU's eSwitch steers traffic to via
-[Single Root I/O Virtualization (SR-IOV)][sriov] virtual functions (VFs). The
-Datum Edge forwards client traffic into the gVPC fabric after applying WAF and
-rate limiting. The gVPC SRv6 core routes packets to the correct worker node. On
-the worker node, the [BlueField DPU][bluefield] delivers packets directly to the
-workload's VF -- no proxy in the path.
+Workloads connect to gVPC through a NetworkInterface resource that abstracts the
+underlying attachment technology. A **NetworkInterfaceClass** controls which
+technology is used under the hood -- [OVS][ovs]-offloaded
+[virtio-net][virtio]/[TAP][tap] for high-density workloads, or
+[Single Root I/O Virtualization (SR-IOV)][sriov] virtual function (VF)
+passthrough for workloads that need near-line-rate performance. Consumers select
+the class that fits their workload; the platform handles the rest.
+
+The Datum Edge forwards client traffic into the gVPC fabric after applying WAF
+and rate limiting. The gVPC [Segment Routing over IPv6 (SRv6)][srv6] core routes
+packets to the correct worker node. On the worker node, the
+[BlueField DPU][bluefield] delivers packets to the workload via the mechanism
+specified by the NetworkInterfaceClass -- either through OVS-offloaded flow
+rules or directly to a VF via the eSwitch hardware fast-path.
 
 For workloads that support scale-from-zero (such as [Unikraft][unikraft]
-functions), an XDP program on the DPU ARM cores detects traffic for idle
-instances and signals a wake daemon, which triggers the
+functions), an [eXpress Data Path (XDP)][xdp] program on the
+[Data Processing Unit (DPU)][dpu] ARM cores detects traffic for idle instances
+and signals a wake daemon, which triggers the
 [Virtual Machine Monitor (VMM)][firecracker] to resume the workload. Packets are
 held in a kernel queue ([Netfilter Queue / NFQUEUE][nfqueue]) or
 [Address Family XDP (AF_XDP)][af-xdp] buffer during the boot window, then
@@ -160,7 +169,17 @@ My function connects to the database over the gVPC network using a private DNS
 name. Traffic routes through the SRv6 fabric without public internet exposure,
 even if the workloads run on different worker nodes in different regions.
 
-#### Story 4: Demand-driven placement reduces latency
+#### Story 4: Choosing a network interface class
+
+As a consumer, I deploy a latency-sensitive trading workload that needs
+near-line-rate network performance. I request a NetworkInterface with the
+`performance` class, and the platform attaches my workload via SR-IOV VF
+passthrough. My colleague deploys a batch of serverless functions that
+prioritize density over per-instance throughput. They use the default
+`standard` class, which attaches via OVS-offloaded virtio-net and allows
+hundreds of instances per node.
+
+#### Story 5: Demand-driven placement reduces latency
 
 As a platform operator, I observe that a workload is receiving significant
 traffic from a new region. The platform automatically schedules instances in
@@ -169,18 +188,33 @@ available instance.
 
 ### Notes/Constraints/Caveats
 
-- **Unikraft currently uses [virtio-net][virtio] via Firecracker TAP devices.**
-  There is no SR-IOV or [Virtual Function I/O (VFIO)][vfio] support in Unikraft
-  today. The DPU's eSwitch must bridge to the TAP device through the host
-  kernel, or Unikraft must add VF passthrough support. This is the most
-  significant integration constraint for functions specifically.
+- **SR-IOV VF limits constrain per-node density.** BlueField DPUs support a
+  maximum of 252 VFs per physical function, with a practical ceiling of 64-128
+  due to hardware queue exhaustion (MSI-X vectors, send/receive queues). This
+  makes SR-IOV unsuitable as the primary attachment for high-density workloads
+  like serverless functions. OVS-offloaded virtio-net/TAP should be the default,
+  with SR-IOV reserved for workloads that explicitly need near-line-rate
+  performance. The NetworkInterfaceClass abstraction lets consumers choose.
+
+- **OVS offload is the primary data path for high-density workloads.**
+  OVS on BlueField offloads flow rules to the eSwitch hardware -- the first
+  packet of each flow goes through software OVS, subsequent packets are handled
+  in hardware. This scales to thousands of workloads per node because TAP
+  devices are software constructs with no per-instance hardware resource cost
+  on the DPU. The trade-off is ~10-50 microseconds of additional latency
+  compared to SR-IOV passthrough.
+
+- **Unikraft's existing virtio-net via Firecracker TAP is the right fit.**
+  Rather than requiring Unikraft to add SR-IOV/[VFIO][vfio] support, the
+  OVS-offloaded virtio-net path works with their existing network stack and
+  provides the density needed for serverless workloads.
 
 - **BlueField XDP runs in native mode on ARM cores, not hardware-offloaded.**
   XDP programs execute on the DPU's ARM subsystem, not in the eSwitch silicon.
   This is sufficient for control-plane operations (wake signaling, map lookups)
-  but not for line-rate data-plane processing. Steady-state traffic should use
-  eSwitch flow rules ([DOCA][doca-sdk] Flow or OVS offload) for hardware-path
-  delivery.
+  but not for line-rate data-plane processing. Steady-state traffic uses
+  eSwitch flow rules ([DOCA][doca-sdk] Flow or OVS offload) for
+  hardware-accelerated delivery.
 
 - **SRv6 on BlueField requires custom P4/DPL development.** SRv6 is not a
   native DOCA Flow tunnel type like
@@ -203,10 +237,11 @@ available instance.
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Unikraft virtio-net cannot attach to DPU VFs directly | Adds a kernel hop via TAP+bridge instead of direct VF passthrough | Acceptable for v1; work with Unikraft on VF support as optimization |
+| SR-IOV VF pool exhaustion on high-demand nodes | Workloads requesting `performance` class cannot be scheduled | Limit VF pool size per node (e.g., 32-64); scheduler treats VFs as a finite resource and bin-packs accordingly |
+| OVS software path latency is too high for some workloads | ~10-50 microsecond overhead vs SR-IOV may not meet SLA for latency-sensitive workloads | NetworkInterfaceClass lets those workloads opt into SR-IOV; most workloads (serverless, batch) are insensitive to this delta |
 | NFQUEUE packet hold introduces kernel dependency | Tight coupling to Linux netfilter subsystem | AF_XDP on DPU ARM cores is a pure-userspace fallback that avoids netfilter entirely |
 | SRv6 DPL development takes longer than expected | Delays hardware-path optimization | Start with SRv6 on VPP (software) at edge nodes; BlueField hardware offload is an optimization, not a blocker |
-| gVPC is not ready when functions need to ship | Functions launch is blocked | Define a minimal gVPC milestone that functions require; the full gVPC feature set is not needed for day-one workloads |
+| gVPC is not ready when first workloads need to ship | Launch is blocked | Define a minimal gVPC milestone; the full gVPC feature set is not needed for day-one workloads |
 
 ## Design Details
 
@@ -218,13 +253,58 @@ The system has four layers, each with clear responsibilities:
 |-------|-----------|----------------|
 | **Edge** | Anycast LB + WAF | Client-facing traffic reception, DDoS protection, rate limiting |
 | **Fabric** | gVPC SRv6 Core | Encrypted, SLA-aware transport between edge and worker nodes |
-| **Node** | BlueField DPU | Hardware traffic steering, wake-on-traffic signaling, SR-IOV |
+| **Node** | BlueField DPU | Traffic steering, wake-on-traffic signaling, NetworkInterfaceClass implementation |
 | **Workload** | VMM + Runtime | Workload execution (Firecracker + Unikraft for functions, other VMMs for other types) |
 
 The edge and fabric layers are fully workload-agnostic. The node layer provides
 workload-type-specific behaviors (scale-from-zero for functions, always-on
-steering for databases) through configurable eBPF programs. The workload layer
-is pluggable -- any runtime that exposes a network interface can attach to gVPC.
+steering for databases) through configurable eBPF programs and implements the
+NetworkInterfaceClass abstraction. The workload layer is pluggable -- any
+runtime that exposes a network interface can attach to gVPC.
+
+### NetworkInterfaceClass
+
+A NetworkInterfaceClass is a platform-defined resource that controls which
+technology backs a workload's network attachment. This follows the same pattern
+as Kubernetes StorageClasses -- the platform operator defines what's available,
+and consumers select the class that fits their workload's needs.
+
+**Proposed classes:**
+
+| Class | Technology | Density | Latency | Use Case |
+|-------|-----------|---------|---------|----------|
+| `standard` (default) | OVS-offloaded virtio-net/TAP | Hundreds-thousands per node | +10-50 microseconds vs passthrough | Serverless functions, containers, batch workloads |
+| `performance` | SR-IOV VF passthrough | 32-64 per node (finite VF pool) | Near-line-rate | Latency-sensitive workloads, high-throughput databases, network-intensive ML inference |
+
+**How it works:**
+
+- **`standard` class**: The platform creates a TAP device for the workload,
+  bridges it through OVS on the DPU, and offloads flow rules to the eSwitch
+  hardware. The first packet of each flow traverses software OVS; subsequent
+  packets are forwarded in hardware. No per-instance hardware resource is
+  consumed on the DPU, so this scales to the limits of host memory and CPU.
+
+- **`performance` class**: The platform allocates a VF from the node's SR-IOV
+  pool and passes it through to the workload's VM via VFIO. Traffic goes
+  directly from the eSwitch to the VM with no software hop. VFs are a finite
+  resource (32-64 per node in practice), so the scheduler treats them like any
+  other constrained resource -- if no VFs are available, the workload is
+  scheduled to a different node or waits.
+
+**Scalability constraints that drive this design:**
+
+| Resource | BlueField-2 | BlueField-3 |
+|----------|-------------|-------------|
+| Max VFs per physical function | 252 (hard PCIe limit) | 252 |
+| Practical VF ceiling | 64-128 (queue/interrupt exhaustion) | 64-128 |
+| eSwitch flow entries (OVS offload) | ~4 million | ~16 million |
+| OVS-offloaded workloads per node | Thousands (software TAP limit) | Thousands |
+
+The NetworkInterfaceClass abstraction ensures product offerings do not need to
+understand these constraints. A serverless functions product defaults to
+`standard`; a managed database product that needs low-latency replication
+defaults to `performance`. The platform handles scheduling, VF pool management,
+and technology selection.
 
 ### Traffic Flow: Steady State
 
@@ -354,9 +434,11 @@ The DPU serves three roles in this architecture:
 
 **1. Hardware traffic steering (steady state)**
 
-DOCA Flow or OVS offload programs eSwitch rules that forward packets directly
-from the network port to the workload's VF. No ARM core or host CPU involvement
-for established flows. This is the same mechanism for all workload types.
+For `standard` class interfaces, OVS offloads flow rules to the eSwitch so that
+established flows are forwarded in hardware without ARM core or host CPU
+involvement. For `performance` class interfaces, [DOCA][doca-sdk] Flow or OVS
+programs eSwitch rules that forward packets directly from the network port to
+the workload's VF.
 
 **2. Wake-on-traffic signaling (cold start)**
 
@@ -375,12 +457,11 @@ pipeline via DPL (P4-based), as Arrcus
 has demonstrated with their SRv6 MUP implementation on BlueField-3.
 
 <<[UNRESOLVED @zachary @shelby @peter]>>
-The DPU integration model depends on whether workload runtimes can support VF
-passthrough (SR-IOV) or must use virtio-net via TAP devices. If TAP-only, the
-DPU steers traffic to the host kernel bridge, adding a kernel hop. If VF
-passthrough is available, traffic goes directly from eSwitch to VM -- true
-hardware path. This needs to be evaluated per runtime (Unikraft/Firecracker
-first, others to follow).
+How many VFs should we reserve per node for the `performance` class? Starting
+with 32 per node keeps the pool small and predictable while we learn usage
+patterns. We also need to decide whether Sub-Functions (SFs) -- a lighter-weight
+BlueField alternative to VFs that scales to 2000+ on BF3 -- should be a third
+NetworkInterfaceClass or an implementation detail of `performance`.
 <<[/UNRESOLVED]>>
 
 ### Workload Runtime Integration
@@ -397,7 +478,8 @@ runtimes:
 
 **What the runtime provides:**
 - A binary/pod that runs the workload VMM
-- A network interface (virtio-net at minimum, VF passthrough preferred)
+- A network interface (virtio-net at minimum; VF passthrough if `performance`
+  class is needed)
 - Snapshot/restore capability (for runtimes that support scale-from-zero)
 
 **What the runtime does NOT need to provide:**
@@ -412,10 +494,10 @@ They do not need to build their own proxy, edge integration, or inter-workload
 networking.
 
 <<[UNRESOLVED @julia]>>
-For the Unikraft integration specifically: evaluate whether VF passthrough
-(SR-IOV) can be supported in the Firecracker fork. This would eliminate the
-TAP+bridge kernel hop and enable true hardware-path delivery from DPU eSwitch
-to unikernel.
+Unikraft's existing virtio-net/TAP integration works well for the `standard`
+NetworkInterfaceClass. If there is future demand for `performance` class
+functions, evaluate whether VF passthrough (SR-IOV via VFIO) can be supported
+in the Firecracker fork. This is not a blocker for initial integration.
 <<[/UNRESOLVED]>>
 
 ## Alternatives
@@ -478,21 +560,31 @@ detection; gVPC handles transport.
    transport to one worker node may be sufficient to unblock functions while the
    full gVPC feature set matures.
 
-2. **VF passthrough per runtime.** Can Unikraft's Firecracker fork support
-   SR-IOV virtual functions, or must we use TAP+bridge? This determines whether
-   steady-state traffic hits the hardware fast-path or takes a kernel hop. The
-   answer may differ per runtime.
+2. **NetworkInterfaceClass defaults per product offering.** Should each product
+   offering declare its default class (e.g., functions default to `standard`,
+   managed databases default to `performance`)? Or should consumers always
+   choose explicitly?
 
-3. **NFQUEUE vs AF_XDP for packet hold.** NFQUEUE is simpler (packet stays in
+3. **VF pool size per node.** How many VFs should be reserved for `performance`
+   class workloads? Starting small (32) is conservative but may under-serve
+   demand. This also interacts with the scheduler -- VFs are a finite resource
+   that affects bin-packing decisions.
+
+4. **Sub-Functions as a third class.** BlueField Sub-Functions (SFs) scale to
+   2000+ on BF3 and provide dedicated hardware queues without consuming PCIe
+   VFs. Should this be exposed as a distinct NetworkInterfaceClass (e.g.,
+   `accelerated`) or treated as an implementation detail of `performance`?
+
+5. **NFQUEUE vs AF_XDP for packet hold.** NFQUEUE is simpler (packet stays in
    kernel memory) but couples to Linux netfilter. AF_XDP is more portable and
    runs entirely on DPU ARM cores but requires packet reinjection logic. Which
    is the right default?
 
-4. **SRv6 on DPU timeline.** Should v1 run SRv6 encap/decap in VPP software on
-   the host, with DPU hardware offload as a v2 optimization? Or should we invest
-   in DPL/P4 development from the start?
+6. **SRv6 on DPU timeline.** Should v1 run SRv6 encapsulation/decapsulation in
+   VPP software on the host, with DPU hardware offload as a v2 optimization?
+   Or should we invest in DPL/P4 development from the start?
 
-5. **Scheduling signals.** How does the placement system consume eBPF traffic
+7. **Scheduling signals.** How does the placement system consume eBPF traffic
    counters from the DPU? Direct API from DPU ARM cores to the scheduler, or
    metrics pipeline via OpenTelemetry?
 
@@ -539,3 +631,4 @@ detection; gVPC handles transport.
 [virtio]: https://docs.oasis-open.org/virtio/virtio/v1.2/virtio-v1.2.html
 [vfio]: https://docs.kernel.org/driver-api/vfio.html
 [vxlan]: https://datatracker.ietf.org/doc/html/rfc7348
+[ovs]: https://www.openvswitch.org/
