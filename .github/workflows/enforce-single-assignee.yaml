@@ -6,6 +6,6 @@ on:
 
 jobs:
   enforce:
-    uses: datum-cloud/actions/.github/workflows/enforce-single-assignee.yaml@main
+    uses: datum-cloud/actions/.github/workflows/enforce-single-assignee.yaml@v1.12.1
     permissions:
       issues: write
