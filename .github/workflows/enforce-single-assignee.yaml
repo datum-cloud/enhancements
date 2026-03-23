@@ -1,0 +1,11 @@
+name: Enforce Single Assignee
+
+on:
+  issues:
+    types: [assigned]
+
+jobs:
+  enforce:
+    uses: datum-cloud/actions/.github/workflows/enforce-single-assignee.yaml@main
+    permissions:
+      issues: write
