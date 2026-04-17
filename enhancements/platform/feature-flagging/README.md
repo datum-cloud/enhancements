@@ -1,0 +1,420 @@
+---
+status: provisional
+stage: alpha
+latest-milestone: "v0.x"
+---
+
+# Feature-flagging via Milo Entitlements
+
+- [Summary](#summary)
+- [Motivation](#motivation)
+  - [Goals](#goals)
+  - [Non-Goals](#non-goals)
+- [Proposal](#proposal)
+  - [User Stories](#user-stories)
+  - [Notes and Constraints](#notes-and-constraints)
+  - [Risks and Mitigations](#risks-and-mitigations)
+- [Design Details](#design-details)
+  - [Conceptual Model](#conceptual-model)
+  - [Resource Hierarchy](#resource-hierarchy)
+  - [Operator Workflow](#operator-workflow)
+  - [Consumer API](#consumer-api)
+  - [Bootstrap Configuration](#bootstrap-configuration)
+  - [IAM and Audit Trail](#iam-and-audit-trail)
+  - [Open Questions](#open-questions)
+- [Incremental Path](#incremental-path)
+- [Implementation History](#implementation-history)
+- [Drawbacks](#drawbacks)
+- [Alternatives](#alternatives)
+
+## Summary
+
+Datum Cloud has no mechanism to selectively enable features for a subset of
+organizations before a full rollout. This enhancement defines an org-level
+(and eventually project-level) boolean feature-flagging system built entirely
+on the existing `quota.miloapis.com/v1alpha1` entitlement primitives — no new
+CRD kinds, no binary changes, no third-party dependencies.
+
+A feature flag is a `ResourceRegistration` with `type=Entity`. Granting a flag
+to an organization is a `ResourceGrant` with `amount=1`. Services check
+whether the flag is enabled by querying the auto-maintained `AllowanceBucket`
+for that (org, resourceType) pair.
+
+## Motivation
+
+Product-led growth requires the ability to run private betas with a specific
+set of customers before broad release. Today, enabling a feature for one
+organization means enabling it for all. The team needs a way to gate features
+per organization that:
+
+- Requires no code change per new flag (data-driven)
+- Is operator-managed initially, with self-serve as a future concern
+- Produces a full audit trail through existing IAM logging
+- Integrates with the Milo API server without bespoke machinery
+
+### Goals
+
+- Operators can define a feature flag by creating a `ResourceRegistration`
+- Operators can grant or revoke a flag for a specific organization by
+  creating or deleting a `ResourceGrant`
+- Services (portal, API server) can determine whether an organization holds
+  a feature flag with a single API read
+- All grant/revoke operations are captured in the existing IAM audit log
+- v1 handles the boolean on/off case without requiring the full
+  quota/limit machinery (claims, admission enforcement)
+
+### Non-Goals
+
+- Self-serve flag requests by organization admins (v2)
+- Project-scoped flags (v2; v1 targets org-level only)
+- Tiered or quantity-based feature access, e.g., "5 GPU hours" (v3)
+- Third-party feature flag services (LaunchDarkly, PostHog, etc.)
+- Per-user feature flags (explicitly out of scope)
+
+## Proposal
+
+### User Stories
+
+#### Story 1: Operator defines a new feature flag
+
+As a Datum operator, I want to define a new boolean feature flag so that I
+can later grant it to specific organizations for a private beta. I apply a
+single `ResourceRegistration` YAML — the flag is immediately available to
+grant, with no binary rollout required.
+
+#### Story 2: Operator grants a feature to an organization
+
+As a Datum operator, I want to enable a feature for a specific organization
+during a private beta. I apply a `ResourceGrant` targeting that organization.
+The organization's `AllowanceBucket` reflects the grant within one
+reconciliation cycle, and the portal begins rendering the gated feature for
+that org.
+
+#### Story 3: Operator revokes access
+
+As a Datum operator, I want to end a private beta for an organization. I
+delete the `ResourceGrant`. The `AllowanceBucket` `status.available` drops to
+zero, and the portal stops rendering the gated feature. The deletion is
+recorded in the IAM audit log.
+
+#### Story 4: Service checks whether a feature is enabled
+
+As the Datum portal or API server, I want to check whether an organization
+has a specific feature enabled before rendering UI or serving an API call. I
+query `AllowanceBucket` by field selector and check `status.available > 0`.
+No per-request authentication hop is required.
+
+#### Story 5: Organization admin observes their features
+
+As an organization admin, I want to see which features are enabled on my
+organization. I list `AllowanceBuckets` scoped to my organization using my
+existing `organization-quota-manager` role permissions.
+
+### Notes and Constraints
+
+The `quota.miloapis.com/v1alpha1` API group is already deployed and
+operational. All six resource kinds (`ResourceRegistration`, `ResourceGrant`,
+`AllowanceBucket`, `ResourceClaim`, `ClaimCreationPolicy`,
+`GrantCreationPolicy`) and their CRDs are present in
+`config/crd/overlays/core-control-plane/kustomization.yaml`. No CRD
+deployment work is required for v1.
+
+Feature checks are read-path only. The quota admission plugin is not
+exercised for feature flags — services consult the quota API before rendering
+UI or serving calls, but no admission webhook enforces the check.
+
+The `organization-quota-manager` IAM role already grants organization admins
+read access to `ResourceGrants` and `AllowanceBuckets` in their organization's
+scope, so org admins can observe their entitlements without any IAM changes.
+
+### Risks and Mitigations
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| `AllowanceBucket` eventual consistency causes stale feature checks | Low (sub-second reconciliation lag) | Low (brief incorrect state during grant/revoke) | Document; use `ResourceGrant` query for authoritative checks when needed |
+| `claimingResources=[]` fails `ResourceRegistration` validation (`MinItems=1` in CRD schema) | Unknown | High (blocks v1 entirely if true) | Verify against live CRD schema before landing; if enforced, omit the field or use a sentinel placeholder kind |
+| Feature flag namespace pollution (many `ResourceRegistrations`) | Medium (grows with feature count) | Low | Labeling convention (`features.miloapis.com/feature-name`) enables easy filtering and management |
+| Operator accidentally grants wrong organization | Low | Medium | Naming convention `feature-<flag>-<org>` for `ResourceGrant` names makes grants easy to audit and identify |
+
+## Design Details
+
+### Conceptual Model
+
+Feature-flagging is a degenerate case of the existing quota system. The
+mapping is exact:
+
+| Quota concept | Feature-flag meaning |
+|---|---|
+| `ResourceRegistration` | Feature flag definition |
+| `ResourceGrant` with `amount=1` | "Organization X has feature Y enabled" |
+| `AllowanceBucket.status.available > 0` | "Feature Y is on for organization X" |
+| Deleting the `ResourceGrant` | "Revoke feature Y from organization X" |
+
+`limit=1` means enabled; no grant (or `limit=0`) means disabled. The
+`ResourceClaim` and `ClaimCreationPolicy` machinery is not used in v1 —
+no admission enforcement is applied.
+
+### Resource Hierarchy
+
+```
+ResourceRegistration (cluster-scoped)
+  name: feature-<feature-name>
+  spec.consumerType: Organization (resourcemanager.miloapis.com)
+  spec.type: Entity
+  spec.resourceType: features.miloapis.com/<feature-name>
+  spec.baseUnit: feature
+  spec.displayUnit: features
+  spec.unitConversionFactor: 1
+  spec.claimingResources: []   # no admission enforcement in v1
+
+ResourceGrant (cluster-scoped)
+  spec.consumerRef:
+    apiGroup: resourcemanager.miloapis.com
+    kind: Organization
+    name: <org-name>
+  spec.allowances:
+    - resourceType: features.miloapis.com/<feature-name>
+      buckets:
+        - amount: 1
+
+# Auto-created by quota system when grant becomes Active:
+AllowanceBucket (cluster-scoped)
+  spec.consumerRef: (mirrors grant)
+  spec.resourceType: features.miloapis.com/<feature-name>
+  status.limit: 1
+  status.available: 1   # → feature is enabled
+```
+
+### Operator Workflow
+
+#### Step 1: Define a feature flag (once per feature)
+
+```yaml
+apiVersion: quota.miloapis.com/v1alpha1
+kind: ResourceRegistration
+metadata:
+  name: feature-private-beta-gpu-inference
+  labels:
+    app.kubernetes.io/name: milo
+    app.kubernetes.io/component: feature-flags
+    features.miloapis.com/feature-name: private-beta-gpu-inference
+spec:
+  consumerType:
+    apiGroup: resourcemanager.miloapis.com
+    kind: Organization
+  type: Entity
+  resourceType: features.miloapis.com/private-beta-gpu-inference
+  description: "Grants access to the GPU inference private beta"
+  baseUnit: feature
+  displayUnit: features
+  unitConversionFactor: 1
+  claimingResources: []
+```
+
+#### Step 2: Grant the feature to an organization
+
+```yaml
+apiVersion: quota.miloapis.com/v1alpha1
+kind: ResourceGrant
+metadata:
+  name: feature-private-beta-gpu-inference-acme-corp
+  labels:
+    app.kubernetes.io/name: milo
+    app.kubernetes.io/component: feature-flags
+    features.miloapis.com/feature-name: private-beta-gpu-inference
+    features.miloapis.com/org: acme-corp
+spec:
+  consumerRef:
+    apiGroup: resourcemanager.miloapis.com
+    kind: Organization
+    name: acme-corp
+  spec:
+    allowances:
+      - resourceType: features.miloapis.com/private-beta-gpu-inference
+        buckets:
+          - amount: 1
+```
+
+#### Step 3: Revoke
+
+```bash
+kubectl delete resourcegrant feature-private-beta-gpu-inference-acme-corp
+```
+
+### Consumer API
+
+Three options exist for how services check whether an organization holds a
+feature flag.
+
+**Option A — Query `AllowanceBucket` (recommended for v1)**
+
+The quota system auto-creates an `AllowanceBucket` for every active
+(consumer, resourceType) grant. A service queries by field selector:
+
+```
+GET /apis/quota.miloapis.com/v1alpha1/allowancebuckets
+  ?fieldSelector=spec.consumerRef.name=acme-corp,spec.resourceType=features.miloapis.com/private-beta-gpu-inference
+```
+
+`status.available > 0` means the feature is enabled.
+
+Pros: single object read; `status.available` is pre-computed; efficient for
+listing all features for an org.
+
+Cons: eventual consistency — bucket status lags by one reconciliation cycle
+after grant create/delete (typically sub-second).
+
+**Option B — Query `ResourceGrant` directly**
+
+```
+GET /apis/quota.miloapis.com/v1alpha1/resourcegrants
+  ?fieldSelector=spec.consumerRef.name=acme-corp
+```
+
+Then filter client-side by `spec.allowances[].resourceType`.
+
+Pros: authoritative; no reconciliation lag.
+
+Cons: requires client-side filtering; returns all grants for the org.
+
+**Option C — Watch-based in-process cache**
+
+The portal maintains an in-memory cache of `AllowanceBuckets` refreshed via
+watch. Feature checks become a map lookup with no API round-trip.
+
+Pros: zero per-request latency.
+
+Cons: watch connection management; additional complexity.
+
+Recommendation: **Option A** for v1. Field selector indexes on
+`spec.consumerRef.kind` and `spec.consumerRef.name` already exist in the
+quota system.
+
+### Bootstrap Configuration
+
+The quota CRDs are already deployed. The Milo bundle needs one new component:
+
+```
+config/services/features/
+  kustomization.yaml
+  registrations/
+    kustomization.yaml
+    # One ResourceRegistration per feature flag
+  iam/
+    kustomization.yaml
+    roles/
+      feature-flag-operator.yaml
+```
+
+This follows the pattern of `config/services/quota/`. No changes to
+`config/crd/` are needed.
+
+The `datum-cloud/infra` repository does not need changes for v1 beyond
+consuming the updated Milo bundle.
+
+### IAM and Audit Trail
+
+Feature flag operations are standard Milo API operations covered by existing
+IAM audit logging. `ResourceGrant` create/delete events are logged with full
+actor identity and timestamp.
+
+A new `feature-flag-operator` Role (or an extension of `quota-operator`)
+should grant:
+
+- `quota.miloapis.com/resourceregistrations`: `get`, `list`, `watch`
+- `quota.miloapis.com/resourcegrants`: `get`, `list`, `watch`, `create`,
+  `update`, `delete`
+- `quota.miloapis.com/allowancebuckets`: `get`, `list`, `watch`
+
+### Open Questions
+
+<<[UNRESOLVED]>>
+
+1. **`claimingResources` validation**: The CRD schema has `MinItems=1` on
+   `spec.claimingResources`. Is an empty list valid, or must v1
+   `ResourceRegistrations` list a placeholder claiming resource kind?
+   Blocking — must be verified against the live CRD before merging.
+
+2. **Consumer check strategy**: Confirm Option A (AllowanceBucket) as the
+   standard pattern for v1. Should this be codified as a helper function in
+   a shared Milo client library?
+
+3. **Bundle vs. infra split**: Should `ResourceRegistration` instances for
+   feature flags live in the Milo bundle (applies to all environments) or in
+   `datum-cloud/infra` (per-cluster)? Argument for bundle: flags are global
+   product decisions. Argument for infra: different clusters may need
+   different flags during rollout.
+
+4. **IAM role placement**: Extend `quota-operator` or create a dedicated
+   `feature-flag-operator` role? A dedicated role keeps the principle of
+   least privilege; extending `quota-operator` reduces role sprawl.
+
+5. **Naming convention**: `features.miloapis.com/<name>` proposed as the
+   `resourceType` value. Confirm this aligns with API group naming standards.
+
+6. **Read permission for org admins**: Does the existing
+   `organization-quota-manager` role already grant org admins sufficient
+   read access to observe their `AllowanceBuckets`, or is a targeted
+   `quota.miloapis.com/allowancebuckets` permission needed?
+
+<<[/UNRESOLVED]>>
+
+## Incremental Path
+
+### v1 — Boolean on/off, operator-managed
+
+- Add `ResourceRegistration` instances to `config/services/features/registrations/`
+- Operators create/delete `ResourceGrant` objects via kubectl or the Milo API
+- Services check `AllowanceBucket.status.available > 0`
+- No new controllers, CRDs, or binary changes
+
+Estimated complexity: **low** — pure configuration and a helper IAM role.
+
+### v2 — Self-serve requests and project-scoped flags
+
+- Add `GrantCreationPolicy` for self-serve grant creation workflows
+- Add `ClaimCreationPolicy` if admission-time enforcement is desired
+- Support `consumerType=Project` for project-scoped flags
+
+### v3 — Tiered and quantity-based feature access
+
+- Use `spec.type=Allocation` with non-binary amounts (e.g., 5 GPU hours)
+- Full quota/limit machinery engaged
+
+## Implementation History
+
+- 2026-04-17: Discovery complete; confirmed zero-code v1 path using existing
+  quota primitives. Enhancement document created.
+
+## Drawbacks
+
+Using the quota system for feature flags couples two concerns: resource
+consumption tracking and feature entitlement. If the quota system evolves in
+ways that affect `ResourceRegistration` semantics, feature flags may be
+incidentally affected. A dedicated `FeatureFlag` CRD kind would be more
+explicit but would require new controllers and binary changes — the quota
+reuse is the explicit tradeoff for keeping v1 zero-code.
+
+## Alternatives
+
+### Dedicated FeatureFlag CRD
+
+A new `FeatureFlag` and `FeatureGrant` kind would be more semantically clear
+and would not depend on quota system internals. Rejected for v1 because it
+requires new CRD installation, new controllers, and binary changes — all of
+which the quota-based approach avoids.
+
+### Labels on Organization objects
+
+Operators could enable features by setting labels on `Organization` resources
+(e.g., `features.miloapis.com/gpu-inference: enabled`). Rejected because
+labels on business objects are not access-controlled at the field level,
+produce no structured audit trail, and cannot be discovered without
+listing all organizations.
+
+### Third-party feature flag service
+
+LaunchDarkly, PostHog, GrowthBook, and similar services provide feature
+flagging as a managed product. Rejected because they introduce an external
+runtime dependency, require data to leave the platform, and create a
+parallel identity/authorization system outside Milo's IAM.
