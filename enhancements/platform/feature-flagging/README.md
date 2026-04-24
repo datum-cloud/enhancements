@@ -35,10 +35,13 @@ organizations before a full rollout. This enhancement defines an org-level
 on the existing `quota.miloapis.com/v1alpha1` entitlement primitives — no new
 CRD kinds, no binary changes, no third-party dependencies.
 
-A feature flag is a `ResourceRegistration` with `type=Entity`. Granting a flag
-to an organization is a `ResourceGrant` with `amount=1`. Services check
-whether the flag is enabled by querying the auto-maintained `AllowanceBucket`
-for that (org, resourceType) pair.
+A feature flag is a `ResourceRegistration` with `type=Feature` (requires a
+one-line Milo CRD prerequisite; see [Incremental Path](#incremental-path)).
+Granting a flag to an organization is a `ResourceGrant` with `amount=1`.
+Services check whether the flag is enabled through an
+[OpenFeature](https://openfeature.dev)-compatible provider that queries the
+auto-maintained `AllowanceBucket` for that (org, resourceType) pair, giving
+all consumers a standard SDK interface regardless of the underlying quota API.
 
 ## Motivation
 
@@ -160,7 +163,7 @@ no admission enforcement is applied.
 ResourceRegistration (cluster-scoped)
   name: feature-<feature-name>
   spec.consumerType: Organization (resourcemanager.miloapis.com)
-  spec.type: Entity
+  spec.type: Feature   # requires Milo prerequisite; see Incremental Path
   spec.resourceType: features.miloapis.com/<feature-name>
   spec.baseUnit: feature
   spec.displayUnit: features
@@ -202,7 +205,7 @@ spec:
   consumerType:
     apiGroup: resourcemanager.miloapis.com
     kind: Organization
-  type: Entity
+  type: Feature
   resourceType: features.miloapis.com/private-beta-gpu-inference
   description: "Grants access to the GPU inference private beta"
   baseUnit: feature
@@ -243,52 +246,59 @@ kubectl delete resourcegrant feature-private-beta-gpu-inference-acme-corp
 
 ### Consumer API
 
-Three options exist for how services check whether an organization holds a
-feature flag.
+Services check feature flags through an
+[OpenFeature](https://openfeature.dev)-compatible provider backed by the
+`AllowanceBucket` API. OpenFeature is a CNCF-incubating vendor-neutral
+standard for feature flag evaluation; by shipping a compliant provider,
+every service gets a typed, testable, and swappable feature-check interface
+without hand-rolling quota API queries.
 
-**Option A — Query `AllowanceBucket` (recommended for v1)**
+**Provider contract**
 
-The quota system auto-creates an `AllowanceBucket` for every active
-(consumer, resourceType) grant. A service queries by field selector:
+The provider implements `resolveBooleanValue(flagKey, default, EvaluationContext)`:
+
+- `flagKey` maps to `features.miloapis.com/<flagKey>`
+- `EvaluationContext.targetingKey` carries the org name
+- Resolution queries `AllowanceBuckets` by field selector on
+  `spec.consumerRef.name` + `spec.resourceType`
+- Returns `true` (reason `TARGETING_MATCH`) if `status.available > 0`;
+  `false` (reason `DEFAULT`) on miss or error
+
+**Underlying query**
 
 ```
 GET /apis/quota.miloapis.com/v1alpha1/allowancebuckets
   ?fieldSelector=spec.consumerRef.name=acme-corp,spec.resourceType=features.miloapis.com/private-beta-gpu-inference
 ```
 
-`status.available > 0` means the feature is enabled.
+Field selector indexes on `spec.consumerRef.kind`, `spec.consumerRef.name`,
+and `spec.resourceType` already exist in the quota system.
 
-Pros: single object read; `status.available` is pre-computed; efficient for
-listing all features for an org.
+**Usage example (Go)**
 
-Cons: eventual consistency — bucket status lags by one reconciliation cycle
-after grant create/delete (typically sub-second).
-
-**Option B — Query `ResourceGrant` directly**
-
-```
-GET /apis/quota.miloapis.com/v1alpha1/resourcegrants
-  ?fieldSelector=spec.consumerRef.name=acme-corp
+```go
+client := openfeature.NewClient("my-service")
+enabled, _ := client.BooleanValue(ctx, "private-beta-gpu-inference", false,
+    openfeature.NewEvaluationContext("acme-corp", nil))
 ```
 
-Then filter client-side by `spec.allowances[].resourceType`.
+**Usage example (TypeScript)**
 
-Pros: authoritative; no reconciliation lag.
+```ts
+const enabled = await client.getBooleanValue('private-beta-gpu-inference', false, {
+  targetingKey: 'acme-corp',
+});
+```
 
-Cons: requires client-side filtering; returns all grants for the org.
+**Deliverables**
 
-**Option C — Watch-based in-process cache**
+- Go provider package (e.g. `pkg/featureflags`) — wraps `AllowanceBucket`
+  list query; unit tests with fake lister; integration test via `envtest`
+- TypeScript provider (e.g. `app/lib/feature-flags/`) — wraps the quota API
+  field selector endpoint; short TTL cache (5 s); unit tests with mocked fetch
 
-The portal maintains an in-memory cache of `AllowanceBuckets` refreshed via
-watch. Feature checks become a map lookup with no API round-trip.
-
-Pros: zero per-request latency.
-
-Cons: watch connection management; additional complexity.
-
-Recommendation: **Option A** for v1. Field selector indexes on
-`spec.consumerRef.kind` and `spec.consumerRef.name` already exist in the
-quota system.
+Both providers expose only `resolveBooleanValue` in v1. String, number, and
+structure resolution are non-goals until v2 introduces tiered access.
 
 ### Bootstrap Configuration
 
@@ -335,40 +345,62 @@ should grant:
    `ResourceRegistrations` list a placeholder claiming resource kind?
    Blocking — must be verified against the live CRD before merging.
 
-2. **Consumer check strategy**: Confirm Option A (AllowanceBucket) as the
-   standard pattern for v1. Should this be codified as a helper function in
-   a shared Milo client library?
-
-3. **Bundle vs. infra split**: Should `ResourceRegistration` instances for
+2. **Bundle vs. infra split**: Should `ResourceRegistration` instances for
    feature flags live in the Milo bundle (applies to all environments) or in
    `datum-cloud/infra` (per-cluster)? Argument for bundle: flags are global
    product decisions. Argument for infra: different clusters may need
    different flags during rollout.
 
-4. **IAM role placement**: Extend `quota-operator` or create a dedicated
+3. **IAM role placement**: Extend `quota-operator` or create a dedicated
    `feature-flag-operator` role? A dedicated role keeps the principle of
    least privilege; extending `quota-operator` reduces role sprawl.
 
-5. **Naming convention**: `features.miloapis.com/<name>` proposed as the
+4. **Naming convention**: `features.miloapis.com/<name>` proposed as the
    `resourceType` value. Confirm this aligns with API group naming standards.
 
-6. **Read permission for org admins**: Does the existing
+5. **Read permission for org admins**: Does the existing
    `organization-quota-manager` role already grant org admins sufficient
    read access to observe their `AllowanceBuckets`, or is a targeted
    `quota.miloapis.com/allowancebuckets` permission needed?
 
 <<[/UNRESOLVED]>>
 
+**Resolved**
+
+- **Consumer check strategy**: `AllowanceBucket` field selector query is the
+  standard read path, codified behind an OpenFeature provider (Go + TypeScript)
+  so callers never query the quota API directly. See [Consumer API](#consumer-api).
+- **`spec.type` value**: The live `ResourceRegistration` CRD only accepts
+  `Entity` and `Allocation` today. `Feature` requires a one-line Milo change
+  (`+kubebuilder:validation:Enum=Entity;Allocation;Feature` in
+  `pkg/apis/quota/v1alpha1/resourceregistration_types.go` + code-gen re-run).
+  This is tracked as a prerequisite in the Incremental Path below. Because
+  `spec.type` is immutable after creation, this Milo change must land before
+  any `ResourceRegistration` instances are created; using `type=Entity` and
+  migrating later would require deleting and recreating every flag definition.
+
 ## Incremental Path
+
+### Prerequisite — Add `type=Feature` to Milo CRD
+
+Add `Feature` to the `+kubebuilder:validation:Enum` marker in
+`pkg/apis/quota/v1alpha1/resourceregistration_types.go` and re-run
+`controller-gen` to regenerate the CRD YAML. One-line Go change plus
+code-gen; no controller logic affected. Must land in Milo before any
+`ResourceRegistration` instances are created (field is immutable).
 
 ### v1 — Boolean on/off, operator-managed
 
-- Add `ResourceRegistration` instances to `config/services/features/registrations/`
+- Add `ResourceRegistration` instances (`type=Feature`) to
+  `config/services/features/registrations/`
 - Operators create/delete `ResourceGrant` objects via kubectl or the Milo API
-- Services check `AllowanceBucket.status.available > 0`
-- No new controllers, CRDs, or binary changes
+- Services check feature flags through the OpenFeature provider (Go +
+  TypeScript); provider queries `AllowanceBucket.status.available > 0`
+- IAM: new `feature-flag-operator` role or extension of `quota-operator`
+- No new controllers or CRDs beyond the Milo prerequisite above
 
-Estimated complexity: **low** — pure configuration and a helper IAM role.
+Estimated complexity: **low** — Milo one-liner, configuration, a helper IAM
+role, and two thin OpenFeature provider packages.
 
 ### v2 — Self-serve requests and project-scoped flags
 
@@ -385,6 +417,11 @@ Estimated complexity: **low** — pure configuration and a helper IAM role.
 
 - 2026-04-17: Discovery complete; confirmed zero-code v1 path using existing
   quota primitives. Enhancement document created.
+- 2026-04-24: Consumer check strategy resolved — OpenFeature provider
+  (Go + TypeScript) wrapping `AllowanceBucket` field selector query adopted
+  as standard pattern. `type=Feature` CRD prerequisite identified and added
+  to incremental path; `spec.type` immutability makes this a hard pre-req
+  before any flag instances are created.
 
 ## Drawbacks
 
@@ -411,6 +448,15 @@ Operators could enable features by setting labels on `Organization` resources
 labels on business objects are not access-controlled at the field level,
 produce no structured audit trail, and cannot be discovered without
 listing all organizations.
+
+### Custom client SDK (roll-your-own)
+
+Rather than implementing an OpenFeature provider, services could use a
+bespoke Datum feature-flag client that wraps the quota API directly. Rejected
+because it produces a Datum-specific interface that every service must adopt
+independently, has no built-in mock/no-op for tests, and would need to be
+replaced if the backend ever changes. OpenFeature provides all of this for
+free at the cost of implementing one provider interface.
 
 ### Third-party feature flag service
 
