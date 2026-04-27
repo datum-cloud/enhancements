@@ -1,5 +1,5 @@
 ---
-status: provisional
+status: implementable
 stage: alpha
 latest-milestone: "v0.x"
 ---
@@ -104,8 +104,9 @@ recorded in the IAM audit log.
 
 As the Datum portal or API server, I want to check whether an organization
 has a specific feature enabled before rendering UI or serving an API call. I
-query `AllowanceBucket` by field selector and check `status.available > 0`.
-No per-request authentication hop is required.
+call `client.BooleanValue("flag-name", false, ctx)` on the OpenFeature client;
+the provider resolves the check against `AllowanceBucket` with no per-request
+authentication hop required.
 
 #### Story 5: Organization admin observes their features
 
@@ -135,7 +136,7 @@ scope, so org admins can observe their entitlements without any IAM changes.
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | `AllowanceBucket` eventual consistency causes stale feature checks | Low (sub-second reconciliation lag) | Low (brief incorrect state during grant/revoke) | Document; use `ResourceGrant` query for authoritative checks when needed |
-| `claimingResources=[]` fails `ResourceRegistration` validation (`MinItems=1` in CRD schema) | Unknown | High (blocks v1 entirely if true) | Verify against live CRD schema before landing; if enforced, omit the field or use a sentinel placeholder kind |
+| `claimingResources=[]` fails `ResourceRegistration` validation | Confirmed | Resolved | `minItems: 1` is enforced; use sentinel `features.miloapis.com/FeatureGrant` to satisfy the constraint without enabling admission enforcement |
 | Feature flag namespace pollution (many `ResourceRegistrations`) | Medium (grows with feature count) | Low | Labeling convention (`features.miloapis.com/feature-name`) enables easy filtering and management |
 | Operator accidentally grants wrong organization | Low | Medium | Naming convention `feature-<flag>-<org>` for `ResourceGrant` names makes grants easy to audit and identify |
 
@@ -168,7 +169,9 @@ ResourceRegistration (cluster-scoped)
   spec.baseUnit: feature
   spec.displayUnit: features
   spec.unitConversionFactor: 1
-  spec.claimingResources: []   # no admission enforcement in v1
+  spec.claimingResources:      # sentinel satisfies minItems=1; no admission enforcement
+    - apiGroup: features.miloapis.com
+      kind: FeatureGrant
 
 ResourceGrant (cluster-scoped)
   spec.consumerRef:
@@ -211,7 +214,9 @@ spec:
   baseUnit: feature
   displayUnit: features
   unitConversionFactor: 1
-  claimingResources: []
+  claimingResources:
+    - apiGroup: features.miloapis.com
+      kind: FeatureGrant   # sentinel; satisfies minItems=1, no admission enforcement
 ```
 
 #### Step 2: Grant the feature to an organization
@@ -231,11 +236,10 @@ spec:
     apiGroup: resourcemanager.miloapis.com
     kind: Organization
     name: acme-corp
-  spec:
-    allowances:
-      - resourceType: features.miloapis.com/private-beta-gpu-inference
-        buckets:
-          - amount: 1
+  allowances:
+    - resourceType: features.miloapis.com/private-beta-gpu-inference
+      buckets:
+        - amount: 1
 ```
 
 #### Step 3: Revoke
@@ -338,38 +342,28 @@ should grant:
 
 ### Open Questions
 
-<<[UNRESOLVED]>>
-
-1. **`claimingResources` validation**: The CRD schema has `MinItems=1` on
-   `spec.claimingResources`. Is an empty list valid, or must v1
-   `ResourceRegistrations` list a placeholder claiming resource kind?
-   Blocking — must be verified against the live CRD before merging.
-
-2. **Bundle vs. infra split**: Should `ResourceRegistration` instances for
-   feature flags live in the Milo bundle (applies to all environments) or in
-   `datum-cloud/infra` (per-cluster)? Argument for bundle: flags are global
-   product decisions. Argument for infra: different clusters may need
-   different flags during rollout.
-
-3. **IAM role placement**: Extend `quota-operator` or create a dedicated
-   `feature-flag-operator` role? A dedicated role keeps the principle of
-   least privilege; extending `quota-operator` reduces role sprawl.
-
-4. **Naming convention**: `features.miloapis.com/<name>` proposed as the
-   `resourceType` value. Confirm this aligns with API group naming standards.
-
-5. **Read permission for org admins**: Does the existing
-   `organization-quota-manager` role already grant org admins sufficient
-   read access to observe their `AllowanceBuckets`, or is a targeted
-   `quota.miloapis.com/allowancebuckets` permission needed?
-
-<<[/UNRESOLVED]>>
-
 **Resolved**
 
+- **`claimingResources` validation**: `minItems: 1` is enforced in the live
+  CRD (`quota.miloapis.com_resourceregistrations.yaml`) and the field is
+  required — an empty list is rejected. Feature flag registrations must
+  include at least one sentinel claiming resource. The proposed sentinel is
+  `features.miloapis.com/FeatureGrant` (a non-existent kind), which satisfies
+  the schema without enabling any admission enforcement. The Resource Hierarchy
+  and operator workflow examples use this sentinel.
 - **Consumer check strategy**: `AllowanceBucket` field selector query is the
   standard read path, codified behind an OpenFeature provider (Go + TypeScript)
   so callers never query the quota API directly. See [Consumer API](#consumer-api).
+- **Bundle vs. infra split**: `ResourceRegistration` instances live in the
+  Milo bundle — flags are global product decisions. Per-cluster variation is
+  handled by creating or deleting `ResourceGrant` objects in `datum-cloud/infra`,
+  not by varying registrations.
+- **IAM role placement**: Dedicated `feature-flag-operator` role. Keeps
+  least-privilege separation; `quota-operator` is not extended.
+- **Naming convention**: `features.miloapis.com/<name>` confirmed as the
+  `resourceType` pattern — consistent with existing API group conventions.
+- **Read permission for org admins**: `organization-quota-manager` already
+  grants read access to `AllowanceBuckets` in org scope. No IAM changes needed.
 - **`spec.type` value**: The live `ResourceRegistration` CRD only accepts
   `Entity` and `Allocation` today. `Feature` requires a one-line Milo change
   (`+kubebuilder:validation:Enum=Entity;Allocation;Feature` in
@@ -422,6 +416,13 @@ role, and two thin OpenFeature provider packages.
   as standard pattern. `type=Feature` CRD prerequisite identified and added
   to incremental path; `spec.type` immutability makes this a hard pre-req
   before any flag instances are created.
+- 2026-04-27: `claimingResources` blocking question resolved — `minItems: 1`
+  is enforced by the live CRD; sentinel `features.miloapis.com/FeatureGrant`
+  adopted to satisfy the constraint without enabling admission enforcement.
+  All remaining open questions resolved: registrations in Milo bundle,
+  dedicated `feature-flag-operator` role, `features.miloapis.com/<name>`
+  naming confirmed, org admin read permissions already covered by
+  `organization-quota-manager`. Enhancement ready for implementation.
 
 ## Drawbacks
 
