@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" contentScriptType="application/ecmascript" contentStyleType="text/css" height="793px" preserveAspectRatio="none" style="width:861px;height:793px;" version="1.1" viewBox="0 0 861 793" width="861px" zoomAndPan="magnify"><defs/><g><text fill="#000000" font-family="Arial" font-size="14" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="258" x="309" y="20.9951">Worker node — component view</text><!--MD5=[b9de0669a29c7bc934fd916b09c39491]
+cluster node--><rect fill="#F0F4FF" height="435" rx="4" ry="4" style="stroke: #999999; stroke-width: 1.5;" width="592" x="22" y="56.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="119" x="258.5" y="77.4355">K8s worker node</text><!--MD5=[f04600f0575a07dfe97362a654bdaa04]
+cluster kernel--><rect fill="#FFF8E6" height="220" rx="4" ry="4" style="stroke: #999999; stroke-width: 1.5;" width="538" x="211" y="562.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="86" x="437" y="583.4355">Linux kernel</text><!--MD5=[bfda29c464f0f1c8a1b2633c76aa45b9]
+entity cilium--><rect fill="#DAE8FC" height="139.875" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="194" x="38" y="335.2969"/><rect fill="#DAE8FC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="33" y="340.2969"/><rect fill="#DAE8FC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="33" y="465.1719"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="42" x="56" y="364.4355">Cilium</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="97" x="56" y="394.4043">CNI DaemonSet</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="158" x="56" y="424.373">veth lifecycle, eBPF policy</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="101" x="56" y="454.3418">pod /128 routes</text><!--MD5=[981c95a07e039df4c7cf5dba937c272c]
+entity gobgp--><rect fill="#DAE8FC" height="139.875" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="231" x="267.5" y="335.2969"/><rect fill="#DAE8FC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="262.5" y="340.2969"/><rect fill="#DAE8FC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="262.5" y="465.1719"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="47" x="285.5" y="364.4355">GoBGP</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="195" x="285.5" y="394.4043">BGP DaemonSet (hostNetwork)</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="102" x="285.5" y="424.373">VPNv4/VPNv6 PE</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="193" x="285.5" y="454.3418">one VRF per tenant · RFC 9252</text><!--MD5=[0050c6625e3b42e2857ba4d8ed699679]
+entity operator--><rect fill="#DAE8FC" height="139.875" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="248" x="241" y="104.2969"/><rect fill="#DAE8FC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="236" y="109.2969"/><rect fill="#DAE8FC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="236" y="234.1719"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="123" x="259" y="133.4355">galactic-operator</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="212" x="259" y="163.4043">Controller DaemonSet (privileged)</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="184" x="259" y="193.373">VRF lifecycle, lxc enslavement</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="141" x="259" y="223.3418">GoBGP config via gRPC</text><!--MD5=[07488cd458bf2efb2e1d6c43bd1cde52]
+entity vrf--><rect fill="#FFE6CC" height="139.875" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="178" x="547" y="618.2969"/><rect fill="#FFE6CC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="542" y="623.2969"/><rect fill="#FFE6CC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="542" y="748.1719"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="83" x="565" y="647.4355">VRF devices</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="116" x="565" y="677.4043">vrf-tenant-{name}</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="96" x="565" y="707.373">One per tenant</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="142" x="565" y="737.3418">separate routing table</text><!--MD5=[bee793d61ec58b45f7df22e4dbc4b3fc]
+entity seg6--><rect fill="#FFE6CC" height="139.875" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="258" x="254" y="618.2969"/><rect fill="#FFE6CC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="249" y="623.2969"/><rect fill="#FFE6CC" height="5" style="stroke: #336699; stroke-width: 1.5;" width="10" x="249" y="748.1719"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="67" x="272" y="647.4355">seg6local</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="222" x="272" y="677.4043">SRv6 End.DT4 / End.DT6 / End.DT46</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="127" x="272" y="707.373">Decap + VRF lookup</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="158" x="272" y="737.3418">for inbound tenant traffic</text><!--MD5=[75f855bb6170443a5e614452cefc1985]
+link cilium to kernel--><path d="M127.62,475.3369 C127.25,495.8769 128.68,518.2469 134,538.2969 C143.62,574.5669 164.3625,611.2294 182.9475,639.1119 C192.24,653.0531 200.9931,664.7994 207.5469,673.2041 C208.3661,674.2546 209.1509,675.253 209.8982,676.1969 C210.2718,676.6689 210.636,677.1273 210.9905,677.5717 " fill="none" id="cilium-&gt;kernel" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="210.9905,677.5717,208.5067,668.0412,207.8732,673.6624,202.2519,673.0289,210.9905,677.5717" style="stroke: #A80036; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="220" x="143" y="527.4355">Creates lxcXXXX veth pairs [Netlink]</text><!--MD5=[f9157f5a92467128cfe80ade6d8c4bd4]
+link operator to vrf--><path d="M489.06,198.3169 C535.27,212.8269 584.37,236.3369 617,274.2969 C697.36,367.7869 678.45,521.7269 657.29,612.9269 " fill="none" id="operator-&gt;vrf" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="656.09,618.0269,662.0617,610.1949,657.2455,613.1622,654.2782,608.3461,656.09,618.0269" style="stroke: #A80036; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="164" x="685" y="409.9355">Creates/destroys [Netlink]</text><!--MD5=[936bbb9f42714c6b253f08f3d4aff91e]
+link operator to cilium--><path d="M240.68,193.5769 C192.51,207.3969 142.05,231.6669 113,274.2969 C101.89,290.5969 100.75,310.6669 104.14,330.1069 " fill="none" id="operator-&gt;cilium" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="105.09,335.0369,107.2956,325.4382,104.1341,330.1291,99.4432,326.9676,105.09,335.0369" style="stroke: #A80036; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="234" x="122" y="294.4355">Watches lxc NEWLINK events [Netlink]</text><!--MD5=[d31fa3155bbf23ef62b32accd3a8145a]
+link operator to gobgp--><path d="M370.43,244.3169 C372.55,271.3469 374.99,302.4069 377.15,329.9269 " fill="none" id="operator-&gt;gobgp" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="377.56,335.0269,380.8539,325.7452,377.1743,330.0418,372.8777,326.3622,377.56,335.0269" style="stroke: #A80036; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="215" x="385" y="294.4355">Configures VRFs and paths [gRPC]</text><!--MD5=[9df9d3149f55cfbcd4c14ae2ac3b9f03]
+link gobgp to seg6--><path d="M380.67,475.5669 C380.39,486.1869 380.15,497.0369 380,507.2969 C379.48,542.0069 379.98,580.4769 380.71,612.9069 " fill="none" id="gobgp-&gt;seg6" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="#A80036" points="380.83,618.0669,384.6233,608.9778,380.7157,613.0682,376.6254,609.1606,380.83,618.0669" style="stroke: #A80036; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="268" x="389" y="527.4355">Programs End.DT4/DT6/DT46 SIDs [Netlink]</text><!--MD5=[d42a742b0d47c004c9fc73b023667dfa]
+@startuml bgp-worker-component
+skinparam defaultFontSize 12
+skinparam defaultFontName Arial
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam padding 8
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam componentBackgroundColor #dae8fc
+skinparam componentBorderColor #336699
+skinparam rectangleBackgroundColor #f5f5f5
+skinparam rectangleBorderColor #999999
+
+title Worker node — component view
+
+rectangle "**K8s worker node**" as node #f0f4ff {
+  component "**Cilium**\nCNI DaemonSet\nveth lifecycle, eBPF policy\npod /128 routes" as cilium #dae8fc
+  component "**GoBGP**\nBGP DaemonSet (hostNetwork)\nVPNv4/VPNv6 PE\none VRF per tenant · RFC 9252" as gobgp #dae8fc
+  component "**galactic-operator**\nController DaemonSet (privileged)\nVRF lifecycle, lxc enslavement\nGoBGP config via gRPC" as operator #dae8fc
+}
+
+rectangle "**Linux kernel**" as kernel #fff8e6 {
+  component "**VRF devices**\nvrf-tenant-{name}\nOne per tenant\nseparate routing table" as vrf #ffe6cc
+  component "**seg6local**\nSRv6 End.DT4 / End.DT6 / End.DT46\nDecap + VRF lookup\nfor inbound tenant traffic" as seg6 #ffe6cc
+}
+
+cilium - -> kernel : Creates lxcXXXX veth pairs [Netlink]
+operator - -> vrf : Creates/destroys [Netlink]
+operator - -> cilium : Watches lxc NEWLINK events [Netlink]
+operator - -> gobgp : Configures VRFs and paths [gRPC]
+gobgp - -> seg6 : Programs End.DT4/DT6/DT46 SIDs [Netlink]
+
+@enduml
+
+PlantUML version 1.2020.02(Sun Mar 01 10:22:07 UTC 2020)
+(GPL source distribution)
+Java Runtime: OpenJDK Runtime Environment
+JVM: OpenJDK 64-Bit Server VM
+Java Version: 21.0.10+7-Ubuntu-124.04
+Operating System: Linux
+Default Encoding: UTF-8
+Language: en
+Country: US
+--></g></svg>
