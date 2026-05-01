@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" contentScriptType="application/ecmascript" contentStyleType="text/css" height="910px" preserveAspectRatio="none" style="width:927px;height:910px;" version="1.1" viewBox="0 0 927 910" width="927px" zoomAndPan="magnify"><defs/><g><text fill="#000000" font-family="Arial" font-size="14" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="287" x="327.5" y="20.9951">BGP control plane — system context</text><!--MD5=[3b8c67fa06828bb75806d0a691e99553]
+cluster tier0--><rect fill="#F3E6FF" height="375" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="173" x="471" y="524.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="134" x="490.5" y="545.4355">Tier 0 — Global RRs</text><!--MD5=[902ec2f90453745b7387e05442755f4c]
+cluster tier1_am--><rect fill="#E6FFF9" height="405" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="290" x="22" y="56.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="123" x="105.5" y="77.4355">Tier 1 — Americas</text><!--MD5=[183dc5f76d4da14c0d3b0dbd2da24efc]
+cluster tier1_eu--><rect fill="#E6FFF9" height="405" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="284" x="336" y="56.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="96" x="430" y="77.4355">Tier 1 — EMEA</text><!--MD5=[d88c77575e23f61f8e58235003bf869c]
+cluster tier1_ap--><rect fill="#E6FFF9" height="405" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="256" x="644" y="56.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="139" x="702.5" y="77.4355">Tier 1 — Asia-Pacific</text><!--MD5=[82121431a4fc5bf03f32008e75d5b53b]
+entity rr_nyc--><rect fill="#E1D5E7" height="109.9063" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="132" x="491" y="572.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="67" x="509" y="601.4355">us-east-2</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="96" x="509" y="631.4043">Global RR (FRR)</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="83" x="509" y="661.373">New York City</text><!--MD5=[65baf83a0460ec265078aa400e457cf8]
+entity rr_fra--><rect fill="#E1D5E7" height="109.9063" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="132" x="487" y="773.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="86" x="505" y="802.4355">de-central-1</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="96" x="505" y="832.4043">Global RR (FRR)</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="57" x="505" y="862.373">Frankfurt</text><!--MD5=[fc5aee18ac6ffbac141f789a1bea1bb6]
+entity rr_am--><rect fill="#CCFFE6" height="109.9063" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="184" x="112" y="335.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="118" x="130" y="364.4355">Americas RR pair</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="148" x="130" y="394.4043">FRR — Anchored at NYC</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="78" x="130" y="424.373">active/active</text><!--MD5=[19ecfd82b0d0aa0036ad2cbc93c367cb]
+entity pop_am--><rect fill="#DAE8FC" height="139.875" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="258" x="38" y="104.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="124" x="56" y="133.4355">7 × worker nodes</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="42" x="56" y="163.4043">GoBGP</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="222" x="56" y="193.373">us-east-1/2, us-central-1, us-west-1</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="202" x="56" y="223.3418">ca-east-1, br-east-1, cl-central-1</text><!--MD5=[feb8def87ba163a61c464406dfd29e8c]
+entity rr_eu--><rect fill="#CCFFE6" height="109.9063" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="217" x="352.5" y="335.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="91" x="370.5" y="364.4355">EMEA RR pair</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="181" x="370.5" y="394.4043">FRR — Anchored at Frankfurt</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="78" x="370.5" y="424.373">active/active</text><!--MD5=[d4d9f6c4d794b7f6616098f58d3cc58c]
+entity pop_eu--><rect fill="#DAE8FC" height="139.875" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="252" x="352" y="104.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="124" x="370" y="133.4355">5 × worker nodes</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="42" x="370" y="163.4043">GoBGP</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="216" x="370" y="193.373">de-central-1, gb-south-1, nl-west-1</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="147" x="370" y="223.3418">ae-north-1, za-central-1</text><!--MD5=[c0f988a0cf3e35a8d6e62e26608da442]
+entity rr_ap--><rect fill="#CCFFE6" height="109.9063" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="224" x="660" y="335.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="90" x="678" y="364.4355">APAC RR pair</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="188" x="678" y="394.4043">FRR — Anchored at Singapore</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="78" x="678" y="424.373">active/active</text><!--MD5=[6d6b6afe99838161f439d6cd382ab664]
+entity pop_ap--><rect fill="#DAE8FC" height="139.875" rx="4" ry="4" style="stroke: #336699; stroke-width: 1.5;" width="174" x="660" y="104.2969"/><text fill="#000000" font-family="Arial" font-size="12" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="124" x="678" y="133.4355">4 × worker nodes</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="42" x="678" y="163.4043">GoBGP</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="138" x="678" y="193.373">sg-central-1, jp-east-1</text><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="124" x="678" y="223.3418">au-east-1, in-west-1</text><!--MD5=[841b06f708e06b1bb7df715ee20fc4b9]
+link rr_nyc to rr_fra--><path d="M555.81,687.4269 C555.3,712.9169 554.7,742.6669 554.19,768.1569 " fill="none" id="rr_nyc-rr_fra" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="554.09,773.1969,558.2692,764.2787,554.19,768.1979,550.2708,764.1187,554.09,773.1969" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="555.91,682.4069,551.7308,691.3251,555.81,687.4059,559.7292,691.4851,555.91,682.4069" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="88" x="564" y="732.4355">iBGP full mesh</text><!--MD5=[1d91b3dfb662b8566c488e092fb798b5]
+link rr_am to rr_nyc--><path d="M290.47,445.3969 C305.41,453.8669 320.97,462.1669 336,469.2969 C337.71,470.1069 462.45,515.2069 464,516.2969 C483.91,530.2269 502.1,549.4269 517.01,567.8869 " fill="none" id="rr_am-&gt;rr_nyc" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="520.34,572.0569,517.8667,562.5236,517.227,568.1442,511.6064,567.5044,520.34,572.0569" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="28" x="451" y="497.4355">iBGP</text><!--MD5=[3c31e802bfc8c249984142906f037a0d]
+link rr_am to rr_fra--><path d="M225.03,445.3169 C250.66,506.8369 298.16,608.3869 359,682.2969 C386.31,715.4669 399.76,717.3369 434,743.2969 C449.6,755.1269 466.66,767.4869 482.85,778.9769 " fill="none" id="rr_am-&gt;rr_fra" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="486.95,781.8769,481.9063,773.4175,482.866,778.9923,477.2911,779.9519,486.95,781.8769" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="28" x="368" y="631.9355">iBGP</text><!--MD5=[9ac2f5242ce55d08fb9d2e638da97a7f]
+link rr_eu to rr_nyc--><path d="M483.14,445.5069 C497.98,481.8269 517.52,529.6569 532.77,566.9869 " fill="none" id="rr_eu-&gt;rr_nyc" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="534.8,571.9569,535.1087,562.1129,532.9135,567.3264,527.7,565.1312,534.8,571.9569" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="28" x="515" y="497.4355">iBGP</text><!--MD5=[80b788b499e61042898bde6aba8dc42e]
+link rr_eu to rr_fra--><path d="M440.47,445.3869 C421,505.2069 398.74,603.5369 428,682.2969 C440.09,714.8269 463.11,744.9469 486.13,769.2069 " fill="none" id="rr_eu-&gt;rr_fra" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="489.83,773.0469,486.4622,763.7917,486.3593,769.4477,480.7034,769.3448,489.83,773.0469" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="28" x="437" y="631.9355">iBGP</text><!--MD5=[d35f2afec2e95c67e2ace4d29de7e6d9]
+link rr_ap to rr_nyc--><path d="M683.12,445.3569 C670.25,455.1369 657.75,465.8869 647,477.2969 C622.01,503.8069 600.6,538.3969 584.94,567.5669 " fill="none" id="rr_ap-&gt;rr_nyc" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="582.48,572.1969,590.2325,566.1224,584.824,567.7804,583.1661,562.3719,582.48,572.1969" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="28" x="656" y="497.4355">iBGP</text><!--MD5=[6ef9c884047bfa706d19bb312c5ee1a9]
+link rr_ap to rr_fra--><path d="M767.11,445.4869 C758.2,518.9369 733.78,651.4669 669,743.2969 C656.98,760.3369 640.38,775.2369 623.49,787.5569 " fill="none" id="rr_ap-&gt;rr_fra" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="619.19,790.6369,628.8366,788.6511,623.2558,787.7266,624.1802,782.1458,619.19,790.6369" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="28" x="764" y="631.9355">iBGP</text><!--MD5=[9993ed548fdd7273ec10a55f1e2af7cd]
+link pop_am to rr_am--><path d="M166.26,244.5969 C167.11,264.3569 169.05,285.8069 173,305.2969 C174.64,313.3669 176.92,321.7069 179.52,329.8369 " fill="none" id="pop_am-&gt;rr_am" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="181.18,334.8769,182.1552,325.0764,179.6117,330.1292,174.5589,327.5857,181.18,334.8769" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="145" x="182" y="294.4355">iBGP (2 sessions/node)</text><!--MD5=[c811be5e2680d4dd9f967d9dc1ab5b60]
+link pop_eu to rr_eu--><path d="M472.5,244.4769 C470.31,272.0669 467.81,303.5069 465.71,330.0269 " fill="none" id="pop_eu-&gt;rr_eu" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="465.29,335.2669,469.9723,326.6022,465.6757,330.2818,461.9961,325.9852,465.29,335.2669" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="145" x="479" y="294.4355">iBGP (2 sessions/node)</text><!--MD5=[96886ccd31c8baaf0f0915da9923e1c0]
+link pop_ap to rr_ap--><path d="M755.08,244.4769 C758.31,272.0669 761.98,303.5069 765.08,330.0269 " fill="none" id="pop_ap-&gt;rr_ap" style="stroke: #333333; stroke-width: 1.0;"/><polygon fill="#333333" points="765.69,335.2669,768.6095,325.8607,765.105,330.3012,760.6644,326.7967,765.69,335.2669" style="stroke: #333333; stroke-width: 1.0;"/><text fill="#000000" font-family="Arial" font-size="12" lengthAdjust="spacingAndGlyphs" textLength="145" x="770" y="294.4355">iBGP (2 sessions/node)</text><!--MD5=[bc4c490c920ad6b8e96919ea585389f3]
+@startuml bgp-context
+skinparam rectangleBackgroundColor #dae8fc
+skinparam rectangleBorderColor #336699
+skinparam arrowColor #333333
+skinparam defaultFontSize 12
+skinparam defaultFontName Arial
+skinparam titleFontSize 14
+skinparam titleFontStyle bold
+skinparam padding 8
+skinparam shadowing false
+skinparam roundCorner 8
+
+title BGP control plane — system context
+
+rectangle "**Tier 0 — Global RRs**" as tier0 #f3e6ff {
+  rectangle "**us-east-2**\nGlobal RR (FRR)\nNew York City" as rr_nyc #e1d5e7
+  rectangle "**de-central-1**\nGlobal RR (FRR)\nFrankfurt" as rr_fra #e1d5e7
+}
+
+rectangle "**Tier 1 — Americas**" as tier1_am #e6fff9 {
+  rectangle "**Americas RR pair**\nFRR — Anchored at NYC\nactive/active" as rr_am #ccffe6
+  rectangle "**7 × worker nodes**\nGoBGP\nus-east-1/2, us-central-1, us-west-1\nca-east-1, br-east-1, cl-central-1" as pop_am #dae8fc
+}
+
+rectangle "**Tier 1 — EMEA**" as tier1_eu #e6fff9 {
+  rectangle "**EMEA RR pair**\nFRR — Anchored at Frankfurt\nactive/active" as rr_eu #ccffe6
+  rectangle "**5 × worker nodes**\nGoBGP\nde-central-1, gb-south-1, nl-west-1\nae-north-1, za-central-1" as pop_eu #dae8fc
+}
+
+rectangle "**Tier 1 — Asia-Pacific**" as tier1_ap #e6fff9 {
+  rectangle "**APAC RR pair**\nFRR — Anchored at Singapore\nactive/active" as rr_ap #ccffe6
+  rectangle "**4 × worker nodes**\nGoBGP\nsg-central-1, jp-east-1\nau-east-1, in-west-1" as pop_ap #dae8fc
+}
+
+rr_nyc <- -> rr_fra : iBGP full mesh
+
+rr_am - -> rr_nyc : iBGP
+rr_am - -> rr_fra : iBGP
+rr_eu - -> rr_nyc : iBGP
+rr_eu - -> rr_fra : iBGP
+rr_ap - -> rr_nyc : iBGP
+rr_ap - -> rr_fra : iBGP
+
+pop_am - -> rr_am : iBGP (2 sessions/node)
+pop_eu - -> rr_eu : iBGP (2 sessions/node)
+pop_ap - -> rr_ap : iBGP (2 sessions/node)
+
+@enduml
+
+PlantUML version 1.2020.02(Sun Mar 01 10:22:07 UTC 2020)
+(GPL source distribution)
+Java Runtime: OpenJDK Runtime Environment
+JVM: OpenJDK 64-Bit Server VM
+Java Version: 21.0.10+7-Ubuntu-124.04
+Operating System: Linux
+Default Encoding: UTF-8
+Language: en
+Country: US
+--></g></svg>
