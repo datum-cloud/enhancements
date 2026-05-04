@@ -2,314 +2,285 @@
 
 ## Overview
 
-This document describes the BGP control plane architecture for Datum's Galactic VPC
-fabric. The fabric spans 16 points of presence (PoPs) across three geographic regions
-and uses a two-tier hierarchical route reflector (RR) model to distribute routing
-information at scale.
+This document describes the BGP control plane architecture for Datum's Galactic VPC fabric. The fabric spans points of presence (PoPs) across three geographic regions.
 
-BGP is the single control plane protocol — no IGP runs in the underlay. SRv6
-(RFC 8986) is the committed data plane. Every design decision in this document is
-made with that constraint as a hard given.
+The underlay provides IPv6 transport and reachability between PoPs. This document covers only the overlay control plane built on top of it.
 
 ---
 
 ## Design goals
 
-- Full control plane reachability across all 16 PoPs via a single protocol (BGP)
+- Full control plane reachability across all PoPs via BGP
 - Regional forwarding survives total loss of the global RR tier
-- No PoP carries more than 2 RR client sessions
+- No worker node carries more than 2 RR client sessions
 - No single point of failure at any tier
 - Clean separation of intra-region and inter-region route reflection
-- galactic-operator owns GoBGP lifecycle end-to-end; no out-of-band config
 
 **Non-goals:**
 
-- IGP in the underlay — BGP handles locator advertisement and underlay reachability
-- MPLS fallback — SRv6 is the commitment, not a preference
+- MPLS data plane — SRv6 is the commitment, not a preference
 - Stretched L2 between PoPs
-
----
-
-## PoP inventory
-
-| Region       | POP ID       | City          | Notes                    |
-|--------------|--------------|---------------|--------------------------|
-| Americas     | us-east-1    | Ashburn       | Migrating to servers.com |
-| Americas     | us-east-2    | New York City | Global RR site           |
-| Americas     | us-central-1 | Dallas        | Migrating to servers.com |
-| Americas     | us-west-1    | San Jose      | Migrating to servers.com |
-| Americas     | ca-east-1    | Toronto       |                          |
-| Americas     | br-east-1    | São Paulo     |                          |
-| Americas     | cl-central-1 | Santiago      |                          |
-| EMEA         | de-central-1 | Frankfurt     | Global RR site           |
-| EMEA         | gb-south-1   | London        |                          |
-| EMEA         | nl-west-1    | Amsterdam     |                          |
-| EMEA         | ae-north-1   | Dubai         |                          |
-| EMEA         | za-central-1 | Johannesburg  |                          |
-| Asia-Pacific | sg-central-1 | Singapore     | Regional RR site         |
-| Asia-Pacific | jp-east-1    | Tokyo         |                          |
-| Asia-Pacific | au-east-1    | Sydney        |                          |
-| Asia-Pacific | in-west-1    | Mumbai        |                          |
 
 ---
 
 ## Architecture
 
-### Two-tier route reflector hierarchy
+The control plane uses a two-tier route reflector hierarchy. This eliminates the O(n²) iBGP full-mesh problem while keeping regional forwarding fully independent of the global tier.
 
-The control plane uses a two-tier hierarchy. This eliminates the O(n²) iBGP full-mesh
-problem while ensuring regional forwarding is fully independent of the global tier.
+```mermaid
+graph TD
+    GRR_A["Global RR — Americas"]
+    GRR_E["Global RR — EMEA"]
+    GRR_A <-->|iBGP| GRR_E
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Tier 0 — Global RRs                                                │
-│                                                                     │
-│   us-east-2 (NYC) ◄────── iBGP full mesh ──────► de-central-1 (FRA) │
-└─────────────────────────────────────────────────────────────────────┘
-          ▲  ▲                    ▲  ▲                   ▲  ▲
-          │  │                    │  │                   │  │
-┌─────────┴──┴──┐        ┌────────┴──┴──┐        ┌───────┴──┴───┐
-│ Regional RR   │        │ Regional RR  │        │ Regional RR  │
-│ Americas      │        │ EMEA         │        │ APAC         │
-│ (NYC anchor)  │        │ (FRA anchor) │        │ (SIN anchor) │
-└───────┬───────┘        └──────┬───────┘        └──────┬───────┘
-        │ iBGP                  │ iBGP                  │ iBGP
-   ┌────┴────┐             ┌────┴────┐             ┌────┴────┐
-   │ Workers │             │ Workers │             │ Workers │
-   │ GoBGP   │             │ GoBGP   │             │ GoBGP   │
-   └─────────┘             └─────────┘             └─────────┘
+    RR_AM["Regional RR pair — Americas"]
+    RR_EM["Regional RR pair — EMEA"]
+    RR_AP["Regional RR pair — APAC"]
+
+    GRR_A -->|reflects| RR_AM
+    GRR_A -->|reflects| RR_EM
+    GRR_A -->|reflects| RR_AP
+    GRR_E -->|reflects| RR_AM
+    GRR_E -->|reflects| RR_EM
+    GRR_E -->|reflects| RR_AP
+
+    W_AM["Workers — Americas"]
+    W_EM["Workers — EMEA"]
+    W_AP["Workers — APAC"]
+
+    RR_AM -->|iBGP| W_AM
+    RR_EM -->|iBGP| W_EM
+    RR_AP -->|iBGP| W_AP
 ```
 
 **Tier 0 — Global RRs (2 nodes)**
 
-Two global RRs deployed as an iBGP full-mesh pair:
-
-| Node         | Location      | Rationale                                          |
-|--------------|---------------|----------------------------------------------------|
-| us-east-2    | New York City | Existing PoP; best latency to Americas and EMEA    |
-| de-central-1 | Frankfurt     | Existing PoP; best latency spread to EMEA and APAC |
-
-The global RRs reflect inter-regional reachability between the three regional
-clusters. They do not carry intra-region routes; those are handled entirely within
-each regional cluster. No new sites are required — both are existing deployed PoPs.
+Two global RRs form an iBGP full-mesh pair, one anchored in Americas and one in EMEA. They reflect inter-regional reachability between the three regional clusters. They carry no intra-region routes — those stay entirely within each regional cluster. Both are co-located at existing PoPs; no new sites are required.
 
 **Tier 1 — Regional RR clusters (3 pairs)**
 
-| Cluster      | RR anchor                | PoPs served                                                                       |
-|--------------|--------------------------|-----------------------------------------------------------------------------------|
-| Americas     | us-east-2 (NYC)          | us-east-1, us-east-2, us-central-1, us-west-1, ca-east-1, br-east-1, cl-central-1 |
-| EMEA         | de-central-1 (Frankfurt) | de-central-1, gb-south-1, nl-west-1, ae-north-1, za-central-1                     |
-| Asia-Pacific | sg-central-1 (Singapore) | sg-central-1, jp-east-1, au-east-1, in-west-1                                     |
+| Cluster      | Scope             |
+|--------------|-------------------|
+| Americas     | All Americas PoPs |
+| EMEA         | All EMEA PoPs     |
+| Asia-Pacific | All APAC PoPs     |
 
-Each regional cluster is a **pair** of RRs operating active/active. Each worker node
-peers with both RRs in its regional cluster — two sessions per node, no more.
-Redundancy is built in: loss of one RR in a pair causes no service impact.
+Each regional cluster is a pair of RRs operating active/active. Each worker node peers with both RRs in its regional cluster — two sessions per worker, no more. Loss of one RR in a pair causes no service impact.
 
-Singapore was chosen as the APAC anchor over Tokyo or Sydney because it minimises
-the average RTT across the four APAC PoPs (Singapore, Tokyo, Sydney, Mumbai). Tokyo
-would penalise Mumbai and Sydney; Sydney would penalise Tokyo and Mumbai.
+**Anchor selection criteria**
 
-Dallas was explicitly rejected as an Americas anchor despite proximity to LATAM:
-the RR is a control plane function and RTT has no material operational impact on
-BGP session management. Dallas is also mid-migration to servers.com, making it
-unsuitable for load-bearing infrastructure.
-
----
-
-## BGP Control Plane System Context
-
-![BGP control plane — system context](bgp-context.svg)
-
-> Source: [`diagrams/bgp-context.puml`](bgp-context.puml)
+The anchor PoP for a regional RR pair should minimise average RTT across all PoPs in that region. This is a tiebreaker, not the primary criterion — BGP session management is not latency-sensitive. The hard constraint is that the anchor must not be a PoP undergoing active infrastructure migration or elevated operational risk.
 
 ---
 
 ## Session topology
 
-### Session counts
+| Node type        | Session count   | Peers                                                              |
+|------------------|-----------------|--------------------------------------------------------------------|
+| Worker node      | 2               | Both RRs in regional pair                                          |
+| Regional RR node | 2 + N           | Both global RRs + all worker nodes in the regional cluster         |
+| Global RR node   | 1 + 6           | Other global RR + both nodes of each regional pair (3 regions × 2) |
 
-| Node type           | Sessions        | Peers                                                              |
-|---------------------|-----------------|--------------------------------------------------------------------|
-| Worker node (GoBGP) | 2               | Both RRs in regional pair                                          |
-| Regional RR node    | 2 + (N clients) | Both global RRs + all regional clients                             |
-| Global RR node      | 2 + 6           | Other global RR + both nodes of each regional pair (3 regions × 2) |
+The design scales linearly: adding a PoP adds exactly 2 RR sessions. There is no fan-out at the global tier.
 
-At 16 PoPs today, with an average of 3 workers per PoP, this is approximately
-96 worker-to-RR sessions globally — entirely manageable. The design scales linearly:
-adding a PoP adds exactly 2 RR sessions.
+---
 
-### BGP session establishment sequence
+## Route propagation
 
-The following shows how a worker node establishes its control plane sessions on boot:
+Routes flow up from worker → regional RR → global RR, then back down to peer regional RRs → workers in the destination region. Intra-region propagation terminates at the regional RR; the global tier is not involved.
 
 ```mermaid
 sequenceDiagram
-  participant W as Worker node<br/>(GoBGP)
-  participant GO as galactic-operator
-  participant RR1 as Regional RR 1
-  participant RR2 as Regional RR 2
-  participant GRR as Global RR
+    participant W_SRC as Worker (origin)
+    participant RR_SRC as Regional RR (origin)
+    participant GRR as Global RR
+    participant RR_DST as Regional RR (destination)
+    participant W_DST as Worker (destination)
 
-  GO->>W: Render GoBGP config (peers, RD/RT, VRFs)
-  GO->>W: SIGHUP GoBGP
-  W->>RR1: TCP SYN → port 179
-  W->>RR2: TCP SYN → port 179
-  RR1-->>W: BGP OPEN (capabilities: IPv6-unicast, VPNv4, VPNv6, EVPN, BGP-LS)
-  RR2-->>W: BGP OPEN (capabilities: IPv6-unicast, VPNv4, VPNv6, EVPN, BGP-LS)
-  W-->>RR1: BGP OPEN + KEEPALIVE
-  W-->>RR2: BGP OPEN + KEEPALIVE
-  RR1->>W: BGP UPDATE — full intra-region RIB
-  RR2->>W: BGP UPDATE — full intra-region RIB
-  Note over RR1,GRR: Regional RRs already peered<br/>with global tier at startup
-  RR1->>W: BGP UPDATE — inter-region routes (via global RR reflection)
-  W->>RR1: BGP UPDATE — local VPNv4/VPNv6 prefixes (RFC 9252 SRv6 TLV)
-  RR1->>GRR: BGP UPDATE — reflects worker prefixes to global tier
-  GRR->>RR2: BGP UPDATE — reflects to other regional clusters
-```
-
-### Route propagation — inter-region example
-
-This shows how a prefix originating on a worker in Tokyo reaches a worker in London:
-
-```mermaid
-sequenceDiagram
-  participant W_JP as Worker<br/>jp-east-1
-  participant RR_AP as APAC RR<br/>sg-central-1
-  participant GRR as Global RR<br/>us-east-2
-  participant RR_EU as EMEA RR<br/>de-central-1
-  participant W_GB as Worker<br/>gb-south-1
-
-  W_JP->>RR_AP: BGP UPDATE — tenant prefix + SRv6 TLV<br/>(End.DT46 SID for jp-east-1)
-  Note over RR_AP: Reflects to regional clients<br/>AND to global RRs
-  RR_AP->>GRR: BGP UPDATE — reflects prefix
-  GRR->>RR_EU: BGP UPDATE — reflects to EMEA
-  RR_EU->>W_GB: BGP UPDATE — installs in tenant VRF
-  Note over W_GB: Traffic to Tokyo now<br/>SRv6-encapsulated with<br/>jp-east-1 End.DT46 SID
+    W_SRC ->> RR_SRC: BGP UPDATE — tenant prefix + SRv6 TLV
+    RR_SRC ->> RR_SRC: Reflects to regional clients and global RRs
+    RR_SRC ->> GRR: BGP UPDATE — reflected prefix
+    GRR ->> RR_DST: BGP UPDATE — reflected to destination region
+    RR_DST ->> W_DST: BGP UPDATE — installs in tenant VRF
 ```
 
 ---
 
-## SAFIs
+## Address families (SAFIs)
 
 All RR sessions negotiate the following address families:
 
-| Address family                                  | Purpose                                           |
-|-------------------------------------------------|---------------------------------------------------|
-| IPv6 Unicast                                    | Underlay reachability, SRv6 locator advertisement |
-| VPNv4 (RFC 4364) + SRv6 Services TLV (RFC 9252) | Tenant L3VPN overlay — IPv4 prefixes              |
-| VPNv6 (RFC 4659) + SRv6 Services TLV (RFC 9252) | Tenant L3VPN overlay — IPv6 prefixes              |
-| EVPN + SRv6 Services TLV (RFC 9252)             | Tenant L2/L3 overlay                              |
-| BGP-LS                                          | Topology export to controller / PCE               |
+| Address family                                  | Purpose                              |
+|-------------------------------------------------|--------------------------------------|
+| VPNv4 (RFC 4364) + SRv6 Services TLV (RFC 9252) | Tenant L3VPN overlay — IPv4 prefixes |
+| VPNv6 (RFC 4659) + SRv6 Services TLV (RFC 9252) | Tenant L3VPN overlay — IPv6 prefixes |
+| EVPN + SRv6 Services TLV (RFC 9252)             | Tenant L2/L3 overlay                 |
+| BGP-LS                                          | Topology export to controller / PCE  |
 
-RFC 9252 SRv6 Services TLV carries the `End.DT4` (IPv4) or `End.DT6` (IPv6) SID for
-each tenant VRF alongside the VPN prefix. This is the glue between BGP VPN signalling
-and SRv6 forwarding — a remote PE receiving a VPN prefix uses the TLV to determine
-which SRv6 SID to use for encapsulation. VPNv4 and VPNv6 use the same SID structure;
-the difference is the BGP NLRI encoding and the SRv6 endpoint behavior (`End.DT4` vs
-`End.DT46` vs `End.DT6` depending on whether the VRF is IPv4-only, dual-stack, or
-IPv6-only).
-
-> **Note on GoBGP RFC 9252 support:** GoBGP's SRv6 Services TLV implementation has
-> known gaps in the `SRv6 SID Structure` sub-TLV (specifically the
-> `TranspositionLength`/`TranspositionOffset` fields used for uSID compression). This
-> must be validated against the regional RR implementation before production rollout.
-> See the RFC 9252 validation spike in the backlog.
+The RFC 9252 SRv6 Services TLV carries the SRv6 SID for each tenant VRF alongside the VPN prefix. A remote PE receiving a VPN prefix uses the TLV to determine which SRv6 SID to use for encapsulation. The SID endpoint behaviour (`End.DT4`, `End.DT46`, or `End.DT6`) is determined by the VRF address family — IPv4-only, dual-stack, or IPv6-only respectively.
 
 ---
 
-## Node-level architecture
+## Tier 0 — Global RRs
 
-Each Kubernetes worker node runs three daemonset processes that together form the
-per-node control and data plane:
+### Role and scope
 
-![Worker node — component view](bgp-worker-component.svg)
+The global RRs exist for one purpose: carrying inter-regional reachability. They do not reflect intra-region routes — regional clusters handle that themselves and the global tier never sees it. The global RRs reflect VPN prefixes, EVPN NLRIs, and BGP-LS topology between the three regional clusters.
 
-> Source: [`bgp-worker-component.puml`](bgp-worker-component.puml)
+Two nodes. Full-mesh iBGP between them. Each global RR is a client of the other — they reflect to each other and both reflect outbound to the regional RR pairs. This means either global RR can independently reflect the full inter-region table to all regional clients.
 
-**galactic-operator reconciliation loop (per tenant pod):**
+**Placement:** One anchor per region is sufficient at current scale; not every region requires a global RR anchor. Regional RRs in unanchored regions peer with both existing global RRs via the underlay. Latency on those sessions is irrelevant for correctness — BGP session management is not latency-sensitive. If a region grows to warrant its own global RR anchor, the criteria are: PoP stability, infrastructure maturity, and avoiding any site currently undergoing active infrastructure migration.
 
-```
-1. Watch:   pod CREATE with datum.net/tenant=<name> on this node
-2. Ensure:  vrf-tenant-<name> exists (Netlink) — idempotent
-3. Ensure:  GoBGP VRF <name> configured with RD/RT (gRPC AddVrf)
-4. Wait:    Cilium creates lxcXXXX (watch netlink NEWLINK)
-5. Act:     ip link set lxcXXXX master vrf-tenant-<name> (Netlink)
-6. Act:     move endpoint route from table 0 → tenant table (Netlink)
-7. Act:     AddPath to GoBGP VRF for pod /128 (gRPC)
+### What the global RRs carry
 
-On pod DELETE:
-1. Watch:   pod DELETE
-2. Act:     DeletePath from GoBGP for pod /128 (gRPC)
-3. Act:     release lxc from VRF (Netlink)
-4. Cleanup: remove VRF if no remaining pods in tenant on this node
-```
+| SAFI | Scope |
+|------|-------|
+| VPNv4 + SRv6 Services TLV | Cross-region tenant IPv4 prefixes |
+| VPNv6 + SRv6 Services TLV | Cross-region tenant IPv6 prefixes |
+| EVPN + SRv6 Services TLV | Cross-region tenant L2/L3 |
+| BGP-LS | Full inter-region topology for PCE/controller |
 
-galactic-operator is the single source of truth. GoBGP holds no persistent state —
-on restart, the operator re-drives all VRF and path state from Kubernetes CRDs.
+The global RRs do **not** participate in intra-region VRF distribution. A prefix originating within a region stays within that region's cluster unless it needs to be reachable from workers in other regions.
+
+### Session model
+
+Each global RR maintains:
+- 1 iBGP session to the other global RR (full-mesh peer, also a route-reflector client)
+- 2 sessions per regional pair × 3 regions = 6 client sessions
+
+Total: 7 sessions per global RR. This is deliberately small. If sessions are being added to the global tier for anything other than a new regional pair, the design should be questioned.
+
+### Route-reflector cluster IDs
+
+Each global RR must have a unique `cluster-id`. The global tier forms its own RR cluster. The cluster ID prevents routing loops: an NLRI reflected by Global RR A carries A's cluster ID, and Global RR B will not re-reflect it back to A. Without distinct cluster IDs, you get silent route suppression or reflection loops depending on implementation.
+
+Assign cluster IDs from a reserved block, documented and stable. Do not reuse cluster IDs from the regional tier.
+
+### Failure behaviour
+
+**One global RR down:** The surviving node continues reflecting between all regional clusters. No routes are lost. Inter-region convergence for new prefixes continues uninterrupted. The only impact is loss of redundancy — one failure away from inter-region blackout for new prefixes. Treat as an incident; restore within the SLO window.
+
+**Both global RRs down:** Existing inter-region routes stay installed in regional RIBs — no immediate forwarding impact. New prefixes originating in one region do not reach other regions. This state must be explicitly tested in staging (see Failure Modes section). Do not assume regional RIBs hold state gracefully without a test confirming it.
+
+---
+
+## Tier 1 — Regional RR clusters
+
+### Role and scope
+
+Each regional cluster is an active/active RR pair responsible for full intra-region route distribution. Every worker in the region peers with both RRs. The regional RRs also upstream-peer with both global RRs, carrying inter-region routes back down to regional workers.
+
+The regional RR is the only BGP peer a worker node ever talks to. Workers do not peer with global RRs, with workers in other regions, or with anything outside their regional pair. This is a hard constraint — it's what keeps the session count on workers bounded at 2.
+
+### Cluster assignment
+
+PoPs are assigned to regional clusters based on geography. Each PoP belongs to exactly one regional cluster. The cluster boundaries are operationally significant: they define RR peering scope, failure domain, and the extent of intra-region route distribution.
+
+### Anchor PoP selection
+
+The anchor PoP hosts both nodes of the regional RR pair. Selection criteria in priority order:
+
+1. **No active infrastructure migration.** Any PoP undergoing active infrastructure migration or with elevated operational risk is excluded as an anchor candidate. This is a hard exclusion — not a tiebreaker.
+2. **Operational maturity.** The anchor PoP should have stable infrastructure, proven hardware, and no open reliability incidents.
+3. **RTT minimisation.** Among qualified PoPs, prefer the one with lowest average RTT to all other PoPs in the region.
+
+Do not co-locate both RR nodes in the same physical rack or on shared power. The pair is active/active — hardware failure at the rack level should take at most one node.
+
+### Session model per regional RR node
+
+Each regional RR node maintains:
+- 2 sessions to global RRs (one each)
+- N sessions to worker nodes in the region (N = number of workers in the regional cluster)
+
+Each worker node in the region peers with both RR nodes — so each RR node carries the full worker session load for the region. Size the RR nodes accordingly; at large regional worker counts this is where memory and FIB capacity matter.
+
+### Route-reflector cluster IDs — regional tier
+
+Each regional pair operates as a single RR cluster. Both nodes in a pair share the same `cluster-id`. This is intentional: it allows either node to reflect routes without the other node suppressing them due to cluster ID loop prevention.
+
+The implication: both nodes in a regional pair are authoritative reflectors for the same cluster. A route reflected by node A and a route reflected by node B for the same prefix look identical from a cluster-loop-prevention standpoint. Workers will accept the reflected route from whichever RR they receive it from first.
+
+Each regional cluster must have a distinct cluster ID from every other cluster including the global tier. Four cluster IDs total: one per regional pair, two for the global tier.
+
+### Route reflection flow — intra-region
+
+A worker in region X originates a tenant VPN prefix:
+
+1. Worker advertises the prefix (VPNv4 + SRv6 TLV) to both regional RR nodes.
+2. Each regional RR reflects the prefix to all other workers in the region and upstream to both global RRs.
+3. Other regional workers install the prefix. The originating worker's SRv6 SID (from the TLV) tells them how to encapsulate.
+4. Global RRs reflect the prefix to the other regional RR pairs, which distribute it to their workers.
+
+The global tier is not in the intra-region path. A worker receiving a prefix from another worker in the same region never touches the global tier. This is what makes regional forwarding independent of global RR availability.
+
+### Route reflection flow — inter-region
+
+A worker in region X originates a tenant VPN prefix:
+
+1. Worker → both regional RR nodes in region X.
+2. Regional RRs reflect to all workers in region X (intra-region done) and upstream to both global RRs.
+3. Global RRs reflect to all other regional RR pairs.
+4. Remote regional RRs distribute to their respective workers.
+
+The SRv6 SID in the TLV is set by the originating worker. Remote workers install the prefix and use that SID for encapsulation — they steer traffic toward the origin's locator, which the underlay resolves via the SRv6 locator advertisement.
+
+### ADD-PATH
+
+Regional RRs should advertise multiple paths (BGP ADD-PATH, RFC 7911) to workers where multiple equal-cost paths exist across the fabric. Without ADD-PATH, a worker receives only the best path the RR selected — you lose visibility into alternate paths and make ECMP harder to exploit correctly. Enable ADD-PATH on all regional RR sessions; configure workers to consume it.
+
+### Next-hop handling
+
+Regional RRs must **not** modify the NEXT_HOP attribute on reflected routes. The next-hop for a VPN route is the originating PE's loopback (or SRv6 locator address) — the RR is a reflector, not a transit node. If next-hop rewrite is enabled by mistake, workers will try to reach the RR as next-hop and the data plane breaks.
+
+Explicitly configure `next-hop-unchanged` (or equivalent) on all RR client peering groups. Verify this in staging before bringing up the first regional cluster.
+
+### Graceful restart
+
+Configure BGP Graceful Restart (RFC 4724) on regional RR nodes. During a planned RR restart (software upgrade, config push), workers should not withdraw all routes immediately. GR gives the RR time to re-establish sessions and re-reflect routes before workers flush their RIB state. Set the GR restart timer conservatively — 120s is reasonable; enough time for an RR to come back without triggering unnecessary reconvergence.
+
+Workers should be GR-aware (Helper mode). The RR is the restarting speaker; workers are helpers that hold state during the restart window.
+
+### Scaling limits
+
+At the regional tier, the binding constraint is the number of active BGP sessions and the VRF/prefix table size the RR must hold. The RR must hold the full regional table plus the inter-region table reflected from the global tier. At current PoP counts this is well within commodity server capacity, but instrument it:
+
+- Monitor BGP session count and RIB size per RR node via gNMI.
+- Alert if either RR in a pair loses sessions that its partner is still holding — that's a split you need to see immediately.
+- Alert on RIB size divergence between the two nodes in a pair — a significant delta indicates a reflection or session issue.
+
+The design is linear: adding a PoP to a region adds 2 sessions to that region's RR pair (one per node). There is no fan-out, no O(n²) growth. This holds as long as workers peer only with their regional pair.
 
 ---
 
 ## Failure modes
 
-### Global RR loss
+### Global RR loss (one node)
 
-Loss of one global RR degrades inter-region route propagation but does not cause an
-outage. The remaining global RR continues reflecting between regional clusters.
+No outage. The surviving global RR continues reflecting between all regional clusters. Inter-region convergence degrades slightly until the failed node is restored.
 
-Loss of **both** global RRs: inter-region routes are no longer updated but existing
-routes remain in the regional RIBs. Intra-region forwarding is completely unaffected.
-New prefixes originating in one region will not reach other regions until the global
-tier recovers.
+### Global RR loss (both nodes)
 
-> **This must be tested explicitly in staging.** Do not assume it works. The test is:
-> withdraw both global RRs, originate a new prefix in Americas, confirm it does NOT
-> appear in EMEA or APAC RIBs, confirm all *existing* inter-region routes remain
-> installed and forwarding.
+Inter-region routes are no longer updated. Existing routes remain in the regional RIBs; intra-region forwarding is completely unaffected. New prefixes originating in one region will not reach other regions until the global tier recovers.
+
+> **This must be tested explicitly in staging.** The test: withdraw both global RRs, originate a new prefix in one region, confirm it does not appear in other regions' RIBs, confirm all existing inter-region routes remain installed and forwarding.
 
 ### Regional RR node loss (one of pair)
 
-No service impact. Workers continue peering with the surviving RR node. The operator
-should alert within 60 seconds; the failed node should be replaced within the SLO
-window before the pair degrades to a single point of failure.
+No service impact. Workers continue peering with the surviving RR. The failed node should be replaced within the SLO window — a degraded pair is a single point of failure.
 
-### Worker GoBGP crash
+### Worker node BGP session loss
 
-BGP sessions drop. galactic-operator detects the restart and re-drives VRF and path
-state via gRPC. Session re-establishment uses configured keepalive/hold timers
-(recommended: 10s keepalive / 30s hold). In-flight traffic to the affected worker
-black-holes until sessions re-establish — typically under 30 seconds with aggressive
-timers.
-
-### servers.com migration (us-east-1, us-central-1, us-west-1)
-
-The three US PoPs migrating to servers.com will experience BGP session bounces during
-cutover. Locators and ASN remain unchanged. The regional RR pair should treat these as
-normal client reconvergence events. Drain each PoP before migration to avoid in-flight
-tenant traffic loss. Do not migrate all three simultaneously.
+Routes originated by the affected worker are withdrawn from the fabric. The control plane reconverges once sessions re-establish. In-flight traffic to the affected worker black-holes until sessions are restored.
 
 ---
 
 ## Timer recommendations
 
-| Timer               | Recommended value | Rationale                                   |
-|---------------------|-------------------|---------------------------------------------|
-| BGP keepalive       | 10s               | Faster detection without excessive overhead |
-| BGP hold time       | 30s               | 3× keepalive; aggressive but stable         |
-| BFD (if enabled)    | 300ms × 3         | Sub-second PE failure detection             |
-| RR client reconnect | 5s                | Fast reconnect after transient loss         |
+| Timer         | Value | Rationale                                   |
+|---------------|-------|---------------------------------------------|
+| BGP keepalive | 10s   | Faster detection without excessive overhead |
+| BGP hold time | 30s   | 3× keepalive; aggressive but stable         |
+| RR reconnect  | 5s    | Fast reconnect after transient loss         |
+| GR restart    | 120s  | Sufficient for planned RR restarts          |
 
-BFD is not currently implemented. Without BFD, PE failure detection relies on BGP
-hold timer expiry — up to 30s with the above settings. Implementing BFD on worker
-nodes is a tracked backlog item; until then, hold timers are the sole failure
-detection mechanism.
-
----
-
-## Full architecture
-
-The diagram below shows the complete BGP control plane from tenant pod through to
-the global RR tier, including the per-node component relationships.
-
-![Galactic VPC — BGP control plane full architecture](bgp-full-architecture.svg)
-
-> Source: [`bgp-full-architecture.puml`](bgp-full-architecture.puml)
+BGP hold timer expiry is the failure detection mechanism at this layer — up to 30s with the above settings. Sub-second failure detection is an underlay concern: the underlay should withdraw reachability fast enough that BGP sessions drop and reconverge without waiting for hold timer expiry. The control plane relies on that signal; it does not attempt to replicate it.
