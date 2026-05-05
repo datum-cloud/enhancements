@@ -314,14 +314,10 @@ config/services/features/
   registrations/
     kustomization.yaml
     # One ResourceRegistration per feature flag
-  iam/
-    kustomization.yaml
-    roles/
-      feature-flag-operator.yaml
 ```
 
 This follows the pattern of `config/services/quota/`. No changes to
-`config/crd/` are needed.
+`config/crd/` are needed. No new IAM role is needed (see below).
 
 The `datum-cloud/infra` repository does not need changes for v1 beyond
 consuming the updated Milo bundle.
@@ -332,13 +328,9 @@ Feature flag operations are standard Milo API operations covered by existing
 IAM audit logging. `ResourceGrant` create/delete events are logged with full
 actor identity and timestamp.
 
-A new `feature-flag-operator` Role (or an extension of `quota-operator`)
-should grant:
-
-- `quota.miloapis.com/resourceregistrations`: `get`, `list`, `watch`
-- `quota.miloapis.com/resourcegrants`: `get`, `list`, `watch`, `create`,
-  `update`, `delete`
-- `quota.miloapis.com/allowancebuckets`: `get`, `list`, `watch`
+The existing `quota.miloapis.com-manager` role already covers all permissions
+needed to manage feature flags — no new role is required. Operators should
+be assigned this role.
 
 ### Open Questions
 
@@ -358,8 +350,8 @@ should grant:
   Milo bundle — flags are global product decisions. Per-cluster variation is
   handled by creating or deleting `ResourceGrant` objects in `datum-cloud/infra`,
   not by varying registrations.
-- **IAM role placement**: Dedicated `feature-flag-operator` role. Keeps
-  least-privilege separation; `quota-operator` is not extended.
+- **IAM role placement**: No new role needed. `quota.miloapis.com-manager`
+  already covers all required permissions for feature flag management.
 - **Naming convention**: `features.miloapis.com/<name>` confirmed as the
   `resourceType` pattern — consistent with existing API group conventions.
 - **Read permission for org admins**: `organization-quota-manager` already
@@ -390,7 +382,7 @@ code-gen; no controller logic affected. Must land in Milo before any
 - Operators create/delete `ResourceGrant` objects via kubectl or the Milo API
 - Services check feature flags through the OpenFeature provider (Go +
   TypeScript); provider queries `AllowanceBucket.status.available > 0`
-- IAM: new `feature-flag-operator` role or extension of `quota-operator`
+- IAM: use existing `quota.miloapis.com-manager` role — no new role needed
 - No new controllers or CRDs beyond the Milo prerequisite above
 
 Estimated complexity: **low** — Milo one-liner, configuration, a helper IAM
@@ -420,7 +412,7 @@ role, and two thin OpenFeature provider packages.
   is enforced by the live CRD; sentinel `features.miloapis.com/FeatureGrant`
   adopted to satisfy the constraint without enabling admission enforcement.
   All remaining open questions resolved: registrations in Milo bundle,
-  dedicated `feature-flag-operator` role, `features.miloapis.com/<name>`
+  `quota.miloapis.com-manager` covers IAM (no new role), `features.miloapis.com/<name>`
   naming confirmed, org admin read permissions already covered by
   `organization-quota-manager`. Enhancement ready for implementation.
 
