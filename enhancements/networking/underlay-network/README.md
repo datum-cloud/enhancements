@@ -137,6 +137,20 @@ If the fabric cannot support jumbo frames end-to-end, the fallback minimum is:
 
 Standard 1500-byte Ethernet MTU is insufficient for SRv6-encapsulated tenant traffic that itself carries 1500-byte payloads. This is not negotiable — either the fabric supports jumbo frames, or tenants are silently forced to a lower effective MTU.
 
+### Internet Transit PoPs — Fragmentation and MSS Clamping
+
+Some PoPs may have only Internet transit connectivity, limiting the practical wire MTU to 1500 bytes. In these cases, the inner tenant MTU cannot be 1500 bytes without exceeding the wire MTU after SRv6 encapsulation. **Inline IPv6 fragmentation must not be relied upon as the solution.**
+
+IPv6 requires the originating node — not intermediate routers — to handle fragmentation (RFC 8200). "Inline fragmentation" at the SRv6 encapsulating node is stateful, bypasses hardware forwarding on most silicon, and introduces latency and CPU load that is unacceptable in the forwarding path. Any vendor claim of line-rate hardware fragmentation must be backed by qualification data under realistic SRH depth and traffic mix before being trusted in production.
+
+The correct approach for Internet-transit-only PoPs:
+
+1. **MSS clamp TCP to 1360 bytes** at the tenant attachment point. Using 1360 (rather than 1400) provides headroom for worst-case SRv6 encapsulation depth — a conservative 80-byte SRv6 overhead budget plus additional SIDs that may be inserted by policy — without assuming that clamp is applied after all encapsulation decisions are finalized.
+
+2. **ICMPv6 PTB generation and forwarding is mandatory.** For non-TCP flows (UDP, QUIC), PMTUD is the only mechanism available. ICMPv6 Packet Too Big messages must be generated at the point of encapsulation and must traverse the underlay unfiltered to reach the originating host. This is already a hard requirement (see Path MTU Discovery below); it is especially load-bearing on Internet transit paths.
+
+3. **Internet transit PoPs are a degraded MTU operating mode.** They must be tracked as a distinct class in the underlay inventory. MSS clamping and reduced inner MTU must be applied automatically based on per-PoP path MTU capability — not configured manually on a case-by-case basis. The operational target is to migrate all PoPs to jumbo-capable connectivity; running indefinitely on Internet transit MTU must require explicit acknowledgment.
+
 ### Path MTU Discovery
 
 **Requirement: ICMPv6 "Packet Too Big" (PTB) messages must not be filtered anywhere in the underlay.**
@@ -196,6 +210,28 @@ This is derived from the BGP hold timer (30s). If the underlay takes longer to r
 
 **Preferred:** Underlay failure detection and rerouting within 1 second, enabling BFD-assisted BGP failure detection (300ms × 3 = 900ms). BFD is a backlog item in the RR design; the underlay must not preclude it.
 
+### BFD Timer Calculation
+
+BFD timers must be set per link class, not globally. A BFD detection interval shorter than the link's round-trip time produces false positives on healthy links — this is worse than slow detection. The minimum interval must satisfy:
+
+```
+min_interval ≥ ceil(RTT_ms / 1000) + jitter_margin_s
+detection_time = min_interval × multiplier (multiplier = 3)
+```
+
+The following per-class values are the recommended baseline. These must be tuned if measured RTTs differ materially from the ranges shown:
+
+| Link class                | Typical RTT | min-interval | Multiplier | Detection time |
+|---------------------------|-------------|--------------|------------|----------------|
+| Intra-PoP                 | < 1 ms      | 50 ms        | 3          | 150 ms         |
+| Regional (same continent) | 5–30 ms     | 100 ms       | 3          | 300 ms         |
+| Intercontinental backbone | 80–200 ms   | 300 ms       | 3          | 900 ms         |
+| Internet path overlay     | 50–500+ ms  | 1000 ms      | 3          | 3 s            |
+
+**Internet path overlay:** BFD on Internet paths cannot reliably achieve sub-second detection. Jitter, asymmetric routing, and path variation produce false positives at aggressive timer values. The Internet overlay failure detection strategy must be multi-mechanism: BFD at the relaxed timers above for signaling, BGP hold timer as the hard backstop, and BGP Graceful Restart awareness to distinguish planned from unplanned loss. Do not attempt to tune Internet-path BFD to match backbone behavior — the false positive rate will exceed the benefit.
+
+Backbone underlay BFD timers are the primary fast-failure signal and should achieve detection well below the 30-second BGP hold timer floor on all backbone paths. Reroute completion — not just detection — must satisfy the 30-second requirement.
+
 ### Reachability Establishment
 
 **Requirement:** Full IPv6 reachability between a newly-connected PoP and all other PoPs must be established within **60 seconds** of the PoP's underlay connectivity being physically present.
@@ -246,6 +282,24 @@ This is a hard requirement. An RR that is reachable from tenant networks is an a
 
 **Requirement:** Underlay infrastructure prefixes must not be advertised to external peers (transit providers, IXP route servers, peering partners). Prefix filtering at all external BGP sessions must drop the infrastructure block in both inbound and outbound directions.
 
+**Exception — loopback reachability for transit-only PoPs:** Router loopbacks must be reachable from the public Internet to support interoperability with transit-only sites and failover to Internet-based paths. This reachability must be provided by advertising a **covering aggregate prefix** — not individual /128 loopbacks.
+
+The correct approach:
+- Each PoP's loopback space must be contained within a PoP-level aggregate (e.g., a /48 or /56 per PoP, drawn from the infrastructure block)
+- Only the aggregate is advertised externally — individual /128s must not appear in the global DFZ
+- The aggregate must be originated from the PoP where those loopbacks reside; if the PoP loses connectivity, the aggregate withdraws naturally
+- The specific prefixes permitted for external advertisement must be an explicit, enumerated list maintained as an operational invariant — "infrastructure prefixes filtered except loopbacks" expressed only in prose is insufficient and will be misapplied
+
+### Control Plane Protection
+
+**Requirement:** All routers with publicly reachable loopbacks must be protected by an aggressive Control Plane Policing (CoPP) policy.
+
+CoPP requirements:
+- BGP (TCP port 179) must be rate-limited to explicitly configured peer addresses only — not just rate-limited globally. Sessions from unknown sources must be dropped at the control plane, not just throttled.
+- BFD, ICMPv6, and management traffic must be in separate CoPP queues with independent rate limits. A flood of one must not starve the others.
+- All other traffic to the control plane must be dropped or severely rate-limited by default.
+- CoPP policy must be validated as part of PoP commissioning. A publicly reachable loopback without a validated CoPP policy is an open attack surface against the control plane.
+
 ---
 
 ## Observability Requirements
@@ -264,20 +318,24 @@ The underlay must expose enough telemetry for the overlay to be operated effecti
 
 The table below consolidates the non-negotiable requirements for quick reference during design review.
 
-| Area                       | Requirement                                                                |
-|----------------------------|----------------------------------------------------------------------------|
-| IP version                 | IPv6 required; dual-stack permitted                                        |
-| Reachability               | Full any-to-any IPv6 reachability across all overlay PoPs                  |
-| Addressing                 | Dedicated IPv6 infrastructure prefix, /128 loopbacks for all overlay nodes |
-| MTU (preferred)            | 9080 bytes end-to-end                                                      |
-| MTU (minimum)              | 1580 bytes end-to-end                                                      |
-| ICMPv6 PTB                 | Must not be filtered anywhere                                              |
-| Path diversity             | ≥2 diverse inter-PoP paths for RR-carrying routes                          |
-| RR failure domain          | Two RR nodes in each pair on independent hardware                          |
-| Underlay convergence       | ≤30s reroute on failure (BFD path: ≤1s)                                    |
-| Reachability establishment | ≤60s from physical connectivity to full overlay reachability               |
-| Inter-PoP transport        | IPv6 forwarding, no DPI, no middleboxes, DSCP preserved                    |
-| Infrastructure isolation   | Infrastructure prefixes unreachable from tenant networks                   |
-| Telemetry                  | gNMI/gRPC at overlay attachment points; no SNMP                            |
+| Area                       | Requirement                                                                  |
+|----------------------------|------------------------------------------------------------------------------|
+| IP version                 | IPv6 required; dual-stack permitted                                          |
+| Reachability               | Full any-to-any IPv6 reachability across all overlay PoPs                    |
+| Addressing                 | Dedicated IPv6 infrastructure prefix, /128 loopbacks for all overlay nodes   |
+| MTU (preferred)            | 9080 bytes end-to-end                                                        |
+| MTU (minimum)              | 1580 bytes end-to-end                                                        |
+| MTU (Internet transit PoP) | MSS clamp TCP to 1360; no inline fragmentation; ICMPv6 PTB required          |
+| ICMPv6 PTB                 | Must not be filtered anywhere                                                |
+| Path diversity             | ≥2 diverse inter-PoP paths for RR-carrying routes                            |
+| RR failure domain          | Two RR nodes in each pair on independent hardware                            |
+| BFD timers                 | Per link class; min-interval ≥ RTT + jitter margin; multiplier = 3           |
+| Underlay convergence       | ≤30s reroute on failure (BFD path: ≤1s on backbone)                          |
+| Reachability establishment | ≤60s from physical connectivity to full overlay reachability                 |
+| Inter-PoP transport        | IPv6 forwarding, no DPI, no middleboxes, DSCP preserved                      |
+| Infrastructure isolation   | Infrastructure prefixes unreachable from tenant networks                     |
+| Loopback advertisement     | Aggregate only (per-PoP /48 or /56); no /128s in DFZ; enumerated permit list |
+| CoPP                       | BGP peer ACL + per-protocol queues; validated at PoP commissioning           |
+| Telemetry                  | gNMI/gRPC at overlay attachment points; no SNMP                              |
 
 
