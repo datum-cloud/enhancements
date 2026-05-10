@@ -125,6 +125,19 @@ Account linking (adding an OAuth provider to an email account, or adding email
 to an OAuth account) is handled entirely within the Zitadel login v2 UI and the
 Zitadel IDP-link API. No new Milo controllers are required.
 
+### Architecture Diagrams
+
+**System Context** — top-level actors and the new SMTP dependency:
+
+![System Context](./architecture/context.png)
+
+**Container View** — internal components of `datum-iam-system` and
+`auth-provider-zitadel`, with the two distinct email paths highlighted. Red
+indicates the blocking pre-requisite (Zitadel email provider) that does not
+exist in the current deployment.
+
+![Container View](./architecture/containers.png)
+
 ### Authentication Flow Changes
 
 The Zitadel login v2 app (`auth-ui`) already has all the routes needed:
