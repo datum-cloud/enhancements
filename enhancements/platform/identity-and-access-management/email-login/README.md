@@ -183,24 +183,56 @@ fraud check runs, and the `RegistrationApproval` field determines access. This
 behavior is unchanged; operators retain the ability to hold email signups in the
 `Pending` state if needed.
 
-<<[UNRESOLVED draines]>>
-Should email self-registration be immediately open in production, or should it
-continue to go through the existing waitlist/approval gate? If we want open
-registration, the fraud-check service must be configured to auto-approve
-email-signup users. If we want gated registration, no code change is needed —
-the existing `UserWaitlistController` handles email notifications for pending
-users.
+**Registration approval decision (resolved 2026-05-10):** Email self-registration
+will go through the existing waitlist/approval gate at launch. No code change is
+needed — the `UserWaitlistController` already holds new users in `Pending` state
+and emails them. Once the anti-fraud infrastructure is validated in production,
+open registration can be activated by toggling a single flag in the fraud-check
+service. This must be easy to turn on and off; the LoginPolicy itself does not
+change between modes.
+
+<<[UNRESOLVED]>>
+**Zitadel email provider (SMTP) is not configured — this is a blocking
+pre-requisite.**
+
+Zitadel must be able to send emails to complete the verification and
+password-reset flows. Without a configured email provider, users who register
+with email/password will never receive their verification link and will be
+permanently locked out of their account.
+
+Investigation of `datum-cloud/infra` found **no SMTP or email provider
+configuration** anywhere in the Zitadel deployment:
+
+- The Helm release `configmapConfig` has no `Email` or `Notification` section.
+- The `external-secret.yaml` does not fetch any email service credentials.
+- The Pulumi setup creates no `DefaultEmailProvider` resource.
+
+Note: the existing `UserWaitlistController` sends waitlist emails through Milo's
+`notification.miloapis.com/v1alpha1` API, which is a separate path from
+Zitadel's own notification system. Those emails working does **not** imply
+Zitadel can send verification or password-reset emails.
+
+Before enabling email login, a decision is needed:
+1. Which email delivery service should Zitadel use (SendGrid, SES, Postmark,
+   or an SMTP relay)?
+2. Who owns the sender domain/address for Zitadel notifications
+   (e.g. `noreply@datum.net`)?
+
+The implementation must add a `DefaultEmailProvider` resource (or equivalent
+SMTP config) to the Pulumi setup, a new entry in `external-secret.yaml` for
+credentials, and email delivery validation in staging before any production
+rollout.
 <<[/UNRESOLVED]>>
 
 ### Risks and Mitigations
 
 | Risk | Likelihood | Mitigation |
 |------|-----------|------------|
-| Email spam / fake account creation | Medium | The existing fraud gate holds new users in `Pending` state; open registration can be enabled gradually after monitoring baseline signup rates |
+| **Zitadel email provider not configured** | **High** | **Blocking pre-requisite. No SMTP or email provider exists in the current infra deployment. Must be resolved before staging validation. See open question above.** |
+| Email spam / fake account creation | Medium | Email signups enter the `Pending` waitlist state at launch; the fraud-check approval gate can be toggled open once anti-fraud confidence is established |
 | LoginPolicy rollback disrupts active email sessions | Low | Rolling back the LoginPolicy does not invalidate active Zitadel sessions; existing email users can finish their current session; new logins will fail until re-enabled |
 | `parseIDPUserData` change breaks Google or GitHub avatar handling | Low | The Google and GitHub detection code runs before the fallback; add or update unit tests to cover all three branches |
 | Staff portal unexpectedly gains email login | Low | Test on staging (which already has email login) before promoting to production; staff portal does not show a register button so self-signup is not exposed |
-| Password reset emails not delivered | Medium | Zitadel uses its own SMTP configuration; verify email delivery works in staging before enabling production |
 
 ## Design Details
 
@@ -353,9 +385,16 @@ cloud-portal API client. The `UserIdentityStatus` fields `ProviderName`,
 
 The following order minimizes risk and allows staging validation at each step.
 
+0. **`datum-cloud/infra`** — **Blocking pre-requisite.** Provision a Zitadel
+   email provider: add a `DefaultEmailProvider` (or SMTP config block) to the
+   Pulumi setup and a corresponding entry in `external-secret.yaml`. Validate
+   that staging delivers a verification email end-to-end before proceeding.
+   This step requires deciding which email delivery service to use and which
+   sender address Zitadel notifications should come from.
+
 1. **`datum-cloud/infra`** — Add `PasswordComplexityPolicy`; update
    `LoginPolicy` to enable email login in production (targets the existing
-   staging-first deploy pipeline).
+   staging-first deploy pipeline). Depends on step 0.
 
 2. **`datum-cloud/milo-os`** (upstream) — Extend `AuthProvider` enum;
    run code generation; open PR to upstream.
@@ -366,9 +405,10 @@ The following order minimizes risk and allows staging validation at each step.
 4. **`datum-cloud/cloud-portal`** — Wire `AccountSignInMethodSettingsCard` to
    live `UserIdentity` data; add "Manage" / "Connect" / "Set password" actions.
 
-Steps 1 and 2–3 are independent and can proceed in parallel. Step 4 depends on
-step 2–3 being deployed so the `UserIdentity` records for email users are
-created correctly.
+Steps 2–3 are independent of step 0–1 and can proceed in parallel. Step 4
+depends on step 2–3 being deployed so the `UserIdentity` records for email users
+are created correctly. No step can be validated end-to-end in staging until step
+0 is complete.
 
 ## Production Readiness Review Questionnaire
 
@@ -420,12 +460,13 @@ existing OAuth login flow:
 
 ### Dependencies
 
+- **Zitadel email provider (SMTP)** — **Not yet configured. Blocking.**
+  Zitadel has no `DefaultEmailProvider` and no SMTP credentials in the current
+  infra deployment. This is a new dependency that must be provisioned before
+  staging validation. The Milo `notification.miloapis.com` path used by the
+  waitlist controller is a separate system and does not satisfy this requirement.
 - **Zitadel** (`datum-iam-system`): Must be running and healthy. Email login
-  does not add new Zitadel dependencies; it uses existing session and user
-  service APIs.
-- **SMTP / Email delivery**: Zitadel must be configured with a working SMTP
-  provider to send verification and password-reset emails. Verify in staging
-  before promoting to production.
+  does not add new Zitadel dependencies beyond the email provider above.
 - **Milo control plane**: The `User` resource creation path via the actions
   server must be functioning. This is the same dependency as the existing
   OAuth login flow.
@@ -443,8 +484,11 @@ error. This is the same behavior as for OAuth registrations today.
 
 - **SMTP not configured or failing**: Email verification and password reset
   emails are not delivered. Users will not be able to complete registration or
-  recover their password. Detection: `zitadel_notification_errors_total` metric;
-  Zitadel logs show `SMTP error`.
+  recover their password. This is a confirmed gap in the current deployment —
+  no email provider is configured. Detection once configured:
+  `zitadel_notification_errors_total` metric; Zitadel logs show `SMTP error`.
+  Note: the `notification.miloapis.com` path (used by the waitlist controller)
+  is unrelated; its availability does not indicate Zitadel SMTP health.
 - **`idpintent.succeeded` event for email provider not handled**: Before the
   `parseIDPUserData` fix is deployed, the `User.Status.LastLoginProvider` will
   not be updated for email logins. The handler logs an error at `Error` level
@@ -459,6 +503,11 @@ error. This is the same behavior as for OAuth registrations today.
 
 - 2026-05-10: Discovery brief written; enhancement document created as
   provisional.
+- 2026-05-10: Confirmed Zitadel email provider is not configured in
+  `datum-cloud/infra` (no SMTP, no `DefaultEmailProvider`, no credentials in
+  `external-secret.yaml`). Added as blocking pre-requisite. Resolved waitlist
+  decision: email signups gated at launch, toggle to open once anti-fraud
+  infrastructure is validated.
 
 ## Alternatives
 
