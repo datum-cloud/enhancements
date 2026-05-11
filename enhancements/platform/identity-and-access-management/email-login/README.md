@@ -18,6 +18,7 @@ latest-milestone: "v0.1"
   - [Notes and Constraints](#notes-and-constraints)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
+  - [Zitadel Email Provider Configuration](#zitadel-email-provider-configuration)
   - [Zitadel LoginPolicy Changes](#zitadel-loginpolicy-changes)
   - [AuthProvider Enum Extension](#authprovider-enum-extension)
   - [Actions Server: Local Provider Handling](#actions-server-local-provider-handling)
@@ -204,38 +205,15 @@ open registration can be activated by toggling a single flag in the fraud-check
 service. This must be easy to turn on and off; the LoginPolicy itself does not
 change between modes.
 
-<<[UNRESOLVED]>>
-**Zitadel email provider (SMTP) is not configured — this is a blocking
-pre-requisite.**
-
-Zitadel must be able to send emails to complete the verification and
-password-reset flows. Without a configured email provider, users who register
-with email/password will never receive their verification link and will be
-permanently locked out of their account.
-
-Investigation of `datum-cloud/infra` found **no SMTP or email provider
-configuration** anywhere in the Zitadel deployment:
-
-- The Helm release `configmapConfig` has no `Email` or `Notification` section.
-- The `external-secret.yaml` does not fetch any email service credentials.
-- The Pulumi setup creates no `DefaultEmailProvider` resource.
-
-Note: the existing `UserWaitlistController` sends waitlist emails through Milo's
-`notification.miloapis.com/v1alpha1` API, which is a separate path from
-Zitadel's own notification system. Those emails working does **not** imply
-Zitadel can send verification or password-reset emails.
-
-Before enabling email login, a decision is needed:
-1. Which email delivery service should Zitadel use (SendGrid, SES, Postmark,
-   or an SMTP relay)?
-2. Who owns the sender domain/address for Zitadel notifications
-   (e.g. `noreply@datum.net`)?
-
-The implementation must add a `DefaultEmailProvider` resource (or equivalent
-SMTP config) to the Pulumi setup, a new entry in `external-secret.yaml` for
-credentials, and email delivery validation in staging before any production
-rollout.
-<<[/UNRESOLVED]>>
+**Zitadel email provider (resolved 2026-05-11):** Zitadel will use
+[Resend](https://resend.com) via its SMTP relay (`smtp.resend.com:587`), which
+is the same delivery service already used by the Milo notification system for
+waitlist and invitation emails. A new scoped Resend API key will be provisioned
+specifically for Zitadel (separate from the key held by `email-provider-resend`)
+so that credentials can be rotated independently. The sender address will be
+`noreply@mail.datum.net`, using the `mail.datum.net` domain already verified in
+Resend. See [Zitadel Email Provider Configuration](#zitadel-email-provider-configuration)
+for the required Pulumi changes.
 
 ### Risks and Mitigations
 
@@ -248,6 +226,71 @@ rollout.
 | Staff portal unexpectedly gains email login | Low | Test on staging (which already has email login) before promoting to production; staff portal does not show a register button so self-signup is not exposed |
 
 ## Design Details
+
+### Zitadel Email Provider Configuration
+
+Zitadel's SMTP configuration is managed as a Pulumi resource
+(`zitadel.SmtpConfig`) at the instance level (not org-scoped). It is separate
+from the Milo `email-provider-resend` deployment — Zitadel sends verification
+and password-reset emails directly via SMTP, not through the
+`notification.miloapis.com` API.
+
+**`infra/apps/datum-iam-system/base/zitadel/zitadel-setup/pulumi/config.ts`**
+
+Add the SMTP password to the config struct. The value is stored in Pulumi ESC
+as a secret and injected at `pulumi up` time — no `external-secret.yaml` change
+is required.
+
+```typescript
+  // existing entries above ...
+  googleIdp: {
+    clientId: setupConfig.require("google-idp-client-id"),
+    clientSecret: setupConfig.requireSecret("google-idp-client-secret"),
+  },
+  smtp: {
+    password: setupConfig.requireSecret("smtp-password"),
+  },
+};
+```
+
+To populate the secret in each stack:
+
+```bash
+pulumi config set --secret --path zitadel-setup:smtp-password <resend-api-key>
+```
+
+A dedicated Resend API key should be created for Zitadel (distinct from the one
+used by `email-provider-resend`) so credentials can be rotated independently.
+The key must have send access for the `mail.datum.net` domain.
+
+**`infra/apps/datum-iam-system/base/zitadel/zitadel-setup/pulumi/index.ts`**
+
+Add the `SmtpConfig` resource after the `PasswordComplexityPolicy`:
+
+```typescript
+new zitadel.SmtpConfig("datum-cloud-smtp", {
+  senderAddress: "noreply@mail.datum.net",
+  senderName: "Datum Cloud",
+  replyToAddress: "support@datum.net",
+  host: "smtp.resend.com:587",
+  user: "resend",
+  password: config.smtp.password,
+  tls: true,
+});
+```
+
+Resend's SMTP relay accepts any value for `user` when authenticating with an
+API key; `"resend"` is the conventional username. The `mail.datum.net` sending
+domain is already verified in Resend via the existing `email-provider-resend`
+deployment.
+
+**Staging validation checklist before promoting to production:**
+
+1. Run `pulumi up` in the staging stack with the new `smtp-password` config set.
+2. Register a test account at `auth.datum.net` using an accessible email address.
+3. Confirm the verification email arrives within 60 seconds.
+4. Click the verification link and confirm the account is activated.
+5. Use "Forgot password?" on the login page and confirm the reset email arrives.
 
 ### Zitadel LoginPolicy Changes
 
@@ -473,11 +516,12 @@ existing OAuth login flow:
 
 ### Dependencies
 
-- **Zitadel email provider (SMTP)** — **Not yet configured. Blocking.**
-  Zitadel has no `DefaultEmailProvider` and no SMTP credentials in the current
-  infra deployment. This is a new dependency that must be provisioned before
-  staging validation. The Milo `notification.miloapis.com` path used by the
-  waitlist controller is a separate system and does not satisfy this requirement.
+- **Zitadel email provider (SMTP)** — Must be provisioned before staging
+  validation. Zitadel will use Resend's SMTP relay (`smtp.resend.com:587`) with
+  a dedicated API key. Configuration is a `zitadel.SmtpConfig` Pulumi resource
+  plus a `smtp-password` secret in Pulumi ESC. The Milo `notification.miloapis.com`
+  path used by the waitlist controller is a separate system and does not satisfy
+  this requirement.
 - **Zitadel** (`datum-iam-system`): Must be running and healthy. Email login
   does not add new Zitadel dependencies beyond the email provider above.
 - **Milo control plane**: The `User` resource creation path via the actions
@@ -521,6 +565,10 @@ error. This is the same behavior as for OAuth registrations today.
   `external-secret.yaml`). Added as blocking pre-requisite. Resolved waitlist
   decision: email signups gated at launch, toggle to open once anti-fraud
   infrastructure is validated.
+- 2026-05-11: Resolved SMTP provider decision: Resend via `smtp.resend.com:587`
+  using a dedicated API key, sender `noreply@mail.datum.net`. Added
+  `zitadel.SmtpConfig` Pulumi resource spec and `config.ts` changes to Design
+  Details. No `external-secret.yaml` change needed — secret held in Pulumi ESC.
 
 ## Alternatives
 
