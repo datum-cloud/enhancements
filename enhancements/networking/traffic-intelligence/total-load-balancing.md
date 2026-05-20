@@ -1,11 +1,11 @@
-# Traffic Intelligence
+# Total Load Balancing
 
 **Product area:** Deliver — Edge Delivery / Load Balancing / Fraud & Traffic Mgmt  
 **Status:** Early definition
 
 ---
 
-## Total Load Balancing
+## The Concept
 
 Traffic Intelligence should operate like "Total Football," the revolutionary strategy popularized by the Dutch national teams of the 1970s led by Johan Cruyff and AFC Ajax. Instead of locking players into rigid positions, Total Football allowed every player to fluidly move across the field, adapting dynamically to where they could create the most value. The concept later became a defining and winning philosophy in Ted Lasso, where flexibility, coordination, and shared awareness transformed the team.
 
@@ -21,13 +21,13 @@ Datum currently uses anycast to direct users to the edge. Anycast is topology-dr
 
 There is no mechanism today to make deliberate routing decisions based on where a user actually is, what regulations apply, how congested a path is, what compute resources are available, or whether an AI model is warm and ready. Every system — DNS, load balancer, proxy, WAF, AI gateway — makes decisions independently and in isolation, with no shared intelligence.
 
-Traffic Intelligence closes that gap: a signal-driven decision layer that makes routing information available to every part of the platform, so each component can act on shared awareness rather than local guesswork.
+Total Load Balancing closes that gap: a signal-driven decision layer that makes routing information available to every part of the platform, so each component can act on shared awareness rather than local guesswork.
 
 ---
 
-## What Traffic Intelligence Is
+## What Total Load Balancing Is
 
-Traffic Intelligence is the decision layer that sits between inbound traffic and Datum's edge infrastructure. It collects, maintains, and distributes signals about users, paths, and infrastructure — then makes those signals available to every system that needs to make a routing or policy decision.
+Total Load Balancing is the decision layer that sits between inbound traffic and Datum's edge infrastructure. It collects, maintains, and distributes signals about users, paths, and infrastructure — then makes those signals available to every system that needs to make a routing or policy decision.
 
 The output at any given component is a **decision**: which PoP, which upstream, allow or block, which inference endpoint — and why.
 
@@ -35,20 +35,21 @@ The output at any given component is a **decision**: which PoP, which upstream, 
 
 ## Signals
 
-Traffic intelligence is built from a growing set of signals, introduced in phases:
+Total Load Balancing is built from a growing set of signals, introduced across projects:
 
-| Signal | Phase | Description |
+| Signal | Project | Description |
 |---|---|---|
-| **Geography** | 1 | Country, region, city, lat/lon derived from client IP |
-| **ASN** | 1 | Autonomous System Number — identifies carrier, cloud provider, peering relationship |
-| **IP Type** | 1 | Residential, datacenter, proxy, VPN, satellite |
-| **RTT** | 2 | Round-trip time to candidate edge locations — first real latency signal |
-| **Packet Loss** | 2 | Loss rate on candidate paths — distinguishes congestion from distance |
-| **Congestion** | 2 | Link utilization at candidate PoPs and upstream |
-| **Sovereignty** | 3 | Data residency and legal jurisdiction rules — hard constraints on path selection |
-| **Risk** | 3 | Reputation score of source IP/ASN — feeds fraud and bot decisions |
-| **Model Locality** | 4 | Where the required inference model is currently loaded |
-| **GPU Availability** | 4 | Utilization and capacity at candidate compute nodes |
+| **Geography** | Roy Kent | Country, region, city, lat/lon derived from client IP |
+| **ASN** | Roy Kent | Autonomous System Number — identifies carrier, cloud provider, peering relationship |
+| **IP Type** | Roy Kent | Residential, datacenter, proxy, VPN, satellite |
+| **Health** | TBD | Liveness and readiness of candidate PoPs and endpoints — prevents routing to degraded or unreachable targets |
+| **RTT** | TBD | Round-trip time to candidate edge locations — first real latency signal |
+| **Packet Loss** | TBD | Loss rate on candidate paths — distinguishes congestion from distance |
+| **Congestion** | TBD | Link utilization at candidate PoPs and upstream |
+| **Sovereignty** | TBD | Data residency and legal jurisdiction rules — hard constraints on path selection |
+| **Risk** | TBD | Reputation score of source IP/ASN — feeds fraud and bot decisions |
+| **Model Locality** | TBD | Where the required inference model is currently loaded |
+| **Compute Availability** | TBD | Utilization and capacity of GPU, CPU, and DPU resources at candidate compute nodes |
 
 ---
 
@@ -62,14 +63,14 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 
 ---
 
-## Phase Documents
+## Projects
 
-| Phase | Name | Status |
+| Project | Signals | Status |
 |---|---|---|
-| 1 | [Geographic Intelligence](geo-phase1.md) | In progress |
-| 2 | Network Performance Signals | Not started |
-| 3 | Sovereignty and Risk | Not started |
-| 4 | AI and Compute Awareness | Not started |
+| [The Roy Kent Project](roy-kent-project.md) | Geography, ASN, IP Type | In progress |
+| TBD | RTT, Packet Loss, Congestion | Not started |
+| TBD | Sovereignty, Risk | Not started |
+| TBD | Model Locality, GPU Availability | Not started |
 
 ---
 

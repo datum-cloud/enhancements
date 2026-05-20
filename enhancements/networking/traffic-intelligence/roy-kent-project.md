@@ -1,11 +1,9 @@
-# Phase 1 — Geographic Intelligence
+# The Roy Kent Project
 
-**Parent:** [Traffic Intelligence](traffic-intelligence.md)  
+**Parent:** [Total Load Balancing](total-load-balancing.md)  
 **Status:** In progress
 
 ---
-
-## The Roy Kent Project
 
 The first Total Load Balancing projects will focus on making geo data broadly available and reusable across the platform. DNS will consume it for Global Server Load Balancing (GSLB). Envoy will use it for ACL enforcement and endpoint load balancing decisions. UFO workloads will leverage it for localization, sovereignty awareness, and regional application behavior. Internally, we think of this as the "Roy Kent Project," inspired by Roy Kent:
 
@@ -17,7 +15,7 @@ Traffic Intelligence should behave the same way — present wherever decisions a
 
 ## Scope
 
-Phase 1 scopes to geography only. The goal is to make IP-to-geo data reliably available to every Datum system that needs it, and to build the operational foundation — database, update process, distribution — before layering in richer signals.
+The Roy Kent Project scopes to geography only. The goal is to make IP-to-geo data reliably available to every Datum system that needs it, and to build the operational foundation — database, update process, distribution — before layering in richer signals.
 
 ---
 
@@ -30,7 +28,7 @@ Integration is delivered in six stages. The sequence is deliberate — each stag
 | 1 | **DNS / GSLB** | Lowest blast radius — a bad geo answer routes suboptimally for one TTL then self-heals. Validates GeoDB accuracy in production with no risk of locking users out. Most immediately visible feature to customers. |
 | 2 | **ACLs (Geo Blocking + Named IP Lists)** | Security-sensitive — a bad geo entry can block legitimate traffic. By this stage the GeoDB is proven against real traffic from Stage 1. |
 | 3 | **Application Load Balancing** | More complex routing logic. Builds on a distribution pipeline and DB already proven in production. |
-| 4 | **Metrics and Logs Enrichment** | Geo-enriched telemetry. Once the DB is proven across stages 1–3, enriching logs and metrics is low risk and high value for observability. |
+| 4 | **Metrics and Logs Enrichment** | Geo-enriched telemetry. Once the DB is proven across the first three stages, enriching logs and metrics is low risk and high value for observability. |
 | 5 | **Galactic VPC** | Distance-based PoP ranking for latency modeling. Depends on accurate lat/lon data validated in earlier stages. |
 | 6 | **UFO Compute** | Most complex integration — Agent Router, AI Router, Tetrate Proxy, WAF. Benefits from all prior learnings. |
 
@@ -67,7 +65,7 @@ The evaluation should assess vendors across:
 | Pricing model | Per-query, flat fee, volume tiers |
 | SLA and support | Uptime guarantees, correction process for bad data |
 
-**Issue [#732](https://github.com/datum-cloud/enhancements/issues/732):** Run GeoDB vendor evaluation against the criteria above. Produce a comparison matrix and a recommendation. Block Phase 1 distribution architecture decisions on this outcome. See [geodb-vendor-eval.md](geodb-vendor-eval.md) for the full vendor list and scoring matrix.
+**Issue [#732](https://github.com/datum-cloud/enhancements/issues/732):** Run GeoDB vendor evaluation against the criteria above. Produce a comparison matrix and a recommendation. Block distribution architecture decisions on this outcome. See [geodb-vendor-eval.md](geodb-vendor-eval.md) for the full vendor list and scoring matrix.
 
 ---
 
@@ -206,11 +204,11 @@ Applications deployed on UFO unikernel compute may need geo context at runtime �
 
 #### 6. Galactic VPC — Latency and Distance Mapping
 
-Galactic VPC uses geographic coordinates (lat/lon of the client and candidate PoPs) as a starting signal for mapping latency and routing distance. This is a precursor to the fuller latency-aware routing in later phases — distance is a proxy for RTT until real measurement data is available.
+Galactic VPC uses geographic coordinates (lat/lon of the client and candidate PoPs) as a starting signal for mapping latency and routing distance. Distance is a proxy for RTT until real measurement data is available in a later project.
 
 - Input: client IP → lat/lon; PoP coordinates (static config)
 - Output: ranked list of PoPs by estimated distance
-- Key consideration: distance ≠ latency (undersea cables, IX routing, peering agreements all distort it) — this is an approximation until Phase 2 RTT signals are available
+- Key consideration: distance ≠ latency (undersea cables, IX routing, peering agreements all distort it) — this is an approximation until RTT signals are available
 
 #### 7. Agent Router, AI Router, Tetrate Proxy, WAF
 
