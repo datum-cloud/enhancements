@@ -31,6 +31,8 @@ Total Load Balancing is the decision layer that sits between inbound traffic and
 
 The output at any given component is a **decision**: which PoP, which upstream, allow or block, which inference endpoint — and why.
 
+Signals are distributed to consumers using [Higgins Bus](higgins-bus.md) — a QUIC-native pub/sub transport (MOQT) that carries signals as named tracks to every edge PoP. Each signal type occupies its own track namespace, so relay infrastructure established by the Roy Kent Project scales to carry all future signal traffic without architectural changes.
+
 ---
 
 ## Signals
@@ -71,6 +73,24 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 | TBD | RTT, Packet Loss, Congestion | Not started |
 | TBD | Sovereignty, Risk | Not started |
 | TBD | Model Locality, GPU Availability | Not started |
+
+---
+
+## Distribution Transport
+
+Signals are distributed platform-wide using **Higgins Bus** — a QUIC-native publish/subscribe transport (MOQT) where each signal type is a named track. Consumers subscribe to the tracks they need; relay infrastructure fans out updates to all edge PoPs.
+
+Each Total Load Balancing project extends the track namespace:
+
+| Signal Group | Track Namespace | Project |
+|---|---|---|
+| Geography, ASN, IP Type | `platform/geodb/version`, `org/{id}/lists/{id}` | Roy Kent |
+| Health | `platform/health/pop/{pop-id}`, `platform/health/endpoint/{endpoint-id}` | TBD |
+| RTT, Packet Loss, Congestion | TBD | TBD |
+| Sovereignty, Risk | TBD | TBD |
+| Model Locality, Compute Availability | TBD | TBD |
+
+Track namespaces are additive — a new signal type requires no changes to existing relay infrastructure or existing subscribers. See [Higgins Bus](higgins-bus.md) for the full transport design.
 
 ---
 

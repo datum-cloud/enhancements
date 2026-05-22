@@ -1,7 +1,8 @@
 # The Roy Kent Project
 
 **Parent:** [Total Load Balancing](total-load-balancing.md)  
-**Status:** In progress
+**Status:** In progress  
+**Codename:** Internal project name — not a go-to-market product name.
 
 ---
 
@@ -234,10 +235,17 @@ All seven consumers above need geo data, but they have different access patterns
 | Galactic VPC | low-ms | daily | control plane |
 | Agent / AI Router, Tetrate, WAF | low-ms | hours | UFO Compute |
 
-This suggests a **pub/sub distribution model**: one canonical store holds the authoritative GeoDB and named lists. When either changes, an event is published. PoP-local subscribers receive the event and pull the update immediately — no polling, no scheduled push cycle. Consumers that can't embed the DB directly subscribe to a lightweight query API that sits in front of the local replica.
+This suggests a **pub/sub distribution model** using [Higgins Bus](higgins-bus.md) (MOQT) as the underlying transport. One canonical store holds the authoritative GeoDB and named lists. When either changes, an event is published to a MoQ track. PoP-local subscribers receive the event immediately — no polling, no scheduled push cycle. Consumers that can't embed the DB directly subscribe to a lightweight query API that sits in front of the local replica.
+
+**Named IP Lists** map directly to the MoQ object model. Each list is a track (`org/{org-id}/lists/{list-id}`), and every update is a new object with a monotonic sequence number and a TTL. Edge nodes subscribe to relevant tracks and receive changes within QUIC's latency budget — typically sub-second from commit to enforcement. This satisfies the near-real-time propagation requirement without a bespoke push system.
+
+**GeoDB distribution** uses a hybrid model. The full database is large (potentially hundreds of MB) and updates on a vendor schedule — MOQT is not optimized for bulk transfer. Initial loads and daily snapshots are pulled from object storage as versioned artifacts. A dedicated MoQ track (`platform/geodb/version`) publishes a new object whenever a snapshot is ready, carrying the version identifier and snapshot URL. PoP nodes subscribe to this track and pull the artifact on notification. Incremental delta patches, where available from the vendor, can flow as MOQT objects directly.
 
 This model handles both update cadences cleanly: GeoDB publishes once daily when a new snapshot is ready; named list changes publish on every write for near-real-time propagation. A new PoP or new consumer subscribes and receives updates without any change to the publishing side.
+
+See [Higgins Bus](higgins-bus.md) for the full transport design, track namespace, relay infrastructure requirements, and failure handling.
 
 - [ ] Define the canonical store format (MMDB, SQLite, custom binary?)
 - [ ] Define the replication mechanism and health checks
 - [ ] Define what happens when a PoP replica is stale or unreachable (fail open vs. fail closed)
+- [ ] Define MoQ track namespace — see [Higgins Bus](higgins-bus.md)
