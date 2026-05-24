@@ -39,14 +39,28 @@ Each signal type is assigned a track namespace. Subscribers subscribe to the tra
 | `platform/geodb/delta/{version}` | Control plane | All PoPs | Delta patch from previous version |
 | `org/{org-id}/lists/{list-id}` | Control plane (on customer write) | PoPs serving that org | Full list payload + sequence number + TTL |
 
+### The Nate Project
+
+The [Nate Project](nate/README.md) introduces health signals — availability, latency, and throughput measurements from distributed active probes. Three track namespaces cover Datum infrastructure, Datum-managed endpoints, and customer-defined checks.
+
+| Track | Publisher | Consumers | Object content |
+|---|---|---|---|
+| `platform/health/pop/{pop-id}` | Nate control plane | Total Load Balancing, GSLB, Galactic VPC | Aggregated HealthStatus for a Datum PoP — overall status, per-region availability and latency, last probe time |
+| `platform/health/endpoint/{endpoint-id}` | Nate control plane | ALB, Connectors, Total Load Balancing | Aggregated HealthStatus for a Datum-managed upstream or endpoint |
+| `org/{org-id}/health/{check-id}` | Nate control plane | Customer ALB policy, customer DNS, customer consumers | Aggregated HealthStatus for a customer-defined HealthCheck |
+
+**Publish triggers:** objects are published immediately on any status transition (HEALTHY → DEGRADED, DEGRADED → UNHEALTHY, and the reverse) and on a heartbeat interval even when status is unchanged, so consumers can detect a failed publisher.
+
+**Bootstrap:** a new subscriber receives the most recent HealthStatus object immediately on subscription — no separate initialization step. The most recent object is always the authoritative current state.
+
+**Metrics path:** probe measurements (raw latency samples, availability counts, throughput) are also written to the Datum metrics pipeline in parallel with Higgins Bus publication. The metrics path serves dashboards and alerting; Higgins Bus serves real-time routing decisions.
+
 ### Future Projects
 
 Each subsequent Total Load Balancing project extends the namespace:
 
 | Track | Signal Group |
 |---|---|
-| `platform/health/pop/{pop-id}` | Health — PoP liveness and readiness |
-| `platform/health/endpoint/{endpoint-id}` | Health — individual endpoint health state |
 | `platform/rtt/{pop-id}` | RTT / Packet Loss / Congestion |
 | `platform/sovereignty/{jurisdiction}` | Sovereignty |
 | `platform/model-locality/{model-id}` | Model Locality |
