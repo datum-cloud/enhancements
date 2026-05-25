@@ -44,7 +44,7 @@ Total Load Balancing is built from a growing set of signals, introduced across p
 | **Geography** | Roy Kent | Country, region, city, lat/lon derived from client IP |
 | **ASN** | Roy Kent | Autonomous System Number — identifies carrier, cloud provider, peering relationship |
 | **IP Type** | Roy Kent | Residential, datacenter, proxy, VPN, satellite |
-| **Health** | [Nate](nate/README.md) | Availability, latency, and throughput of candidate PoPs and endpoints — prevents routing to degraded or unreachable targets |
+| **Health** | [Nate](nate.md) | Availability, latency, and throughput of candidate PoPs and endpoints — prevents routing to degraded or unreachable targets |
 | **RTT** | TBD | Round-trip time to candidate edge locations — first real latency signal |
 | **Packet Loss** | TBD | Loss rate on candidate paths — distinguishes congestion from distance |
 | **Congestion** | TBD | Link utilization at candidate PoPs and upstream |
@@ -70,7 +70,7 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 | Project | Signals | Status |
 |---|---|---|
 | [The Roy Kent Project](roy-kent-project.md) | Geography, ASN, IP Type | In progress |
-| [The Nate Project](nate/README.md) | Health (Availability, Latency, Throughput) | Early definition |
+| [The Nate Project](nate.md) | Health (Availability, Latency, Throughput) | Early definition |
 | TBD | RTT, Packet Loss, Congestion | Not started |
 | TBD | Sovereignty, Risk | Not started |
 | TBD | Model Locality, GPU Availability | Not started |
@@ -86,7 +86,7 @@ Each Total Load Balancing project extends the track namespace:
 | Signal Group | Track Namespace | Project |
 |---|---|---|
 | Geography, ASN, IP Type | `platform/geodb/version`, `org/{id}/lists/{id}` | Roy Kent |
-| Health | `platform/health/pop/{pop-id}`, `platform/health/endpoint/{endpoint-id}`, `org/{id}/health/{check-id}` | [Nate](nate/README.md) |
+| Health | `platform/health/pop/{pop-id}`, `platform/health/endpoint/{endpoint-id}`, `org/{id}/health/{check-id}` | [Nate](nate.md) |
 | RTT, Packet Loss, Congestion | TBD | TBD |
 | Sovereignty, Risk | TBD | TBD |
 | Model Locality, Compute Availability | TBD | TBD |
