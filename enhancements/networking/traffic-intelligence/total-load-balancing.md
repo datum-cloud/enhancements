@@ -1,4 +1,4 @@
-# Total Load Balancing
+﻿# Total Load Balancing
 
 **Product area:** Deliver — Edge Delivery / Load Balancing / Fraud & Traffic Mgmt  
 **Status:** Early definition
@@ -31,7 +31,7 @@ Total Load Balancing is the decision layer that sits between inbound traffic and
 
 The output at any given component is a **decision**: which PoP, which upstream, allow or block, which inference endpoint — and why.
 
-Signals are distributed to consumers using [Higgins Bus](higgins-bus.md) — a QUIC-native pub/sub transport (MOQT) that carries signals as named tracks to every edge PoP. Each signal type occupies its own track namespace, so relay infrastructure established by the Roy Kent Project scales to carry all future signal traffic without architectural changes.
+Signals are distributed to consumers using [Higgins Bus](signal-distribution-higgins-bus.md) — a QUIC-native pub/sub transport (MOQT) that carries signals as named tracks to every edge PoP. Each signal type occupies its own track namespace, so relay infrastructure established by the Roy Kent Project scales to carry all future signal traffic without architectural changes.
 
 ---
 
@@ -41,10 +41,10 @@ Datum uses a two-layer load balancing architecture. Both layers consume Total Lo
 
 | Layer | Technology | Customer-Configurable | Scope |
 |---|---|---|---|
-| **L4 (transport)** | [Dani Rojas / Cilium](l4-load-balancing.md) | For compute targets | Routes TCP/UDP traffic to UFO Compute or other customer compute; platform-managed in front of Envoy |
-| **L7 (application)** | Envoy | Via delivery policies | HTTP/HTTPS routing, TLS termination, origin selection, header manipulation |
+| **L4 (transport)** | [Dani Rojas / Cilium](l4-load-balancing-dani-rojas.md) | For compute targets | Routes TCP/UDP traffic to UFO Compute or other customer compute; platform-managed in front of Envoy |
+| **L7 (application)** | [Zava / Envoy](envoy-routing-zava.md) | Via delivery policies | HTTP/HTTPS routing, TLS termination, origin selection, header manipulation |
 
-See [Dani Rojas](l4-load-balancing.md) for the Cilium design, customer configuration model, and relationship to the L7 layer.
+See [Dani Rojas](l4-load-balancing-dani-rojas.md) for the Cilium design, customer configuration model, and relationship to the L7 layer. See [Zava](envoy-routing-zava.md) for the full Envoy routing feature map and integration details.
 
 ---
 
@@ -57,7 +57,7 @@ Total Load Balancing is built from a growing set of signals, introduced across p
 | **Geography** | Roy Kent | Country, region, city, lat/lon derived from client IP |
 | **ASN** | Roy Kent | Autonomous System Number — identifies carrier, cloud provider, peering relationship |
 | **IP Type** | Roy Kent | Residential, datacenter, proxy, VPN, satellite |
-| **Health** | [Nate](nate.md) | Availability, latency, and throughput of candidate PoPs and endpoints — prevents routing to degraded or unreachable targets |
+| **Health** | [Nate](health-checks-nate.md) | Availability, latency, and throughput of candidate PoPs and endpoints — prevents routing to degraded or unreachable targets |
 | **RTT** | TBD | Round-trip time to candidate edge locations — first real latency signal |
 | **Packet Loss** | TBD | Loss rate on candidate paths — distinguishes congestion from distance |
 | **Congestion** | TBD | Link utilization at candidate PoPs and upstream |
@@ -80,10 +80,12 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 
 ## Projects
 
-| Project | Signals | Status |
+| Project | Signals / Scope | Status |
 |---|---|---|
-| [The Roy Kent Project](roy-kent-project.md) | Geography, ASN, IP Type | In progress |
-| [The Nate Project](nate.md) | Health (Availability, Latency, Throughput) | Early definition |
+| [The Roy Kent Project](ip-geo-roy-kent.md) | Geography, ASN, IP Type | In progress |
+| [The Nate Project](health-checks-nate.md) | Health (Availability, Latency, Throughput) | Early definition |
+| [Jamie Tartt](gslb-jamie-tartt.md) | GSLB / DNS — geo + health-aware PoP steering | Early definition |
+| [Zava](envoy-routing-zava.md) | L7 routing — geo, health, policy, protocol | Early definition |
 | TBD | RTT, Packet Loss, Congestion | Not started |
 | TBD | Sovereignty, Risk | Not started |
 | TBD | Model Locality, GPU Availability | Not started |
@@ -99,18 +101,18 @@ Each Total Load Balancing project extends the track namespace:
 | Signal Group | Track Namespace | Project |
 |---|---|---|
 | Geography, ASN, IP Type | `platform/geodb/version`, `org/{id}/lists/{id}` | Roy Kent |
-| Health | `platform/health/pop/{pop-id}`, `platform/health/endpoint/{endpoint-id}`, `org/{id}/health/{check-id}` | [Nate](nate.md) |
+| Health | `platform/health/pop/{pop-id}`, `platform/health/endpoint/{endpoint-id}`, `org/{id}/health/{check-id}` | [Nate](health-checks-nate.md) |
 | RTT, Packet Loss, Congestion | TBD | TBD |
 | Sovereignty, Risk | TBD | TBD |
 | Model Locality, Compute Availability | TBD | TBD |
 
-Track namespaces are additive — a new signal type requires no changes to existing relay infrastructure or existing subscribers. See [Higgins Bus](higgins-bus.md) for the full transport design.
+Track namespaces are additive — a new signal type requires no changes to existing relay infrastructure or existing subscribers. See [Higgins Bus](signal-distribution-higgins-bus.md) for the full transport design.
 
 ---
 
 ## Related Areas
 
-- **[Dani Rojas](l4-load-balancing.md)** — Cilium as the transport-layer LB; customer-configurable for compute targets
+- **[Dani Rojas](l4-load-balancing-dani-rojas.md)** — Cilium as the transport-layer LB; customer-configurable for compute targets
 - **Connectivity / gVPC** — private path selection uses the same signal set
 - **Interconnect / Tunnels** — sovereign path enforcement extends into the Connect layer
 - **Observability / Metrics** — RTT and loss signals are sourced from and feed back to the Manage layer

@@ -1,4 +1,4 @@
-# Higgins Bus
+﻿# Higgins Bus
 
 **Parent:** [Total Load Balancing](total-load-balancing.md)  
 **Status:** In progress  
@@ -41,7 +41,7 @@ Each signal type is assigned a track namespace. Subscribers subscribe to the tra
 
 ### The Nate Project
 
-The [Nate Project](nate.md) introduces health signals — availability, latency, and throughput measurements from distributed active probes. Three track namespaces cover Datum infrastructure, Datum-managed endpoints, and customer-defined checks.
+The [Nate Project](health-checks-nate.md) introduces health signals — availability, latency, and throughput measurements from distributed active probes. Three track namespaces cover Datum infrastructure, Datum-managed endpoints, and customer-defined checks.
 
 | Track | Publisher | Consumers | Object content |
 |---|---|---|---|

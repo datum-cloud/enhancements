@@ -1,4 +1,4 @@
-# The Roy Kent Project
+﻿# The Roy Kent Project
 
 **Parent:** [Total Load Balancing](total-load-balancing.md)  
 **Status:** In progress  
@@ -50,23 +50,35 @@ A GeoDB maps IP addresses and prefixes to geographic and network attributes. At 
 
 **Update process:** IP-to-geo mappings shift constantly as prefixes are reassigned and carriers restructure. The DB must be refreshed on a defined schedule with a tested rollout process — a bad update can flip geo decisions globally.
 
-**GeoDB Source — status: vendor eval required**
+**GeoDB Source — status: vendor eval required ([#732](https://github.com/datum-cloud/enhancements/issues/732))**
 
-No vendor is selected. [ip66.dev](https://ip66.dev/) has been identified as a candidate but its dataset coverage is limited and needs validation. A formal evaluation is required before committing to a source.
+No vendor is selected. A formal evaluation is required before committing to a source. Distribution architecture decisions are blocked on this outcome. The evaluation output will be documented in `geodb-vendor-eval.md` (to be created as part of #732).
 
 The evaluation should assess vendors across:
 
 | Criteria | Notes |
 |---|---|
 | Dataset coverage | % of global IP space mapped; accuracy by region |
-| Attribute completeness | Country, city, lat/lon, ASN, IP type — which fields are present and reliable |
+| Attribute completeness | Country, region, city, lat/lon, ASN, carrier, IP type — which fields are present and reliable |
 | Update frequency | How often the feed refreshes; how quickly real-world changes are reflected |
-| Distribution format | MMDB, CSV, API — must fit our edge distribution model |
-| Licensing terms | Can the data be embedded in edge nodes? Restrictions on redistribution? |
+| Distribution format | MMDB or equivalent local-embed format — must support sub-ms in-process lookup; API-only vendors do not qualify |
+| Licensing terms | PoP embedding rights, multi-node distribution, use in security/fraud products |
 | Pricing model | Per-query, flat fee, volume tiers |
 | SLA and support | Uptime guarantees, correction process for bad data |
 
-**Issue [#732](https://github.com/datum-cloud/enhancements/issues/732):** Run GeoDB vendor evaluation against the criteria above. Produce a comparison matrix and a recommendation. Block distribution architecture decisions on this outcome. See [geodb-vendor-eval.md](geodb-vendor-eval.md) for the full vendor list and scoring matrix.
+Vendors in scope for evaluation:
+
+| Vendor | Notes |
+|---|---|
+| MaxMind GeoIP2 | Most widely deployed; likely reference benchmark |
+| IPinfo | Strong ASN + privacy/VPN detection data |
+| IP2Location | Large commercial dataset |
+| DB-IP | Downloadable DB + API; free tier available |
+| Digital Envoy NetAcuity | Enterprise / adtech heritage |
+| Neustar IP Intelligence | Fraud / identity focus; post-TransUnion acquisition; may be API-only — confirm embed viability early |
+| ip66.dev | Early internal candidate; coverage limitations known; needs quantification |
+
+**Note on Envoy Gateway 1.8.0:** The native GeoIP provider in Envoy Gateway (`EnvoyProxy.spec.geoIP`) consumes MMDB format. Vendor format output from #732 must be confirmed compatible before the geo-authorization integration can proceed.
 
 ---
 
@@ -166,6 +178,8 @@ The edge proxy enforces access rules combining IP and geo signals. Rules are eva
 - Output: allow / block decision per request based on first matching rule
 - Key consideration: needs low-latency in-process lookup (not a remote call); the full rule list must be local to the proxy
 
+**Envoy Gateway 1.8.0 native GeoIP support.** Envoy Gateway 1.8.0 (May 2026) adds `SecurityPolicy.spec.authorization.rules[*].principal.clientIPGeoLocations` backed by a shared GeoIP provider in `EnvoyProxy.spec.geoIP`. This provides native geo authorization (allow/block by country or region) on HTTPRoutes and GRPCRoutes without a custom filter. The integration task shifts to ensuring the Roy Kent GeoDB replica on each PoP is the source for Envoy Gateway's GeoIP provider and is updated when a new snapshot is distributed via Higgins Bus. Named IP list rules (customer-managed CIDR lists) are evaluated alongside geo rules in the ordering model above and are not covered by the native GeoIP feature — those continue to require the distribution mechanism described in this document.
+
 **Rule ordering model:**
 
 ```
@@ -235,7 +249,7 @@ All seven consumers above need geo data, but they have different access patterns
 | Galactic VPC | low-ms | daily | control plane |
 | Agent / AI Router, Tetrate, WAF | low-ms | hours | UFO Compute |
 
-This suggests a **pub/sub distribution model** using [Higgins Bus](higgins-bus.md) (MOQT) as the underlying transport. One canonical store holds the authoritative GeoDB and named lists. When either changes, an event is published to a MoQ track. PoP-local subscribers receive the event immediately — no polling, no scheduled push cycle. Consumers that can't embed the DB directly subscribe to a lightweight query API that sits in front of the local replica.
+This suggests a **pub/sub distribution model** using [Higgins Bus](signal-distribution-higgins-bus.md) (MOQT) as the underlying transport. One canonical store holds the authoritative GeoDB and named lists. When either changes, an event is published to a MoQ track. PoP-local subscribers receive the event immediately — no polling, no scheduled push cycle. Consumers that can't embed the DB directly subscribe to a lightweight query API that sits in front of the local replica.
 
 **Named IP Lists** map directly to the MoQ object model. Each list is a track (`org/{org-id}/lists/{list-id}`), and every update is a new object with a monotonic sequence number and a TTL. Edge nodes subscribe to relevant tracks and receive changes within QUIC's latency budget — typically sub-second from commit to enforcement. This satisfies the near-real-time propagation requirement without a bespoke push system.
 
@@ -243,9 +257,9 @@ This suggests a **pub/sub distribution model** using [Higgins Bus](higgins-bus.m
 
 This model handles both update cadences cleanly: GeoDB publishes once daily when a new snapshot is ready; named list changes publish on every write for near-real-time propagation. A new PoP or new consumer subscribes and receives updates without any change to the publishing side.
 
-See [Higgins Bus](higgins-bus.md) for the full transport design, track namespace, relay infrastructure requirements, and failure handling.
+See [Higgins Bus](signal-distribution-higgins-bus.md) for the full transport design, track namespace, relay infrastructure requirements, and failure handling.
 
 - [ ] Define the canonical store format (MMDB, SQLite, custom binary?)
 - [ ] Define the replication mechanism and health checks
 - [ ] Define what happens when a PoP replica is stale or unreachable (fail open vs. fail closed)
-- [ ] Define MoQ track namespace — see [Higgins Bus](higgins-bus.md)
+- [ ] Define MoQ track namespace — see [Higgins Bus](signal-distribution-higgins-bus.md)

@@ -1,4 +1,4 @@
-# Dani Rojas: Layer 4 Load Balancing
+﻿# Dani Rojas: Layer 4 Load Balancing
 
 **Parent:** [Total Load Balancing](total-load-balancing.md)  
 **Status:** Early definition  
@@ -105,7 +105,7 @@ The portal exposes a simplified L4 load balancer configuration surface covering 
 | **Timeout tuning** | Connection timeout, idle timeout, backend connect timeout |
 | **Backend weights** | Per-backend traffic weight for weighted distribution |
 
-Active and passive health checks are complementary. Active checks probe backends on a schedule and remove them before real traffic hits a failed backend. Passive checks observe live connection outcomes and eject backends that are failing under real load. Both can be enabled simultaneously. Active health checks at the L4 layer are distinct from [Nate](nate.md) signals — Nate publishes platform-wide health state to [Higgins Bus](higgins-bus.md) for routing decisions across the platform; L4 active checks are local to the load balancer and drive immediate backend pool membership.
+Active and passive health checks are complementary. Active checks probe backends on a schedule and remove them before real traffic hits a failed backend. Passive checks observe live connection outcomes and eject backends that are failing under real load. Both can be enabled simultaneously. Active health checks at the L4 layer are distinct from [Nate](health-checks-nate.md) signals — Nate publishes platform-wide health state to [Higgins Bus](signal-distribution-higgins-bus.md) for routing decisions across the platform; L4 active checks are local to the load balancer and drive immediate backend pool membership.
 
 ---
 
@@ -131,4 +131,4 @@ Customers who need HTTP routing, TLS termination, or origin health checking conf
 - **IP assignment.** Does each L4 load balancer get a dedicated IP, or does it share a VIP with other listeners? How are IPs allocated and advertised?
 - **UFO integration.** How does the L4 LB discover UFO Compute backend IPs as unikernel instances start and stop? Does it read from the UFO control plane, or does the customer configure static pools?
 - **Quota limits.** How many L4 load balancers can a customer create? What limits apply to backend pool size, listener count, and connection rate?
-- **Health check signals to Higgins Bus.** Should L4 health check results be published as [Nate](nate.md) signals on [Higgins Bus](higgins-bus.md), or are they local to the LB?
+- **Health check signals to Higgins Bus.** Should L4 health check results be published as [Nate](health-checks-nate.md) signals on [Higgins Bus](signal-distribution-higgins-bus.md), or are they local to the LB?

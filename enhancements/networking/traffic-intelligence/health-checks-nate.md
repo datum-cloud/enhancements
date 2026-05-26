@@ -1,4 +1,4 @@
-# The Nate Project: Active Health Checks
+﻿# The Nate Project: Active Health Checks
 
 **Parent:** [Total Load Balancing](total-load-balancing.md)  
 **Status:** Early definition  
@@ -12,7 +12,7 @@ Named after Nathan Shelley — the kit man who obsessively catalogued every weak
 
 ## What Nate Does
 
-Nate is Datum Cloud's active health checking system. It probes endpoints and infrastructure continuously from geographically distributed vantage points, measures availability, latency, and throughput across a wide range of protocols, and publishes the results as health signals on [Higgins Bus](higgins-bus.md) so every routing and policy component in the platform has a current view of what is up, what is degraded, and what is unreachable.
+Nate is Datum Cloud's active health checking system. It probes endpoints and infrastructure continuously from geographically distributed vantage points, measures availability, latency, and throughput across a wide range of protocols, and publishes the results as health signals on [Higgins Bus](signal-distribution-higgins-bus.md) so every routing and policy component in the platform has a current view of what is up, what is degraded, and what is unreachable.
 
 Nate is the active side only — it initiates probes and reports measurements. Applications and infrastructure manage their own passive health state through their internal mechanisms. Nate does not observe, aggregate, or configure that process.
 
@@ -186,7 +186,7 @@ status:
 
 ## Geographic Probe Distribution
 
-Nate uses geography in two ways: selecting where probes originate, and interpreting results relative to where users and targets are located. Geographic data for PoP and target coordinates comes from the [Roy Kent Project](roy-kent-project.md) GeoDB.
+Nate uses geography in two ways: selecting where probes originate, and interpreting results relative to where users and targets are located. Geographic data for PoP and target coordinates comes from the [Roy Kent Project](ip-geo-roy-kent.md) GeoDB.
 
 ### Probe Location Selection
 
@@ -212,7 +212,7 @@ For targets that are not publicly reachable, probes can be routed through a [Con
 
 ## Distribution via Higgins Bus
 
-Health status objects are published to [Higgins Bus](higgins-bus.md) using the MOQT track model. The Nate control plane is the publisher; routing and policy systems across the platform are the consumers.
+Health status objects are published to [Higgins Bus](signal-distribution-higgins-bus.md) using the MOQT track model. The Nate control plane is the publisher; routing and policy systems across the platform are the consumers.
 
 ### Track Namespaces
 
