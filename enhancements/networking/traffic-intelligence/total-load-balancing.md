@@ -35,6 +35,19 @@ Signals are distributed to consumers using [Higgins Bus](higgins-bus.md) — a Q
 
 ---
 
+## Load Balancing Stack
+
+Datum uses a two-layer load balancing architecture. Both layers consume Total Load Balancing signals to make informed routing decisions.
+
+| Layer | Technology | Customer-Configurable | Scope |
+|---|---|---|---|
+| **L4 (transport)** | [Dani Rojas / Cilium](l4-load-balancing.md) | For compute targets | Routes TCP/UDP traffic to UFO Compute or other customer compute; platform-managed in front of Envoy |
+| **L7 (application)** | Envoy | Via delivery policies | HTTP/HTTPS routing, TLS termination, origin selection, header manipulation |
+
+See [Dani Rojas](l4-load-balancing.md) for the Cilium design, customer configuration model, and relationship to the L7 layer.
+
+---
+
 ## Signals
 
 Total Load Balancing is built from a growing set of signals, introduced across projects:
@@ -97,6 +110,7 @@ Track namespaces are additive — a new signal type requires no changes to exist
 
 ## Related Areas
 
+- **[Dani Rojas](l4-load-balancing.md)** — Cilium as the transport-layer LB; customer-configurable for compute targets
 - **Connectivity / gVPC** — private path selection uses the same signal set
 - **Interconnect / Tunnels** — sovereign path enforcement extends into the Connect layer
 - **Observability / Metrics** — RTT and loss signals are sourced from and feed back to the Manage layer
