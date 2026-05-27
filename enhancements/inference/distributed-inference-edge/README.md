@@ -15,6 +15,7 @@ latest-milestone: "v0.x"
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
+  - [Architecture Diagrams](#architecture-diagrams)
   - [Architecture Overview](#architecture-overview)
   - [Per-Node Components](#per-node-components)
   - [Per-PoP Components](#per-pop-components)
@@ -24,6 +25,7 @@ latest-milestone: "v0.x"
   - [Build Phases](#build-phases)
   - [Integration with Datum Workloads](#integration-with-datum-workloads)
   - [Integration with Galactic VPC and SRv6](#integration-with-galactic-vpc-and-srv6)
+  - [Security](#security)
   - [Observability](#observability)
 - [Production Readiness Review Questionnaire](#production-readiness-review-questionnaire)
   - [Feature Enablement and Rollback](#feature-enablement-and-rollback)
@@ -89,6 +91,12 @@ layer.
   class; the architecture assumes homogeneous inference nodes within a PoP.
 - Fault-tolerant mid-inference recovery; a node failure terminates in-flight
   generation and the client must retry.
+- Seamless mid-stream reconnect resume; if a client's TCP connection breaks
+  during active generation (SSE stream), the stream is terminated. The client
+  must issue a new request with the same `X-Datum-Session-ID` to continue; KV
+  cache context is preserved, but already-generated tokens are not replayed.
+- Rolling model weight updates without capacity impact; model version changes
+  require node restarts and a capacity reduction during the rollout window.
 - Defining the commercial packaging of inference capacity; that is a pricing
   and GTM concern.
 
@@ -103,8 +111,11 @@ from DCGM. Cross-PoP session affinity is provided by SRv6 policy steering
 over the Galactic VPC backbone. A global control plane manages anycast weight
 adjustments and cross-PoP KV cache transfers.
 
-The system exposes an OpenAI-compatible inference API. No client-side changes
-are required for basic usage; session affinity and roaming are transparent.
+The system exposes an OpenAI-compatible inference API. Clients must include a
+`X-Datum-Session-ID` header to enable session affinity and roaming; new
+sessions receive this header in the response and must echo it on reconnect.
+Clients that do not send this header receive stateless inference with no KV
+cache continuity across connections.
 
 ### User Stories
 
@@ -174,9 +185,13 @@ GitOps pull requests.
 
 **Risk: llama-server instability affects the broader edge cluster.** Mitigation:
 Inference workloads run in isolated Kubernetes namespaces with resource quotas.
-cgroup limits prevent VRAM-exhausted pods from impacting other workloads on the
-same node. Inference node pools are dedicated GPU hardware and do not share
-capacity with general-purpose edge workloads.
+Inference node pools are dedicated GPU hardware and do not share capacity with
+general-purpose edge workloads. Note: GPU VRAM is not controlled by Linux
+cgroups — `cudaMalloc` bypasses cgroup memory accounting. The primary VRAM
+isolation mechanism is the dedicated node pool (no other workloads on the same
+GPU nodes) combined with the DCGM-driven health check that removes a node from
+Envoy rotation before it is fully exhausted. NVIDIA MIG partitioning may be
+evaluated for Phase 2 if multi-tenant isolation on shared hardware is required.
 
 **Risk: New PoP integration introduces control plane split-brain.** Mitigation:
 Phase 3 global control plane uses a consensus-based session registry. New PoPs
@@ -184,6 +199,29 @@ register before accepting traffic. The global control plane validates registry
 consistency before adjusting anycast weights for a new PoP.
 
 ## Design Details
+
+### Architecture Diagrams
+
+#### System Context
+
+![System Context](./architecture-context.png)
+
+#### Network Topology
+
+The topology mirrors a CDN architecture: BGP anycast is the entry point (CDN
+edge address), edge PoPs are the serving layer (CDN edge nodes), the Galactic
+VPC SRv6 backbone is the interconnect fabric, and the global control plane is
+the origin/orchestration layer.
+
+![Network Topology](./architecture-network-topology.png)
+
+#### PoP Components
+
+![PoP Components](./architecture-pop-components.png)
+
+#### Cross-PoP Session Roaming Flow
+
+![Session Routing](./architecture-session-routing.png)
 
 ### Architecture Overview
 
@@ -242,15 +280,23 @@ resources requested. The following components run on each node:
 
 | Component | Role |
 |-----------|------|
-| `llama-server` | OpenAI-compatible inference API |
-| `dcgm-exporter` | GPU/VRAM metrics exposure for Prometheus |
-| `kv-cache-store` | Local KV cache keyed by prompt prefix hash |
-| `/health` endpoint | VRAM pressure signal for Envoy health checks |
+| `llama-server` | OpenAI-compatible inference API (`/v1/chat/completions`, SSE streaming) |
+| `dcgm-exporter` | GPU/VRAM metrics exposure for Prometheus (`:9400/metrics`) |
+| `kv-cache-store` | Local KV cache keyed by `tenant_id:SHA-256(prompt prefix)` |
+| `/health` endpoint | Returns structured VRAM pressure JSON for Envoy health checks |
+| model readiness gate | Init container / sidecar that blocks the readiness probe until model weights are fully loaded into VRAM; prevents routing to cold nodes after scale-out |
 
 The health endpoint returns a structured response including current VRAM
 utilization. Envoy polls this endpoint and adjusts load balancing weight
 accordingly, removing nodes from rotation when `vram_pressure` exceeds the
 threshold configured in the `pop-router` xDS policy.
+
+**Model cold-start:** Large model weights (e.g., 35GB for a 70B model at 4-bit
+quantization) take 2–5 minutes to load into VRAM at startup. The model
+readiness gate ensures `pop-router` does not add a node to the Envoy cluster
+until model loading is complete. This also means scale-out events have a
+2–5 minute ramp-up time; autoscaling thresholds should be tuned to trigger
+scale-out before VRAM headroom is critically low, not in response to it.
 
 ### Per-PoP Components
 
@@ -261,7 +307,7 @@ Each inference-capable PoP extends the existing edge cluster with:
 | `pop-router` | xDS control plane; drives Envoy configuration from DCGM metrics |
 | Envoy (extended) | Within-PoP load balancing; already deployed at edge clusters |
 | Prometheus (extended) | Scrapes `dcgm-exporter` endpoints; already deployed |
-| Redis | Session registry and local KV cache index |
+| Redis Sentinel (3-node) | Session registry and local KV cache index; Sentinel provides HA failover |
 
 The `pop-router` is the only new control-plane component per PoP. It watches
 Prometheus for `dcgm_fb_free` and `dcgm_fb_used` metrics and pushes xDS
@@ -274,8 +320,10 @@ The global control plane is a new service, deployed in the Datum production
 cluster following the same GitOps pattern as other platform services. It
 provides:
 
-- **Session registry**: maps session IDs to owning PoP. Backed by a replicated
-  store (etcd or CockroachDB; to be determined in Phase 3 design).
+- **Session registry**: maps session IDs to owning PoP. Backed by CockroachDB
+  (chosen over etcd because `InferenceSession` objects reach the millions;
+  etcd degrades at high write rates and is not designed for application-level
+  data at that scale).
 - **Prefix cache index**: global index of prompt prefix hashes and their
   resident PoPs. Used to route requests for known prefixes to PoPs that have
   already computed them.
@@ -291,36 +339,53 @@ within-PoP inference.
 
 ### Session Routing
 
+**Session ID transport:**
+
+Session identity is carried via the `X-Datum-Session-ID` HTTP request header.
+On the first request of a new session (no header present), `pop-router`
+generates a UUID, writes it to the local Redis Sentinel cluster, and returns it
+to Envoy via xDS metadata so Envoy can inject it as a response header. The
+client must echo this header on all subsequent requests in the session,
+including reconnects from a different network. Clients that omit the header
+receive stateless inference with no cross-request cache affinity.
+
 **New session:**
 
-1. Client connects to the inference anycast address.
+1. Client connects to the inference anycast address without `X-Datum-Session-ID`.
 2. DNS/anycast directs the connection to the nearest PoP (existing Datum anycast
    infrastructure; no changes required).
 3. Envoy at the PoP selects the least-pressured inference node using VRAM-aware
-   load balancing.
-4. A session ID is assigned and recorded in the local Redis instance and
-   asynchronously replicated to the global session registry.
+   load balancing (consistent hash on KV prefix hash when available).
+4. `pop-router` assigns a session ID (UUID), records it in the local Redis
+   Sentinel cluster, and asynchronously replicates it to the global session
+   registry. The session ID is returned to the client as `X-Datum-Session-ID`
+   in the response.
 
 **Roaming client (cross-PoP):**
 
-1. Client reconnects from a different network location; anycast routes to a
-   different PoP.
-2. The new PoP's `pop-router` queries the global session registry with the
-   session ID.
-3. The registry returns the owning PoP.
-4. SRv6 policy steering is applied: the new PoP encapsulates the client's
-   traffic in an SRv6 header with a segment pointing to the owning PoP.
-5. The client's packets arrive at the owning PoP transparently; no HTTP
-   redirect, no application-layer round trip.
+1. Client reconnects from a different network location, presenting its
+   `X-Datum-Session-ID` header. Anycast routes to the nearest PoP (now PoP B).
+2. `pop-router` at PoP B extracts the session ID from xDS per-request metadata
+   forwarded by Envoy. Local Redis lookup returns a miss.
+3. `pop-router` queries the global session registry; the registry returns the
+   owning PoP (PoP A). This lookup adds approximately one WAN RTT to the
+   first request after a roaming event; subsequent requests from the same
+   session skip the global lookup once SRv6 steering is installed.
+4. SRv6 policy steering is applied: PoP B encapsulates the client's traffic in
+   an SRv6 header with a segment pointing to PoP A.
+5. The client's packets arrive at PoP A transparently; no HTTP redirect, no
+   application-layer round trip.
 
 This uses the same SRv6 End.DT4/DT6 forwarding already used by Galactic VPC
 for tenant traffic steering.
 
 ### KV Cache Architecture
 
-KV cache is keyed by the SHA-256 prefix hash of the prompt tokens. The local
-index maps prefix hashes to cache shard locations on the local node. The global
-index (managed by the global control plane) maps prefix hashes to PoPs.
+KV cache is keyed by `tenant_id:SHA-256(prompt token prefix)`. The tenant ID
+scoping ensures that prefix hash collisions between tenants never result in
+cross-tenant cache sharing. The local index maps prefix hashes to cache shard
+locations on the local node. The global index (managed by the global control
+plane) maps prefix hashes to PoPs.
 
 **Within-PoP cache hit:** Envoy uses consistent hashing on the prefix hash to
 route requests to the node most likely to have the relevant cache shard. Cache
@@ -330,8 +395,11 @@ updated.
 **Cross-PoP cache hit (Phase 3):** The global control plane detects that a
 prefix hash is resident at a remote PoP and either (a) routes the request to
 that PoP via SRv6 or (b) initiates a cache transfer over a dedicated
-bandwidth-reserved SRv6 segment. The threshold for transfer vs. redirect is a
-function of cache size, available bandwidth, and expected generation length.
+bandwidth-reserved SRv6 segment. The threshold between transfer and redirect
+is a function of cache size and available bandwidth, using `max_tokens` from
+the request as a proxy for expected generation length (since actual generation
+length is unknown at request time). The heuristic is: transfer if
+`cache_size_bytes / available_bandwidth_bps < estimated_generation_ttft`.
 
 ### Build Phases
 
@@ -353,9 +421,11 @@ single PoP. No global infrastructure is required.
 
 #### Phase 2: Second PoP, transparent session affinity
 
-Add a second GPU-capable PoP. Deploy the global session registry (lightweight;
-no anycast weight control yet). Configure SRv6 session steering between the
-two PoPs using the existing Galactic VPC SRv6 policy infrastructure.
+Add a second GPU-capable PoP. Deploy the global session registry as a
+single-region CockroachDB cluster (3 nodes for quorum; no anycast weight
+control yet). Configure SRv6 session steering between the two PoPs using the
+existing Galactic VPC SRv6 policy infrastructure. Phase 3 expands the
+CockroachDB cluster to multi-region; no data migration is required.
 
 Deliverables:
 - Session registry with cross-PoP replication between the two PoPs
@@ -402,16 +472,16 @@ spec:
         - name: llama-server
           containers:
             - name: llama-server
-              image: ghcr.io/datum-cloud/llama-server:latest
+              image: ghcr.io/datum-cloud/llama-server:v0.1.0  # pin to semver; never use :latest
               resources:
                 requests:
                   memory: "64Gi"
                 limits:
                   memory: "64Gi"
             - name: dcgm-exporter
-              image: nvcr.io/nvidia/k8s/dcgm-exporter:latest
+              image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
             - name: kv-cache-store
-              image: ghcr.io/datum-cloud/kv-cache-store:latest
+              image: ghcr.io/datum-cloud/kv-cache-store:v0.1.0
   placements:
     - name: us-central-1
       cityCode: ORD
@@ -450,6 +520,36 @@ enhancement must be satisfied before Phase 2 deployment:
 - Minimum 9080-byte MTU on inter-PoP paths (SRv6 overhead budget: 80 bytes)
 - TCP port 179 open between PoPs (BGP for Galactic VPC route distribution)
 - ICMPv6 PTB forwarding enabled on all inter-PoP paths
+
+### Security
+
+#### Authentication and authorization
+
+The inference API is exposed behind Datum's existing API gateway, which
+validates API keys and JWT tokens before requests reach Envoy. Rate limiting is
+enforced at the gateway tier. The `pop-router` and inference nodes are not
+directly reachable from the public internet.
+
+#### Transport security for cross-PoP traffic
+
+KV cache shards transferred via `inference.cache-xfer` SRv6 segments contain
+embeddings computed from user prompt tokens and must be treated as sensitive
+data. All inter-PoP KV cache transfers use mTLS at the application layer
+(established between `kv-cache-store` sidecars); the Galactic VPC fabric
+encryption provides a second layer but is not relied upon exclusively.
+
+All communication between `pop-router` instances and the global control plane
+uses mTLS. Redis Sentinel cluster traffic uses TLS with certificate rotation
+managed by cert-manager.
+
+#### Tenant isolation in KV cache
+
+KV cache keys are namespaced by `tenant_id` (derived from the authenticated
+API key). Prefix hash lookups are never served across tenant boundaries. A
+global prefix index entry for a given hash is only visible to the tenant that
+created it. Cache hit timing does not expose cross-tenant data because the
+consistent hash routing decision is made per-tenant before consulting the
+prefix index.
 
 ### Observability
 
@@ -589,10 +689,11 @@ count in real time.
 
 #### Are there any missing metrics that would be useful?
 
-KV cache eviction rate per node is not currently planned in Phase 1. This
-metric would help tune cache sizing. Deferred because the Redis cache store
-exposes eviction counters and these can be added to the scrape config without
-code changes.
+KV cache eviction rate per node (`kv_cache_eviction_rate`) is not included in
+Phase 1 but should be added in Phase 2. Redis exposes eviction counters via
+`redis_evicted_keys_total`; adding this to the scrape config requires no code
+changes. This metric is critical for tuning cache sizing before Phase 3
+cross-PoP promotion heuristics are enabled.
 
 ### Dependencies
 
@@ -645,7 +746,12 @@ Phase 3 will introduce:
   audit and debugging. Short-lived; TTL-based garbage collection.
 
 Supported object counts: hundreds of `InferencePoP` resources (one per PoP),
-millions of `InferenceSession` resources (capped by TTL GC).
+millions of `InferenceSession` resources (capped by TTL GC). `InferenceSession`
+objects are stored in CockroachDB, not in Kubernetes etcd — etcd is not
+designed for millions of short-lived application-layer records at high write
+rates. The Kubernetes API surface for `InferenceSession` is backed by a
+CockroachDB aggregated API server following the existing Datum API server
+pattern.
 
 #### Will enabling / using this feature result in any new calls to the cloud provider?
 
@@ -667,7 +773,8 @@ expected to be affected.
 #### Will enabling / using this feature result in non-negligible increase of resource usage in any components?
 
 - `pop-router`: 256Mi memory, 0.5 CPU per PoP (new component)
-- Redis (local cache index): 2Gi memory per PoP (new component)
+- Redis Sentinel cluster: 3 × 2Gi memory per PoP = 6Gi total (new component;
+  3-node Sentinel for HA failover)
 - Prometheus: additional scrape targets add ~5MB/day storage per PoP at
   15s scrape interval for ~20 DCGM metric series per node
 
@@ -729,6 +836,13 @@ and re-watches; any node additions or removals during the outage are applied.
 ## Implementation History
 
 - 2026-05-25: Initial provisional enhancement created
+- 2026-05-27: Addressed review feedback: specified `X-Datum-Session-ID` session
+  transport protocol; corrected VRAM/cgroup isolation claim; added Redis
+  Sentinel HA; specified CockroachDB for session registry (replacing etcd/TBD);
+  added tenant-scoped KV cache keys; added Security section (mTLS, tenant
+  isolation, auth delegation); clarified streaming reconnect non-goal; added
+  model readiness gate for cold-start; pinned container image tags; added C4
+  architecture diagrams.
 
 ## Drawbacks
 
