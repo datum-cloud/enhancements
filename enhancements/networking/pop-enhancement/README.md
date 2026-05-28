@@ -1,4 +1,4 @@
-Purpose
+# Purpose
 
 Datum operates a global anycast network upon which it provides a variety
 of connectivity services to its customers.  Performance and optimization
@@ -24,7 +24,8 @@ for testing and
 validation. Designs presented here have been tested/validated as part of
 this project and/or previous operational deployment.
 
-Recap Current Architecture\
+\
+**Recap Current Architecture**\
 \
 The current architecture consists of sixteen PoPs hosted in a single
 provider's cloud. Each PoP is comprised of a VM based K8s cluster with
@@ -33,8 +34,7 @@ to manage all pod networking to include BGP peering and route
 announcement with the hosting provider's routers. The Cilium only based
 implementation lacks key functionality and scale.
 
-![](./pr2_media/media/image1.png){width="5.130208880139983in"
-height="3.7377230971128608in"}
+![](./pr2_media/media/image1.png)
 
 Routing Detail
 
@@ -56,7 +56,8 @@ Cilium Limitations
 
 -   No support for other needed protocols i.e. IS-IS
 
-Target Architecture 1 (TA1): +FRR/VPP
+\
+**Target Architecture 1 (TA1): +FRR/VPP**
 
 The first design builds on the current Cilium based architecture while
 solving the identified gaps in scale and needed feature support. This is
@@ -106,10 +107,9 @@ switches in the most redundant way possible. Likewise, all servers will
 be homed to both TOR switches ensuring survivability during switch
 failure or maintenance.
 
-![](./pr2_media/media/image2.png){width="6.5in"
-height="7.6722222222222225in"}
+![](./pr2_media/media/image2.png)
 
-Target Architecture 2 (TA2): Dedicated Routers
+**Target Architecture 2 (TA2): Dedicated Routers**
 
 Like TA1, TA2 also solves all of the identified gaps from the current
 architecture. The difference is that it also addresses the identified
@@ -132,6 +132,4 @@ Added functionality and benefits
 -   Clear separation between infrastructure network services and
     platform services
 
-![](./pr2_media/media/image3.png){width="6.5in"
-height="7.311805555555556in"}
-
+![](./pr2_media/media/image3.png)
