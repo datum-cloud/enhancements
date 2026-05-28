@@ -61,7 +61,10 @@ graph TD
 
 #### Key Steps for Success
 
-1. **Standard Checkout Forms**: We must use Stripe's official payment forms on our website. This allows Stripe to analyze device behavior. Custom checkout forms bypass this analysis, which significantly lowers Radar's ability to catch fraud.
+1. **Official Payment Integrations**: We must use Stripe's official payment components rather than custom form inputs to allow Stripe to collect device telemetry. Stripe offers two ways to achieve this:
+   - **Stripe Checkout**: Redirects the user to an external, Stripe-hosted checkout page.
+   - **Stripe Elements**: Embeds customizable payment input fields directly into our website's own pages via iframes, keeping users in our native experience.
+   Both options utilize Stripe's SDKs to analyze device behavior, telemetry, and interaction patterns. Building custom form fields that bypass these SDKs and collect details manually may prevent Stripe Radar from gathering this critical client side telemetry, significantly weakening its fraud detection capability.
 2. **Sharing Context**: When a user submits a payment, we pass basic customer info (like signup location and email domain) to Stripe. This helps the system distinguish between a legitimate customer and a bad actor.
 3. **Automatic Alerts**: We configure notifications so Stripe can alert our system when a cardholder reports fraud. This allows us to instantly freeze the associated account and prevent further resource abuse.
 
