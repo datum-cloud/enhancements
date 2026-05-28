@@ -114,6 +114,7 @@ Sanctions screening must be integrated into our onboarding pipeline, balancing c
                              │
                              ▼
         [Step 3: Access Approved or Restricted for Review]
+         (Flags geolocation mismatches, e.g. IP in Iran/Russia)
 ```
 
 #### Option A: Self-Hosted Moov Watchman (Recommended for Phase 1)
@@ -131,12 +132,13 @@ Commercial identity platforms check names against lists and verify identities us
 - **Cost**: Fees range from $0.10 to $0.50 per check.
 - **Value**: Significantly fewer false positives since they verify if the name matches a real, sanctioned individual rather than a coincidental namesake.
 
-### 3.3 Managing False Alarms and Minimizing Disruption
+### 3.3 Managing False Alarms and Geolocation Mismatches
 
-Because of fuzzy name matching, the system will occasionally flag legitimate users who share a name with a sanctioned entity (false positives).
+Because of fuzzy name matching, the system will occasionally flag legitimate users who share a name with a sanctioned entity (false positives). Furthermore, because bad actors often misrepresent their true location, we must cross-reference self-reported countries against IP geolocation data.
 
+- **Geolocation Discrepancies**: If a user claims to be from a permitted region but their IP address originates from a high-risk or sanctioned country (e.g., Iran, Russia), the system must flag the account for deeper review.
 - **Fail-Closed Security**: If the sanctions checker is offline, compliance regulations require that we halt approval and flag the user for manual review rather than letting them bypass the check.
-- **Review and Override Workflow**: When a potential match is flagged, the system restricts the account and alerts our compliance team. An operator reviews the user's details (such as requesting country of origin or middle names) and can manually override the restriction to grant access.
+- **Review and Override Workflow**: When a potential name match or geolocation discrepancy is flagged, the system restricts the account and alerts our compliance team. An operator reviews the user's details (such as requesting country of origin, middle names, or VPN usage) and can manually override the restriction to grant access.
 
 ---
 
