@@ -32,7 +32,7 @@ to manage all pod networking to include BGP peering and route
 announcement with the hosting provider's routers. The Cilium only based
 implementation lacks key functionality and scale.
 
-![](./pr2_media/media/image1.png)
+![](./image1.png)
 
 Routing Detail
 
@@ -105,7 +105,7 @@ switches in the most redundant way possible. Likewise, all servers will
 be homed to both TOR switches ensuring survivability during switch
 failure or maintenance.
 
-![](./pr2_media/media/image2.png)
+![](./image2.png)
 
 **Target Architecture 2 (TA2): Dedicated Routers**
 
@@ -130,4 +130,4 @@ Added functionality and benefits
 -   Clear separation between infrastructure network services and
     platform services
 
-![](./pr2_media/media/image3.png)
+![](./image3.png)
