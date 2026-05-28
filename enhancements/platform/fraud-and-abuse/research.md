@@ -15,6 +15,7 @@
   - [5.1 Overview of Specialized Tools](#51-overview-of-specialized-tools)
   - [5.2 Business Comparison Matrix](#52-business-comparison-matrix)
   - [5.3 Team Setup & Testing Environments](#53-team-setup--testing-environments)
+  - [5.4 Example Indicators of Network Abuse and Risky Behaviors](#54-example-indicators-of-network-abuse-and-risky-behaviors)
 - [6. Proposed Implementation](#6-proposed-implementation)
 
 ---
@@ -225,6 +226,16 @@ The ease of setting up test environments directly impacts our development speed.
 
 - **Self-Provisioned Sandbox**: Platforms like **SEON**, **Fingerprint**, **Castle**, and **Darwinium** allow developers to sign up and get credential keys immediately. They provide pre-built playgrounds (like Fingerprint's Stackblitz integration) and mock tokens to test different risk decisions (`approve`, `review`, `deny`) in local environments.
 - **Gated Environments**: Platforms like **Sardine** and **Sift** require formal business verification (KYB) or sales-led onboarding before issuing credentials, meaning they take longer to set up initially for testing.
+
+### 5.4 Example Indicators of Network Abuse and Risky Behaviors
+
+As we design and calibrate our defense strategy, we will need to track various network-level and behavioral markers to identify malicious activity. While not a final or exhaustive list of rules, the following are common examples of risk indicators we can evaluate:
+
+- **Velocity and Volume Anomalies**: Rapid bursts of account creations, login attempts, or API requests originating from the same IP address, device fingerprint, or subnet within a very short timeframe.
+- **Anomalous Network Routing**: Traffic routing through known anonymizing networks (Tor, commercial VPNs, or data center IP ranges) rather than standard residential ISPs, often used to mask malicious origins.
+- **Credential Stuffing & Brute Force**: Repeated failed authentication attempts across different accounts, or sudden success after multiple failures, indicating an automated attack using compromised credential lists.
+- **Device & Browser Inconsistencies**: Signatures of "impossible travel" (e.g., logins from different continents within an hour), or browser configurations that frequently rotate, clear cookies abnormally, or mismatch the declared operating system (user-agent spoofing).
+- **Application Abuse Patterns**: Navigation through the platform that defies normal human interaction speeds, or immediate exploitation of high-value actions (e.g., instantly spinning up compute resources or initiating bulk transfers) immediately after a fresh account creation.
 
 ---
 
