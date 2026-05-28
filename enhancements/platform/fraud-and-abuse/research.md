@@ -25,7 +25,7 @@ As self-service platforms grow, they face various safety and financial risks—i
 
 Our proposed strategy is divided into two horizons:
 
-1. **Short-Term Focus (Quick Wins)**: Use Stripe Radar to block payment fraud, deploy a free self-hosted name screening tool to comply with federal regulations, and implement a local whitelist to fast-track trusted enterprise clients and reduce external testing costs.
+1. **Short-Term Focus (Quick Wins)**: Implement aa higher barrier signup flow; implement Stripe Radar to mitigate payment fraud; improve existing MaxMind functionality and scoring; deploy a free self-hosted name screening tool to comply with OFAC federal regulations; and implement a local whitelist to fast-track trusted enterprise clients and reduce external testing costs.
 2. **Long-Term Focus**: Evaluate and integrate specialized fraud tools (such as Sardine, Fingerprint, Darwinium, SEON, or our preferred choice, Castle.io) that analyze device details and mouse/typing behavior to block sophisticated, automated bot networks and multiple account signups.
 
 ---
