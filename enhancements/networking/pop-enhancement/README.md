@@ -105,6 +105,7 @@ switches in the most redundant way possible. Likewise, all servers will
 be homed to both TOR switches ensuring survivability during switch
 failure or maintenance.
 
+\
 ![](./image2.png)
 
 **Target Architecture 2 (TA2): Dedicated Routers**
@@ -130,4 +131,5 @@ Added functionality and benefits
 -   Clear separation between infrastructure network services and
     platform services
 
+\
 ![](./image3.png)
