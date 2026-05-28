@@ -11,12 +11,16 @@
   - [3.3 Managing False Alarms and Geolocation Mismatches](#33-managing-false-alarms-and-geolocation-mismatches)
 - [4. Whitelist / Safe-list Strategy (Cost & Customer Experience Optimization)](#4-whitelist--safe-list-strategy-cost--customer-experience-optimization)
   - [4.1 Designing the Whitelist Layer](#41-designing-the-whitelist-layer)
+  - [4.2 Orchestration and Short-Circuit Logic](#42-orchestration-and-short-circuit-logic)
 - [5. Advanced Long-Term Tooling: Specialized Fraud Platforms](#5-advanced-long-term-tooling-specialized-fraud-platforms)
   - [5.1 Overview of Specialized Tools](#51-overview-of-specialized-tools)
   - [5.2 Business Comparison Matrix](#52-business-comparison-matrix)
   - [5.3 Team Setup & Testing Environments](#53-team-setup--testing-environments)
   - [5.4 Example Indicators of Network Abuse and Risky Behaviors](#54-example-indicators-of-network-abuse-and-risky-behaviors)
 - [6. Proposed Implementation](#6-proposed-implementation)
+  - [Phase 1: The Core Foundation](#phase-1-the-core-foundation)
+  - [Phase 2: Scoring Calibration & Observation](#phase-2-scoring-calibration--observation)
+  - [Phase 3: Perimeter Defense & Castle.io Integration](#phase-3-perimeter-defense--castleio-integration)
 
 ---
 
