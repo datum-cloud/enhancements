@@ -21,7 +21,7 @@
 
 ## 1. Executive Summary
 
-As self-service platforms grow, they face various safety and financial risks—including stolen payment cards, fake account registrations, and automated bot systems designed to abuse free trials. To secure the Datum platform and ensure we comply with federal laws, we need a balanced approach that starts with immediate, low-cost safety measures and builds toward advanced behavioral checks over time.
+As self-service platforms grow, they face various safety and financial risks—including stolen payment cards, fake account registrations, automated bot systems designed for abuse, and attacks by malicious users both within the platform and on other systems. To secure Datum Cloud, protect quality of service, and comply with federal laws and best practices, we need a balanced approach that starts with immediate, low-cost safety measures and builds toward advanced behavioral checks over time.
 
 Our proposed strategy is divided into two horizons:
 
