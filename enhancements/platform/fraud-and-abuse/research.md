@@ -36,25 +36,27 @@ Since we already plans to use Stripe to handle customer payments, using its buil
 
 ### 2.1 How Stripe Radar Works
 
-Stripe Radar checks every payment as it happens, using a two-layered defense:
+Stripe Radar checks every payment or card validation as it happens, using a two-layered defense:
 
-- **Machine Learning Core**: Automatically scores every payment attempt on a scale of `0` (lowest risk) to `99` (highest risk), based on global patterns seen across millions of businesses.
-- **Custom Rules**: Allows us to write custom rules to block payments, send them to a manual review queue, or require extra verification steps (like requesting a security code from the customer's bank).
+- **Machine Learning Core**: Automatically scores every transaction attempt on a scale of `0` (lowest risk) to `99` (highest risk), based on global patterns seen across millions of businesses.
+- **Custom Rules**: Allows us to write custom rules to block transactions, send them to a manual review queue, or require extra verification steps (like requesting a security code from the customer's bank).
 
 ### 2.2 Implementation Flow
 
-Radar monitors customer behavior on the checkout page to identify red flags (like rapidly testing multiple cards).
+Radar monitors customer behavior on the checkout or setup page to identify red flags (like rapidly testing multiple cards).
+
+Crucially, **we can capture credit card details during new account creation and perform validation check**. Radar evaluates this validation request in real-time. If the card is flagged as fraudulent or high-risk, we can instantly block the account creation process, preventing bad actors from ever accessing the platform.
 
 ```mermaid
 graph TD
-    User[Client Browser] -->|1. Enters Payment Details| StripeElements[Stripe Payment Form]
+    User[Client Browser] -->|1. Enters Card Details for Signup or Checkout| StripeElements[Stripe Payment Form]
     Note[Device behavior and typing details analyzed automatically] -.-> StripeElements
-    StripeElements -->|2. Submits Payment Request| App[Application Backend]
-    App -->|3. Initiates Payment w/ User Details| StripeAPI[Stripe Radar Risk Engine]
+    StripeElements -->|2. Submits Card Data| App[Application Backend]
+    App -->|3. Initiates Validation w/ User Details| StripeAPI[Stripe Radar Risk Engine]
     
-    StripeAPI -->|Decision: Block| Block[Block Charge & Reject Signup]
-    StripeAPI -->|Decision: Review| Review[Approve Charge but Flag Account for Team Review]
-    StripeAPI -->|Decision: Allow| Allow[Approve Charge & Grant Access]
+    StripeAPI -->|Decision: Block| Block[Block Card & Reject Account Creation]
+    StripeAPI -->|Decision: Review| Review[Approve Validation but Flag Account for Team Review]
+    StripeAPI -->|Decision: Allow| Allow[Approve Validation & Grant Account Access]
 ```
 
 #### Key Steps for Success
