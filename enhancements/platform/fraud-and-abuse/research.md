@@ -8,7 +8,7 @@
 - [3. Regulatory Compliance: Sanctions Screening](#3-regulatory-compliance-sanctions-screening)
   - [3.1 OFAC and Sanctions Screening Requirements](#31-ofac-and-sanctions-screening-requirements)
   - [3.2 Screening Implementation Options](#32-screening-implementation-options)
-  - [3.3 Managing False Alarms and Minimizing Disruption](#33-managing-false-alarms-and-minimizing-disruption)
+  - [3.3 Managing False Alarms and Geolocation Mismatches](#33-managing-false-alarms-and-geolocation-mismatches)
 - [4. Whitelist / Safe-list Strategy (Cost & Customer Experience Optimization)](#4-whitelist--safe-list-strategy-cost--customer-experience-optimization)
   - [4.1 Designing the Whitelist Layer](#41-designing-the-whitelist-layer)
 - [5. Advanced Long-Term Tooling: Specialized Fraud Platforms](#5-advanced-long-term-tooling-specialized-fraud-platforms)
@@ -114,7 +114,7 @@ Sanctions screening must be integrated into our onboarding pipeline, balancing c
                              │
                              ▼
         [Step 3: Access Approved or Restricted for Review]
-         (Flags geolocation mismatches, e.g. IP in Iran/Russia)
+         (Flags geolocation mismatches, e.g. IP from a high-risk country)
 ```
 
 #### Option A: Self-Hosted Moov Watchman (Recommended for Phase 1)
@@ -136,7 +136,7 @@ Commercial identity platforms check names against lists and verify identities us
 
 Because of fuzzy name matching, the system will occasionally flag legitimate users who share a name with a sanctioned entity (false positives). Furthermore, because bad actors often misrepresent their true location, we must cross-reference self-reported countries against IP geolocation data.
 
-- **Geolocation Discrepancies**: If a user claims to be from a permitted region but their IP address originates from a high-risk or sanctioned country (e.g., Iran, Russia), the system must flag the account for deeper review.
+- **Geolocation Discrepancies**: If a user claims to be from a permitted region but their IP address originates from a high-risk or sanctioned country, the system must flag the account for deeper review.
 - **Fail-Closed Security**: If the sanctions checker is offline, compliance regulations require that we halt approval and flag the user for manual review rather than letting them bypass the check.
 - **Review and Override Workflow**: When a potential name match or geolocation discrepancy is flagged, the system restricts the account and alerts our compliance team. An operator reviews the user's details (such as requesting country of origin, middle names, or VPN usage) and can manually override the restriction to grant access.
 
