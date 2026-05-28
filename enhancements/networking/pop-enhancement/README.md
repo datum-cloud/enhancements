@@ -19,10 +19,8 @@ designs both of which solve near term requirements and scale. The second
 of the two designs also solves concerns with future scale and
 operational supportability. There is room here for a third design using
 smart nics, but it was descoped as the needed hardware was not available
-for testing and
-
-validation. Designs presented here have been tested/validated as part of
-this project and/or previous operational deployment.
+for testing and validation. Designs presented here have been tested/validated 
+as part of this project and/or previous operational deployment.
 
 \
 **Recap Current Architecture**\
