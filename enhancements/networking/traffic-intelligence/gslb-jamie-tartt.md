@@ -130,6 +130,94 @@ Customer-visible behavior: DNS answers for customer zones return PoP addresses s
 
 ---
 
+## Customer Configuration
+
+Customers do not configure PowerDNS directly. The customer-facing surface is a `GeoSteeringPolicy` resource that targets a DNS zone. The control plane translates the policy into PowerDNS zone configuration.
+
+### GeoSteeringPolicy
+
+```yaml
+apiVersion: networking.datum.net/v1alpha
+kind: GeoSteeringPolicy
+metadata:
+  name: example-com-geo
+  namespace: acme-corp
+spec:
+  targetRef:
+    group: dns.datum.net
+    kind: Zone
+    name: example.com
+  enabled: true
+  ttl: 60s                        # DNS TTL for geo-steered records
+  fallback:
+    behavior: nearest-healthy     # nearest-healthy | round-robin | specific-pop
+    pop: us-east                  # only used when behavior: specific-pop
+  sovereignty:
+    rules:
+      - clientRegions: [EU]
+        allowedJurisdictions: [EU]
+      - clientRegions: [US, CA]
+        allowedJurisdictions: [US, CA]
+```
+
+When `enabled: false` or no `GeoSteeringPolicy` exists for a zone, DNS answers are returned without geo steering — standard round-robin across all healthy PoPs.
+
+### What the Customer Controls vs What Datum Manages
+
+| | Customer configures | Datum manages |
+|---|---|---|
+| Geo steering on/off | `spec.enabled` | — |
+| DNS TTL | `spec.ttl` | Minimum TTL floor enforced by platform |
+| Fallback behavior | `spec.fallback` | PoP health state that drives which PoPs qualify as "healthy" |
+| Sovereignty rules | `spec.sovereignty.rules` | PoP jurisdiction registry (which PoP is in which legal jurisdiction) |
+| PoP selection logic | — | Geographic proximity scoring, PowerDNS GeoIP rule generation |
+| Health failover | — | Nate signal subscription, PowerDNS record updates on health transitions |
+| GeoDB updates | — | Roy Kent snapshot distribution and PowerDNS reload |
+| EDNS Client Subnet | — | PowerDNS ECS configuration and fallback behavior |
+
+### TTL Guidance
+
+The `spec.ttl` field sets the DNS TTL for geo-steered records. This directly controls the failover window: a client that has cached a PoP address continues routing to that PoP until the TTL expires, even if the PoP is removed from the GSLB answer set due to a health event.
+
+| TTL | Tradeoff |
+|---|---|
+| 30–60s | Fast failover; higher DNS query volume |
+| 60–120s | Balanced — recommended default |
+| 300s+ | Lower query volume; 5-minute window during which clients route to a failed PoP |
+
+The platform enforces a minimum TTL floor (TBD) to prevent abuse of the DNS infrastructure. The right default and minimum values depend on Nate failover propagation time — see open question in the Open Questions section.
+
+### Visibility
+
+Customers can inspect the current GSLB answer for their zone using `datumctl`:
+
+```
+datumctl get geosteeringpolicy example-com-geo
+datumctl describe zone example.com --gslb
+```
+
+The `describe` output will show which PoPs are currently in the answer set, which are excluded due to health, and which are excluded due to sovereignty rules. This is the primary debugging surface for "why is traffic going to the wrong PoP?" questions.
+
+Status on the GeoSteeringPolicy resource reflects current control plane state:
+
+```yaml
+status:
+  activePops:
+    - id: us-east-1
+      status: HEALTHY
+      inAnswerSet: true
+    - id: eu-west-1
+      status: HEALTHY
+      inAnswerSet: true
+    - id: ap-southeast-1
+      status: DEGRADED
+      inAnswerSet: false
+      excludedReason: health
+  lastUpdated: "2026-05-29T14:00:00Z"
+```
+
+---
+
 ## Sovereignty Constraints
 
 Some customers or workloads have data residency requirements that prohibit routing through certain jurisdictions. GSLB must respect these constraints as hard rules — a non-compliant PoP must be excluded regardless of proximity or health.

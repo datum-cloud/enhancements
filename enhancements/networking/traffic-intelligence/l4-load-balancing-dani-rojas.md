@@ -74,6 +74,86 @@ The routing path between Cilium and Envoy is platform infrastructure. Customers 
 
 ---
 
+## Resource Model
+
+L4 load balancing uses Gateway API as the base resource model, with a Datum-specific policy attachment for settings that Gateway API does not cover.
+
+**Gateway** — defines the listener: IP address, port, and protocol. The `gatewayClassName: datum-cilium` selects Datum's Cilium-backed implementation.
+
+**TCPRoute / UDPRoute** — defines backend routing: which compute targets receive traffic, and their relative weights. Standard Gateway API resources — no Datum extensions required at this layer.
+
+**L4LoadBalancerPolicy** — Datum policy attachment targeting a Gateway. Carries all configuration that Gateway API does not express natively: load balancing algorithm, session persistence, active and passive health check parameters, connection limits, PROXY protocol, and timeout tuning.
+
+```yaml
+# Listener
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: Gateway
+metadata:
+  name: acme-l4-gw
+  namespace: acme-corp
+spec:
+  gatewayClassName: datum-cilium
+  listeners:
+    - name: tcp-443
+      protocol: TCP
+      port: 443
+
+---
+# Backend routing
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata:
+  name: acme-backends
+  namespace: acme-corp
+spec:
+  parentRefs:
+    - name: acme-l4-gw
+  rules:
+    - backendRefs:
+        - name: ufo-workload-a
+          port: 8080
+          weight: 70
+        - name: ufo-workload-b
+          port: 8080
+          weight: 30
+
+---
+# Extended configuration
+apiVersion: networking.datum.net/v1alpha
+kind: L4LoadBalancerPolicy
+metadata:
+  name: acme-l4-policy
+  namespace: acme-corp
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: acme-l4-gw
+  algorithm: least-connections       # round-robin | least-connections | ip-hash | weighted-round-robin | random
+  sessionPersistence:
+    enabled: true
+    type: source-ip
+  activeHealthCheck:
+    protocol: TCP                    # TCP | HTTP | HTTPS
+    interval: 10s
+    timeout: 5s
+  passiveHealthCheck:
+    consecutiveFailures: 3
+    ejectionDuration: 30s
+    maxEjectionPercent: 50           # never eject more than 50% of the pool
+  connectionLimits:
+    maxConnectionsPerBackend: 10000
+    connectionRateLimit: 1000        # new connections per second
+  proxyProtocol:
+    enabled: false
+    version: v2
+  timeouts:
+    connect: 5s
+    idle: 300s
+```
+
+---
+
 ## Configuration Model
 
 ### Basic Configuration (UI)
@@ -125,10 +205,43 @@ Customers who need HTTP routing, TLS termination, or origin health checking conf
 
 ---
 
+## Health Signals and Higgins Bus
+
+L4 active and passive health checks operate locally within Cilium. They are the immediate backend pool management mechanism — a backend that fails a TCP probe or triggers outlier detection is ejected from the pool without any external dependency. This must stay fast and local; coupling L4 failover to an external signal path would introduce latency and availability risk into a layer that needs to be self-contained.
+
+However, backend pool state changes have value beyond the load balancer itself. Operators need visibility into why traffic shifted. Nate and platform-level health consumers benefit from knowing which L4 backends are currently in rotation. The resolution:
+
+**L4 health checks drive pool membership locally. Backend pool state changes are published to Higgins Bus for observability.**
+
+When a backend is ejected from or restored to the pool — by either the active health check or passive outlier detection — the L4 control plane publishes a pool state update to Higgins Bus:
+
+| Track | Publisher | Consumers | Object content |
+|---|---|---|---|
+| `org/{org-id}/l4lb/{gateway-name}/pool` | L4 control plane | Operators, metrics pipeline, platform observability | Current pool membership — per-backend status (active / ejected), ejection reason (active-check-failure / outlier-detection), ejection time, expected restore time |
+
+This is a publication path only — Higgins Bus does not drive L4 pool membership. The L4 load balancer does not subscribe to Nate signals or any external health track to determine backend state. The flow is one-directional: L4 detects → L4 acts → L4 publishes.
+
+### Relationship to Nate
+
+[Nate](health-checks-nate.md) and L4 active health checks are complementary, not redundant:
+
+| | L4 active checks (Cilium) | Nate |
+|---|---|---|
+| **Scope** | Backends in this load balancer's pool | Any endpoint, from multiple geographic vantage points |
+| **Protocol** | TCP, HTTP, HTTPS | TCP, HTTP, HTTPS, TLS, DNS, gRPC, ICMP, UDP, SMTP |
+| **Latency to action** | Milliseconds — local decision | Seconds — consensus across regions before status changes |
+| **Output** | Backend ejected / restored in pool | HealthStatus published to Higgins Bus |
+| **Consumer** | Cilium — controls pool membership | GSLB, ALB, Total Load Balancing, operators |
+| **Failure mode** | Backend removed from rotation immediately | PoP or endpoint removed from platform routing |
+
+A customer can run both. Nate checks against the same origin that Cilium is load balancing to will catch degradation that Cilium's TCP-level probe misses (a server that accepts TCP connections but returns 500s on the application path). They are different instruments measuring different things.
+
+---
+
 ## Open Questions
 
 - **Resource model.** What Kubernetes-native resource type represents a customer L4 load balancer? Does it align with the Gateway API (GatewayClass, Gateway, TCPRoute) or use a Datum-specific type?
 - **IP assignment.** Does each L4 load balancer get a dedicated IP, or does it share a VIP with other listeners? How are IPs allocated and advertised?
 - **UFO integration.** How does the L4 LB discover UFO Compute backend IPs as unikernel instances start and stop? Does it read from the UFO control plane, or does the customer configure static pools?
 - **Quota limits.** How many L4 load balancers can a customer create? What limits apply to backend pool size, listener count, and connection rate?
-- **Health check signals to Higgins Bus.** Should L4 health check results be published as [Nate](health-checks-nate.md) signals on [Higgins Bus](signal-distribution-higgins-bus.md), or are they local to the LB?
+- **Health check signals to Higgins Bus.** Resolved — see Health Signals and Higgins Bus section above. L4 checks remain local; pool state changes are published to Higgins Bus for observability only.

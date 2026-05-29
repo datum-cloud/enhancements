@@ -9,9 +9,11 @@
 
 Traffic Intelligence should operate like "Total Football," the revolutionary strategy popularized by the Dutch national teams of the 1970s led by Johan Cruyff and AFC Ajax. Instead of locking players into rigid positions, Total Football allowed every player to fluidly move across the field, adapting dynamically to where they could create the most value. The concept later became a defining and winning philosophy in Ted Lasso, where flexibility, coordination, and shared awareness transformed the team.
 
-We believe modern networking should evolve the same way. Traffic intelligence signals such as geography, latency, ASN, congestion, sovereignty, health, and risk should not be trapped inside a single appliance or isolated service. These capabilities should move fluidly throughout the platform, becoming accessible anywhere decisions are made — across DNS, Anycast ingress, Layer 3 and 4 load balancing, Envoy Proxy routing, tunnels, AI gateways, and UFO workloads.
+We believe modern networking should evolve the same way. Traffic intelligence signals such as geography, latency, ASN, congestion, sovereignty, health, and risk should not be trapped inside a single appliance or isolated service. These capabilities should move fluidly throughout the platform, becoming accessible anywhere decisions are made — across DNS, Anycast ingress, Layer 3 and 4 load balancing, Envoy Proxy routing, tunnels, AI gateways, inference workers, and agent pipelines.
 
 We refer to this model as **Total Load Balancing** — a network architecture where routing and intelligence operate as a coordinated system rather than a collection of isolated features.
+
+As AI inference moves from centralized APIs toward distributed workloads — workers that need to be discovered, models that may or may not be warm, agent pipelines handing off between stages — the routing problem extends naturally. Model locality (which worker has the required model loaded) and compute availability (which PoP has spare GPU capacity) become routing signals alongside geography and health. The same decision layer that routes a user to the nearest healthy PoP routes an inference request to the worker best positioned to serve it. The Total Football principle holds whether the ball is a TCP connection or an inference job.
 
 ---
 
@@ -27,7 +29,7 @@ Total Load Balancing closes that gap: a signal-driven decision layer that makes 
 
 ## What Total Load Balancing Is
 
-Total Load Balancing is the decision layer that sits between inbound traffic and Datum's edge infrastructure. It collects, maintains, and distributes signals about users, paths, and infrastructure — then makes those signals available to every system that needs to make a routing or policy decision.
+Total Load Balancing is the decision layer that sits between inbound traffic and Datum's edge infrastructure. It collects, maintains, and distributes signals about users, paths, and infrastructure — then makes those signals available to every system that needs to make a routing or policy decision. For inference-bound traffic, the signal set extends: model locality and compute availability join geography and health as inputs to the routing decision. The decision layer is the same; the signal inputs reflect the workload type.
 
 The output at any given component is a **decision**: which PoP, which upstream, allow or block, which inference endpoint — and why.
 
@@ -105,6 +107,7 @@ Each Total Load Balancing project extends the track namespace:
 | RTT, Packet Loss, Congestion | TBD | TBD |
 | Sovereignty, Risk | TBD | TBD |
 | Model Locality, Compute Availability | TBD | TBD |
+| Inference and Agent Coordination | See [Higgins Bus](signal-distribution-higgins-bus.md) — Inference and Agent Workloads namespace | TBD |
 
 Track namespaces are additive — a new signal type requires no changes to existing relay infrastructure or existing subscribers. See [Higgins Bus](signal-distribution-higgins-bus.md) for the full transport design.
 

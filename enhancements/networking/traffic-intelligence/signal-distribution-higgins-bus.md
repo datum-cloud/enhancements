@@ -8,6 +8,8 @@
 
 Higgins Bus is the pub/sub transport layer for Total Load Balancing, built on MoQ Transport (MOQT). It carries signals — geo data, named IP lists, and future routing intelligence — from authoritative sources to every edge PoP and consumer in near real-time.
 
+The decision to build on MOQT reflects a broader conviction about where this protocol is heading. MoQ is emerging as a foundation layer not just for platform coordination — routing signals, health state, geo data — but for the AI workloads that will run alongside them: token streaming from inference workers, worker discovery without a registry, job scheduling across a distributed compute fleet, and agent-to-agent pipeline handoffs. These are the same fan-out and coordination problems, carrying different payloads. Building Higgins Bus on MOQT now means the relay infrastructure established here extends naturally to serve inference and agent use cases as they mature — one fabric, not two systems built side by side.
+
 ---
 
 ## Why MOQT
@@ -67,6 +69,20 @@ Each subsequent Total Load Balancing project extends the namespace:
 | `platform/compute/{pop-id}` | Compute Availability |
 
 Track namespaces are additive — adding a new signal type requires no changes to existing relay infrastructure or existing subscribers.
+
+### Inference and Agent Workloads
+
+Higgins Bus is not limited to routing signals. The same relay infrastructure extends to inference management and agent-to-agent communication — the same fan-out and coordination problems as Total Load Balancing, carrying different payloads. These namespaces are reserved as the inference layer matures; track definitions will be refined as implementation begins.
+
+| Track | Publisher | Consumers | Object content |
+|---|---|---|---|
+| `platform/inference/capacity/{model-id}/{region}/{worker-id}` | Inference worker | AI gateway, job schedulers | Worker endpoint, current load %, max concurrent jobs — TTL acts as heartbeat; a dead worker disappears automatically |
+| `platform/inference/queue/{model-id}` | Job coordinator | Inference workers | Job payload — prompt, parameters, callback address, priority, TTL; expired unclaimed jobs are re-queued by coordinator |
+| `platform/model-locality/{model-id}/{worker-id}` | Inference worker | Schedulers, AI gateway | Model load state (warm / cold / loading), worker endpoint — lets schedulers avoid cold-start latency |
+| `{org}/inference/{request-id}/tokens` | Inference worker | Initiating client, downstream agents, logging pipeline | Token batch with sequence number; subscriber that loses connectivity resumes from last sequence number without re-inference |
+| `{org}/agents/{agent-id}/output/{job-id}` | Agent | Downstream agents, orchestrators, logging pipeline | Agent output object with sequence number; downstream agents subscribe directly — no orchestrator in the handoff path |
+
+The TTL model applies uniformly: a subscriber that loses connectivity enforces the last-received object until TTL expires, then falls back to a safe default. For capacity and queue tracks, the safe default is "no workers available / no jobs pending" — the scheduler waits rather than routing to a potentially stale endpoint.
 
 ---
 
@@ -144,10 +160,62 @@ PoPs connect to their regional relay. The relay receives each published object o
 
 ---
 
+## Durable Replay
+
+MOQT relays hold recent objects in memory but do not store message history. For most Higgins Bus use cases this is acceptable — the most recent geo snapshot, health status, or IP list is the authoritative current state, and intermediate updates missed during a brief outage are irrelevant. Current state is all that matters.
+
+Two cases where current-state-only is not sufficient:
+
+- **Extended outages** — a node offline for hours needs context to understand what changed during the gap, not just where things stand now. Incident review and post-mortem analysis depend on this.
+- **AI workloads** — agents performing anomaly detection, trend analysis, or incident correlation require access to signal history, not just the most recent value. This use case will grow as Higgins Bus expands to carry inference management signals.
+
+### Pattern
+
+An adapter subscribes to the relay as an ordinary MOQT subscriber and writes each received object to a time-series database: track namespace, sequence number, publish timestamp, and payload. The write is asynchronous — the adapter is not in the critical path for relay delivery.
+
+When a subscriber needs to bootstrap from history, it queries the TSDB for the relevant track namespace and time range, ordered by sequence number. After processing the historical records, it subscribes to the live relay starting from the sequence number immediately following the last TSDB record. The handoff is exact because both sides use the same sequence space — no gap, no overlap, no separate coordination step.
+
+```
+Historical query (TSDB)         Live relay
+  seq 1 ... seq 847             seq 848, 849 ...
+              └──── handoff ───┘
+```
+
+Every MoQ object already carries a monotonic sequence number. That is a natural join condition between the TSDB and the live relay — a property of the protocol that makes replay architecture cleaner than it would be with most alternatives.
+
+### Storage
+
+Signal data on Higgins Bus — health events, geo updates, IP list changes, capacity and model locality signals — is small, structured, time-stamped, and written at high volume. A time-series database with columnar storage handles this ingest rate without becoming a bottleneck and makes bounded time range queries efficient. "Give me everything on `platform/health/pop/#` between 14:00 and 14:30 UTC yesterday" is the natural query shape.
+
+Hydrolix is an early candidate for evaluation — a streaming analytics database built for high-volume time-series ingest that speaks SQL. No vendor is selected; evaluation is required before committing to a storage layer.
+
+### Retention per Signal Type
+
+Not all signal types have equal replay value. Retention windows should reflect this:
+
+| Signal type | Replay value | Suggested retention |
+|---|---|---|
+| PoP and endpoint health events | High — essential for incident review and post-mortem | 30–90 days |
+| Customer health checks | Medium — useful for customer-facing incident timelines | 30 days |
+| Inference capacity and model locality | Medium — trend analysis, scheduling tuning | 7–30 days |
+| Named IP list updates | Low — current state is authoritative; history useful mainly for audit | 7 days |
+| GeoDB version notifications | Very low — node should pull current snapshot; version history has minimal replay value | 7 days |
+
+### Operational Characteristics
+
+The TSDB is not in the critical path for live delivery. If unavailable:
+- Existing live subscribers are unaffected
+- New subscribers fall back to bootstrapping from current state only
+- Historical queries and analytics fail
+
+**Handoff edge case.** The TSDB retention window should exceed the relay's in-memory buffer by a meaningful margin. A recovering subscriber whose last known sequence number falls within the TSDB window but outside the relay buffer hands off cleanly. Beyond the TSDB retention window, the subscriber falls back to current state with no historical context. Calibrating the margin per signal type is part of the retention strategy above.
+
+---
+
 ## Caveats
 
 **IETF draft status.** MOQT is an active IETF draft, not a finalized RFC. The core object model, subscription semantics, and relay protocol have stabilized, but track namespace conventions and priority signaling are still evolving. Pin the moqstream implementation to a specific draft version and plan for an upgrade pass when the final RFC is published.
 
-**No durable replay.** MOQT relays do not provide durable message replay. A PoP that was offline for an extended period will receive the most recent object on reconnect but will not receive intermediate objects it missed. For named lists this is acceptable — the most recent object is always the full current state. For GeoDB deltas, a PoP that has missed a delta sequence falls back to pulling the full snapshot (see above).
+**No durable relay history.** MOQT relays do not store message history. The Durable Replay section above describes the time-series storage approach for subscribers that need historical context. For named lists, current state is always sufficient — the most recent object is the full authoritative state. For GeoDB deltas, a PoP that misses a delta sequence falls back to pulling the current full snapshot.
 
 **Object storage dependency.** The GeoDB hybrid model introduces a dependency on object storage for snapshot distribution. This is a deliberate trade-off: it keeps MOQT in its sweet spot (real-time, small-to-medium objects) while using the right tool for bulk artifact distribution.
