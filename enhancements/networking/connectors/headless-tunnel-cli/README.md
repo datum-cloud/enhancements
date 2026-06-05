@@ -57,33 +57,29 @@ datumctl already supports. The plugin invokes datumctl's credentials helper
 for both initial token acquisition and long-running token refresh, so a single
 installed tunnel can run for days or years without manual intervention.
 
-The plugin wraps the existing `datum-connect` Rust binary, which holds the
+The plugin wraps the existing [datum-connect][`datum-connect`] Rust binary, which holds the
 iroh data plane and the K8s control-plane integration. The Go plugin layer
 handles process lifecycle, configuration persistence, and service-manager
 integration; the Rust binary handles the tunnel itself.
 
 [datumctl]: https://github.com/datum-cloud/datumctl
+[datum-connect]: https://github.com/datum-cloud/app
 
 ## Motivation
 
-The Datum desktop application requires a display environment. That excludes
-a large set of legitimate Datum use cases:
+The only client-side application Datum has today which supports
+connectors and tunneling is the [datum-connect][desktop application].
+The desktop app requires a display environment. That
+excludes a large set of legitimate Datum use cases:
 
 - Headless servers (cloud VMs, on-prem infrastructure)
 - CI/CD pipelines
 - Container workloads
-- SSH-only remote machines
-- Automated infrastructure
 
-Operators who want a persistent tunnel on a server today have no supported
-path. They either run the GUI app in a degraded mode, cobble together
-workarounds, or do not use Datum at all. The system-service capability
-directly addresses the operational gap where tunnels need to survive reboots
-and run unattended — the same problem Docker and Podman solve for container
-workloads with `systemctl`.
+Operators who need a persistent connection to Datum on a server today
+have no solution.
 
-Without a headless CLI and service model, Datum is positioned as a developer
-convenience tool rather than as production infrastructure.
+[datum-connect]: https://github.com/datum-cloud/app
 
 ### Goals
 
@@ -93,6 +89,7 @@ convenience tool rather than as production infrastructure.
   today (label, endpoint, enabled state).
 - Users can run a tunnel in the foreground (blocking, logs to stdout/stderr)
   or detach it as a background daemon.
+- Users can run a tunnel and detach it as a background daemon.
 - Users can install a named tunnel as a persistent system service that
   auto-starts at boot, using the OS-native service manager (systemd on Linux,
   launchd on macOS, Windows Service Manager on Windows).
@@ -126,7 +123,7 @@ convenience tool rather than as production infrastructure.
 
 ## Proposal
 
-A new datumctl plugin, `datumctl-connect`, ships as a release of this
+A new datumctl plugin, `connect`, ships as a release of this
 repository and is registered in
 [datum-cloud/datumctl-plugins](https://github.com/datum-cloud/datumctl-plugins).
 The plugin binary bundles the existing `datum-connect` Rust binary in the
@@ -134,12 +131,13 @@ same release tarball. The Go plugin handles command-line surface, process
 lifecycle, and service-manager integration; the Rust binary runs the actual
 tunnel.
 
-The Rust binary is refactored to support a "plugin mode" in which it
-receives its bearer token via env var and renews it by invoking datumctl's
-credentials helper — never opening a browser, never running OIDC discovery,
-never writing OAuth state to disk. The datumctl credentials helper supports
-both interactive sessions and Datum Cloud service-account sessions
-transparently, so the same code path serves long-running unattended tunnels.
+The Rust code in the desktop app refactored to support a "plugin mode"
+in which it receives its bearer token via env var and renews it by
+invoking datumctl's credentials helper — never opening a browser,
+never running OIDC discovery, never writing OAuth state to disk. The
+datumctl credentials helper supports both interactive sessions and
+Datum Cloud service-account sessions transparently, so the same code
+path serves long-running unattended tunnels.
 
 ### User Stories
 
