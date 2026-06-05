@@ -87,8 +87,7 @@ have no solution.
   tunnels with no display environment.
 - The CLI exposes every tunnel configuration option the desktop UI exposes
   today (label, endpoint, enabled state).
-- Users can run a tunnel in the foreground (blocking, logs to stdout/stderr)
-  or detach it as a background daemon.
+- Users can run a tunnel in the foreground (blocking, logs to stdout/stderr).
 - Users can run a tunnel and detach it as a background daemon.
 - Users can install a named tunnel as a persistent system service that
   auto-starts at boot, using the OS-native service manager (systemd on Linux,
