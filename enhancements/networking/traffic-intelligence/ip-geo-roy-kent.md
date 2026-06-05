@@ -233,11 +233,23 @@ These components are hosted in UFO Compute. They each need geo context to enforc
 - Tetrate Proxy: injects geo headers into the service mesh so downstream microservices receive client context
 - WAF: applies geo-specific rule sets (e.g. stricter rules for high-risk countries, different bot thresholds by region)
 
+#### 8. Beard — DDoS Detection and Scrubbing
+
+[Beard](ddos-scrubbing-beard.md) uses geo data and named IP lists as direct inputs to its inline XDP/eBPF scrubbing layer at each PoP.
+
+- **Geo filtering:** Beard's XDP programs perform geo lookups against the PoP-local GeoDB replica. Customers can configure geo-based drop rules that Beard enforces at the XDP layer — at line rate, before packets enter the networking stack
+- **Named IP lists:** customer-curated block lists (`org/{org-id}/lists/{list-id}`) distributed via Higgins Bus are loaded directly into XDP eBPF maps. Updates propagate to enforcement within seconds of a customer write
+- **Datum threat intel lists:** Datum-managed lists of known attack infrastructure (botnet C2, amplification reflectors, anonymizing proxies) follow the same distribution path and apply across all customers
+
+- Input: client IP → geo lookup against PoP-local GeoDB; named list membership check against eBPF maps
+- Output: per-packet drop / pass decision at XDP layer
+- Key consideration: lookup must be sub-microsecond — the full GeoDB and named lists must be resident in PoP-local memory, not a remote call
+
 ---
 
 ## Distribution Architecture
 
-All seven consumers above need geo data, but they have different access patterns:
+All eight consumers above need geo data, but they have different access patterns:
 
 | Consumer | Latency need | Update tolerance | Deployment |
 |---|---|---|---|

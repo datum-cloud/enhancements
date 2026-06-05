@@ -88,6 +88,7 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 | [The Nate Project](health-checks-nate.md) | Health (Availability, Latency, Throughput) | Early definition |
 | [Jamie Tartt](gslb-jamie-tartt.md) | GSLB / DNS — geo + health-aware PoP steering | Early definition |
 | [Zava](envoy-routing-zava.md) | L7 routing — geo, health, policy, protocol | Early definition |
+| [The Beard Project](ddos-scrubbing-beard.md) | DDoS detection and scrubbing — inline XDP/eBPF, BGP FlowSpec, RTBH | Early definition |
 | TBD | RTT, Packet Loss, Congestion | Not started |
 | TBD | Sovereignty, Risk | Not started |
 | TBD | Model Locality, GPU Availability | Not started |

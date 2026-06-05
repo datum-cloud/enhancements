@@ -105,6 +105,8 @@ The integration path:
 
 **TTL behavior on failover:** When a PoP is removed from the answer set, clients that have already cached the old answer will continue routing to that PoP until the TTL expires. Short TTLs reduce this window but increase DNS query volume. TTL strategy needs to be defined.
 
+**DDoS-aware steering:** GSLB also subscribes to `platform/ddos/pop/{pop-id}` from [Beard](ddos-scrubbing-beard.md). When Beard reports a PoP as `mitigating` or `blackholed`, the control plane deprioritizes that PoP in DNS answers, steering new sessions to less-affected PoPs. This signal is distinct from Nate health — a PoP under active attack may show degraded health metrics without being infrastructure-failed. Treating these signals separately avoids incorrectly retiring a healthy PoP that is simply absorbing attack traffic.
+
 ---
 
 ## GeoDB Integration
