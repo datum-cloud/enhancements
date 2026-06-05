@@ -39,14 +39,15 @@ Signals are distributed to consumers using [Higgins Bus](signal-distribution-hig
 
 ## Load Balancing Stack
 
-Datum uses a two-layer load balancing architecture. Both layers consume Total Load Balancing signals to make informed routing decisions.
+Datum uses a three-layer load balancing architecture. Every layer consumes Total Load Balancing signals to make informed routing decisions.
 
 | Layer | Technology | Customer-Configurable | Scope |
 |---|---|---|---|
+| **DNS / GSLB** | [Jamie Tartt / PowerDNS](gslb-jamie-tartt.md) | Via `GeoSteeringPolicy` | Outermost steering layer — operates before any connection is established; routes users to the right PoP based on geography, health, and DDoS state |
 | **L4 (transport)** | [Dani Rojas / Cilium](l4-load-balancing-dani-rojas.md) | For compute targets | Routes TCP/UDP traffic to UFO Compute or other customer compute; platform-managed in front of Envoy |
-| **L7 (application)** | [Zava / Envoy](envoy-routing-zava.md) | Via delivery policies | HTTP/HTTPS routing, TLS termination, origin selection, header manipulation |
+| **L7 (application)** | [Zava / Envoy](envoy-routing-zava.md) | Via delivery policies | HTTP/HTTPS routing, TLS termination, WAF (Coraza), origin selection, header manipulation |
 
-See [Dani Rojas](l4-load-balancing-dani-rojas.md) for the Cilium design, customer configuration model, and relationship to the L7 layer. See [Zava](envoy-routing-zava.md) for the full Envoy routing feature map and integration details.
+See [Jamie Tartt](gslb-jamie-tartt.md) for the GSLB design, PowerDNS GeoIP backend, and health-aware failover. See [Dani Rojas](l4-load-balancing-dani-rojas.md) for the Cilium design and customer configuration model. See [Zava](envoy-routing-zava.md) for the full Envoy routing feature map and integration details.
 
 ---
 
@@ -65,6 +66,7 @@ Total Load Balancing is built from a growing set of signals, introduced across p
 | **Congestion** | TBD | Link utilization at candidate PoPs and upstream |
 | **Sovereignty** | TBD | Data residency and legal jurisdiction rules — hard constraints on path selection |
 | **Risk** | TBD | Reputation score of source IP/ASN — feeds fraud and bot decisions |
+| **DDoS / Attack State** | [Beard](ddos-scrubbing-beard.md) | Active attack state per PoP and per customer prefix — steers traffic away from PoPs under attack |
 | **Model Locality** | TBD | Where the required inference model is currently loaded |
 | **Compute Availability** | TBD | Utilization and capacity of GPU, CPU, and DPU resources at candidate compute nodes |
 
@@ -87,7 +89,8 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 | [The Roy Kent Project](ip-geo-roy-kent.md) | Geography, ASN, IP Type | In progress |
 | [The Nate Project](health-checks-nate.md) | Health (Availability, Latency, Throughput) | Early definition |
 | [Jamie Tartt](gslb-jamie-tartt.md) | GSLB / DNS — geo + health-aware PoP steering | Early definition |
-| [Zava](envoy-routing-zava.md) | L7 routing — geo, health, policy, protocol | Early definition |
+| [Dani Rojas](l4-load-balancing-dani-rojas.md) | L4 load balancing — Cilium, customer-configurable for compute targets | Early definition |
+| [Zava](envoy-routing-zava.md) | L7 routing — geo, health, WAF (Coraza), policy, protocol | Early definition |
 | [The Beard Project](ddos-scrubbing-beard.md) | DDoS detection and scrubbing — inline XDP/eBPF, BGP FlowSpec, RTBH | Early definition |
 | TBD | RTT, Packet Loss, Congestion | Not started |
 | TBD | Sovereignty, Risk | Not started |
@@ -108,6 +111,7 @@ Each Total Load Balancing project extends the track namespace:
 | RTT, Packet Loss, Congestion | TBD | TBD |
 | Sovereignty, Risk | TBD | TBD |
 | Model Locality, Compute Availability | TBD | TBD |
+| DDoS / Attack State | `platform/ddos/pop/{pop-id}`, `org/{org-id}/ddos/{prefix}` | [Beard](ddos-scrubbing-beard.md) |
 | Inference and Agent Coordination | See [Higgins Bus](signal-distribution-higgins-bus.md) — Inference and Agent Workloads namespace | TBD |
 
 Track namespaces are additive — a new signal type requires no changes to existing relay infrastructure or existing subscribers. See [Higgins Bus](signal-distribution-higgins-bus.md) for the full transport design.
