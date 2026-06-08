@@ -118,6 +118,12 @@ Track namespaces are additive — a new signal type requires no changes to exist
 
 ---
 
+## Roadmap
+
+See [total-load-balancing-roadmap.md](total-load-balancing-roadmap.md) for the phased delivery plan.
+
+---
+
 ## Related Areas
 
 - **[Dani Rojas](l4-load-balancing-dani-rojas.md)** — Cilium as the transport-layer LB; customer-configurable for compute targets
