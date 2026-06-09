@@ -15,6 +15,7 @@ latest-milestone: "v0.1"
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
+  - [End-to-end data path](#end-to-end-data-path)
   - [Execution Modes](#execution-modes)
   - [Architecture: Go Plugin + Rust Binary](#architecture-go-plugin--rust-binary)
   - [Auth Integration](#auth-integration)
@@ -252,6 +253,85 @@ We may publish an official image in a follow-up enhancement.
 | Cross-compiling Rust for Windows arm64 (tier-2 target) | Verify in CI before publishing the windows/arm64 manifest entry; omit from the first release if the build is unstable. |
 
 ## Design Details
+
+### End-to-end data path
+
+The tunnel runtime this CLI manages is one piece of a larger pipeline. It helps
+to see where it sits before getting into the daemon-internal details below.
+
+The two diagrams answer two separate questions: how a single HTTPS request
+reaches a service bound to `127.0.0.1` on the device, and how the cloud-side
+gateway learns which device to send it to in the first place.
+
+#### Per-request data flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Browser
+    participant DNS as Datum DNS
+    participant Envoy as Envoy<br/>(Datum edge)
+    participant Gateway as iroh-gateway<br/>(co-located w/ Envoy)
+    participant Relay as iroh-relay<br/>(fallback)
+    participant Listen as ListenNode<br/>(tunnel runtime, on device)
+    participant Local as Local service<br/>(127.0.0.1:PORT)
+
+    Browser->>DNS: resolve api.example.com
+    DNS-->>Browser: Datum anycast IP
+    Browser->>Envoy: HTTPS request
+    Note right of Envoy: terminate TLS,<br/>match HTTPRoute → connector,<br/>wrap in HTTP/2 CONNECT<br/>+ x-iroh-endpoint-id header
+    Envoy->>Gateway: HTTP/2 CONNECT (Unix socket)
+    Note right of Gateway: look up endpoint via DNS TXT,<br/>open iroh QUIC stream
+    alt direct path available
+        Gateway->>Listen: QUIC stream (iroh magicsock, P2P)
+    else NAT / firewall in the way
+        Gateway->>Relay: QUIC (TCP 443 / UDP 7842)
+        Relay->>Listen: relayed QUIC stream
+    end
+    Listen->>Local: HTTP/1.1 request
+    Local-->>Listen: HTTP/1.1 response
+    Listen-->>Gateway: response on stream
+    Gateway-->>Envoy: CONNECT body
+    Envoy-->>Browser: HTTPS response
+```
+
+Read it as one sentence: a browser hits HTTPS, DNS sends it to the Datum
+edge, Envoy terminates TLS and pipes a CONNECT over a Unix socket to
+iroh-gateway with the device's iroh endpoint ID in a header, the gateway
+opens an iroh QUIC stream to the device (direct if it can, via an
+iroh-relay if it can't), and the tunnel runtime on the device makes a plain
+HTTP call to the local service.
+
+#### Device discovery
+
+The gateway can only open that QUIC stream because the device has previously
+advertised itself.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Listen as ListenNode<br/>(tunnel runtime, on device)
+    participant PCP as Project Control Plane<br/>(kube API)
+    participant NSO as iroh-dns controller<br/>(NSO)
+    participant DNS as Datum DNS
+    participant Gateway as iroh-gateway
+
+    Note over Listen: at startup,<br/>load or generate iroh keypair
+    Listen->>PCP: heartbeat — publish endpoint ID,<br/>socket addresses, home relay
+    Note over PCP,NSO: watch ConnectorAdvertisement /<br/>HTTPProxy status
+    PCP-->>NSO: status update
+    NSO->>DNS: upsert TXT _iroh.&lt;endpoint-id&gt;.datumconnect.net.
+    Note over Listen,DNS: heartbeat repeats while the tunnel<br/>runs; DNS records are refreshed in place
+
+    Note over Gateway: ...later, when a request arrives:
+    Gateway->>DNS: TXT _iroh.&lt;endpoint-id&gt;.datumconnect.net.
+    DNS-->>Gateway: socket addresses + home relay
+    Note right of Gateway: iroh magicsock then picks<br/>direct vs. relayed path
+```
+
+This is what `HeartbeatAgent` and the kube-client portions of the runtime
+exist to do; they are not optional plumbing — without them, the gateway has
+nothing to dial.
 
 ### Execution Modes
 
