@@ -333,6 +333,21 @@ This is what `HeartbeatAgent` and the kube-client portions of the runtime
 exist to do; they are not optional plumbing — without them, the gateway has
 nothing to dial.
 
+The TTL on the TXT record (`IrohConnectorConfig.TTLSeconds` in NSO,
+default 30) is load-bearing for restart UX: if a tunnel restarts before
+the previous record's TTL expires, the gateway's resolver returns the
+stale answer and the new endpoint isn't reachable until it expires.
+Measured behaviour:
+
+| Scenario | Time from `datum-connect` start to proxy responding |
+|---|---|
+| Restart immediately after stop | ~30s (TTL-bound) |
+| Restart 35s after stop (TTL elapsed) | ~1s |
+
+The 30s floor is essentially the cached TTL counting down; control-plane
+plumbing (PCP heartbeat → NSO reconcile → DNSRecordSet → Envoy
+metadata) completes in well under a second in both cases.
+
 ### Execution Modes
 
 ```
