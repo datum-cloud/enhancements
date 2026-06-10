@@ -320,11 +320,11 @@ sequenceDiagram
     Listen->>PCP: heartbeat — publish endpoint ID,<br/>socket addresses, home relay
     Note over PCP,NSO: watch ConnectorAdvertisement /<br/>HTTPProxy status
     PCP-->>NSO: status update
-    NSO->>DNS: upsert TXT _iroh.&lt;endpoint-id&gt;.datumconnect.net.
-    Note over Listen,DNS: heartbeat repeats while the tunnel<br/>runs; DNS records are refreshed in place
+    NSO->>DNS: upsert TXT _iroh.<endpoint-id>.datumconnect.net.
+    Note over Listen,DNS: heartbeat repeats while the tunnel<br/>runs, DNS records are refreshed in place
 
     Note over Gateway: ...later, when a request arrives:
-    Gateway->>DNS: TXT _iroh.&lt;endpoint-id&gt;.datumconnect.net.
+    Gateway->>DNS: TXT _iroh.<endpoint-id>.datumconnect.net.
     DNS-->>Gateway: socket addresses + home relay
     Note right of Gateway: iroh magicsock then picks<br/>direct vs. relayed path
 ```
