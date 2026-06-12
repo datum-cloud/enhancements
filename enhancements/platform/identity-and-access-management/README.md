@@ -195,3 +195,5 @@ In the future we will also support the following formats to support additional
 use-cases.
 
 - `group:<group-email>` grants a group in the IAM system access to a role
+- `principal:<principal-uri>` grants a federated identity access to a role (see
+  [Workload Identity Federation](./workload-identity-federation/))
