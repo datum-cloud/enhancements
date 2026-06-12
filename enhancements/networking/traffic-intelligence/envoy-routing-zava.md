@@ -62,6 +62,7 @@ Envoy is platform-managed. Customers configure Envoy behavior through Datum deli
 | 17 | Policy Driven Routing | Integration Required | `ext_proc` (external processing) filter is the integration point for Datum policy engine; sovereignty, cost, and compliance constraints evaluated externally |
 | 18 | Observability Hooks | Integration Required | Native stats, access logs, and distributed tracing built in; requires wiring to Datum's OpenTelemetry pipeline and metrics system |
 | 19 | Request Timeout Management | Native | `timeout` and `idle_timeout` per route and cluster; `max_stream_duration` for streaming workloads; `per_try_timeout` on retry policies |
+| 20 | WAF — OWASP Rule Enforcement | Integration Required | Coraza WAF runs as a WebAssembly filter inside Envoy; implements OWASP ModSecurity Core Rule Set; inspects HTTP/HTTPS inline for injection, XSS, path traversal, and application-layer DDoS patterns |
 
 ---
 
@@ -159,6 +160,28 @@ The integration work is connecting these signals to Datum's observability pipeli
 - **Routing decision context:** Where routing decisions are influenced by geo context, Nate health signals, or policy evaluation, that context should be reflected in access log fields or trace attributes so operators can understand why a request was routed to a particular upstream.
 
 **Datum systems involved:** Datum metrics pipeline (scraping or push target), Datum log ingest pipeline, Datum tracing infrastructure (OpenTelemetry collector).
+
+---
+
+### 20. WAF — Coraza
+
+[Coraza](https://coraza.io) is an open-source WAF engine that runs as a WebAssembly filter inside Envoy, inspecting HTTP/HTTPS requests and responses inline without an external sidecar or additional network hop.
+
+**What Coraza provides:**
+
+| Capability | Detail |
+|---|---|
+| OWASP CRS | ModSecurity Core Rule Set — SQL injection, XSS, path traversal, RCE, protocol anomalies |
+| Custom rules | Datum and customer-defined rules in SecLang syntax alongside the CRS |
+| Request/response inspection | Headers, body, URI — full HTTP/HTTPS payload visibility |
+| Application-layer DDoS signals | HTTP flood patterns, scanner fingerprints, malformed request sequences |
+| Audit logging | Per-request rule match events for security analysis and incident response |
+
+**Integration path:** Coraza ships as a WASM binary (`coraza-proxy-wasm`) loaded into Envoy's HTTP filter chain via the `wasm` filter. The Datum control plane distributes Coraza's rule set and configuration to each PoP via the standard xDS mechanism or as a versioned artifact via Higgins Bus (same pattern as GeoDB snapshots).
+
+**Relationship to Beard:** Coraza's rule match events and request rate counters are the L7 signal source for [Beard](ddos-scrubbing-beard.md). When Coraza identifies HTTP flood or attack tool patterns, those signals flow to Beard's mitigation control plane, which can escalate to L3/L4 enforcement at the XDP layer — blocking attacking IPs before their packets reach Envoy.
+
+**Datum systems involved:** Datum control plane (rule set distribution), Beard mitigation control plane (L7 signal consumer), Datum log ingest pipeline (Coraza audit log events).
 
 ---
 

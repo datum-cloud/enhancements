@@ -251,6 +251,9 @@ All probe measurements (raw latency samples, availability counts, throughput obs
 | [Galactic VPC](../research/galactic-vpc/README.md) | PoP health | Excludes degraded paths from path computation |
 | [Connectors](../connectors/initial-proposal/README.md) | Endpoint health | Reflects target health state for connector-backed upstreams |
 | Metrics / Observability | All probe measurements | Time-series retention for dashboards, alerting, capacity analysis |
+| [Beard](ddos-scrubbing-beard.md) | PoP health (context) | Distinguishes attack-induced degradation from infrastructure failure — see DDoS Context note below |
+
+**DDoS Context.** A PoP absorbing a large volumetric attack will often exhibit elevated latency, dropped probes, and reduced availability — the same signals Nate uses to mark a PoP as DEGRADED or UNHEALTHY. Consumers that act on Nate health signals (GSLB, ALB, Total Load Balancing) should correlate against Beard's `platform/ddos/pop/{pop-id}` track before concluding a PoP has failed. A PoP that is `mitigating` per Beard but `DEGRADED` per Nate is under attack, not broken — the appropriate response is DDoS-aware traffic steering, not infrastructure failover. Nate does not suppress or modify its signals during an attack; interpretation in attack context is the consumer's responsibility.
 
 ### Customer Access
 
