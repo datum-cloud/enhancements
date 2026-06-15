@@ -57,6 +57,19 @@ The [Nate Project](health-checks-nate.md) introduces health signals — availabi
 
 **Metrics path:** probe measurements (raw latency samples, availability counts, throughput) are also written to the Datum metrics pipeline in parallel with Higgins Bus publication. The metrics path serves dashboards and alerting; Higgins Bus serves real-time routing decisions.
 
+### The Beard Project
+
+[Beard](ddos-scrubbing-beard.md) introduces DDoS attack state as a platform signal. Two tracks carry attack information — one for platform-wide routing consumers, one for per-customer alerting.
+
+| Track | Publisher | Consumers | Object content |
+|---|---|---|---|
+| `platform/ddos/pop/{pop-id}` | Beard control plane | GSLB, Total Load Balancing, Ops | Attack state (clean / elevated / mitigating / blackholed), attack class, intensity (bps/pps), active mitigation mode, affected prefixes |
+| `org/{org-id}/ddos/{prefix}` | Beard control plane | Customer systems, alerting pipeline | Per-prefix attack state, mitigation mode, estimated traffic impact, start time |
+
+**Publish triggers:** objects are published immediately on any attack state transition and on a heartbeat interval during active attacks so consumers can detect a stalled publisher.
+
+**GSLB consumer note:** when a PoP transitions to `mitigating` or `blackholed`, GSLB deprioritizes that PoP in DNS answer sets, routing new sessions to less-affected PoPs. This is a distinct signal path from Nate health — a PoP under attack may appear degraded in Nate's health view; Beard's signal provides the attack context that distinguishes attack-induced degradation from infrastructure failure.
+
 ### Future Projects
 
 Each subsequent Total Load Balancing project extends the namespace:
