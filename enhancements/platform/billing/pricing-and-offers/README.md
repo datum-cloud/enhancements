@@ -42,6 +42,7 @@ latest-milestone: "v0.x"
 - [Implementation History](#implementation-history)
 - [Drawbacks](#drawbacks)
 - [Alternatives](#alternatives)
+- [Competitive Research](#competitive-research)
 
 ## Summary
 
@@ -967,6 +968,71 @@ scoped resource.
   quota driver for account-level pricing would couple two different scopes and
   require invasive renames. Rejected (see Drawbacks).
 
+## Competitive Research
+
+The table below summarises how major billing systems model the same concepts,
+verified against primary sources (API references, proto definitions, and open
+source implementations).
+
+### Primitive mapping
+
+| Platform | Meter definition | Per-meter pricing | Plan / offer | Account assignment | Quota gate? |
+|---|---|---|---|---|---|
+| **GCP** | `ServiceConfiguration` → `MonitoredResource` + DELTA metrics | `services.skus.list` → `pricingExpression` with `tieredRates` | SKU category (resourceFamily/resourceGroup) + account-level custom pricing API | Committed Use Discounts, negotiated contracts | No — access is separate from billing |
+| **AWS** | `serviceCode` + `attributes` block in Price List JSON | `terms.OnDemand` / `terms.Reserved` blocks per SKU | "Offer" in AWS parlance = the `terms` section; one product → many pricing terms | Savings Plans; Marketplace contract | Marketplace only: `GetEntitlements` call required before serving |
+| **Azure Marketplace** | Dimension declared per Plan with `includedQuantity` | Flat-rate or per-dimension overage via Metering Service API | `Offer` (top-level) → `Plan` (variant with independent pricing) | `Subscription` object via SaaS Fulfillment API (`Subscribed` state) | Yes — `RegisterUsage` must succeed at container start |
+| **Amberflo** | `Meter` (CloudEvents aggregation) | `ProductPlan` → price phases per meter | `ProductPlan` bundles meters + cadence + feature limits | `CustomerPlan` = ProductPlan instance with effective date + overrides | Optional per-plan feature entitlements |
+| **Stripe** | `Meter` (event aggregation) | `Price` object (flat, per-seat, metered, tiered) attached to `Product` | `Product` + set of `Price`s; `PricingTable` groups products | `Subscription` → activates `ActiveEntitlement` per mapped feature | No — Stripe documents entitlements, does not enforce them |
+| **OpenMeter** | `Meter` (CloudEvents) | `RateCard` (tiered, volume, flat, usage) per `Feature` | `Plan` bundles RateCards with a billing cadence | `Subscription` + `Entitlement` (real-time quota balance) | Yes — `Entitlement` tracks balance; grace period configurable |
+| **Zuora** | (external metering) | `ProductRatePlanCharge` (one-time / recurring / usage) | `ProductRatePlan` bundles charges; `Product` is the catalog entry | `Subscription` → `Invoice` | No |
+
+### Key findings
+
+**"Service config owns the meter, billing owns pricing" is production-proven at
+Google scale.**  
+GCP's Service Infrastructure uses exactly this split: a `ServiceConfiguration`
+declares `MonitoredResource` types and DELTA metrics; Cloud Billing then
+attaches SKU pricing to those meters. Services call the Service Control API to
+report usage; the rating engine prices it. This directly validates the
+`ServiceConfiguration → ServicePricing` chain in this enhancement.
+([source](https://cloud.google.com/service-infrastructure/docs/reporting-billing-metrics))
+
+**Offer → BillingEntitlement is a well-established pattern.**  
+Amberflo's `ProductPlan → CustomerPlan`, Azure's `Offer → Plan → Subscription`,
+AWS Marketplace's entitlement contract, and Stripe's `Product → ActiveEntitlement`
+all follow the same shape: a reusable pricing template (the Offer) plus a
+per-account assignment record (the BillingEntitlement). The assignment record is
+what activates metered invoicing and optional access gating.
+
+**`chargeTypes` (Usage / OneTime / Recurring) maps directly to Zuora's
+`ProductRatePlanCharge` and Azure's dimension model.**  
+Every major billing system distinguishes these three charge types. Zuora's
+`ProductRatePlanCharge.type` is the canonical reference implementation.
+
+**Quota gating tied to billing is opt-in, not universal.**  
+GCP, Stripe, Zuora, and Lago do not enforce access at the billing layer — they
+document entitlements and leave enforcement to the application. Only AWS
+Marketplace (container products) and Azure Marketplace mandate an entitlement
+check at startup. OpenMeter and Schematic explicitly provide enforcement as a
+separate layer. This validates the `spec.billing.quotaGating: BillingEntitlement`
+opt-in approach: making it the default would be out of step with how the wider
+ecosystem works.
+
+**K8s-native BillingEntitlement has direct prior art.**  
+The [ControlPlane flux-operator][flux-operator] ships an `EntitlementReconciler`
+that watches Namespaces, calls `RegisterUsage()` to obtain an entitlement token,
+stores it in a Secret, and requeues every 30 minutes to re-verify. On failure it
+purges the Secret, triggering downstream feature gating. The same pattern —
+entitlement as a Kubernetes-reconciled resource with an external billing authority
+— is what this design proposes for `BillingEntitlement`.
+
+**GCP Marketplace for K8s chose Secrets + ConfigMaps over CRDs.**  
+The [GCP Marketplace K8s billing integration][gcp-marketplace-k8s] injects a
+Reporting Secret (consumer-id, entitlement-id, reporting-key) at deploy time and
+uses a sidecar metering agent instead of CRDs. That trade-off (simplicity over
+formal resource hierarchy) is documented so future reviewers can revisit whether
+the CRD approach in this enhancement remains the right call as complexity grows.
+
 <!-- Link references -->
 
 [scope]: ../initial-scope.md
@@ -975,3 +1041,5 @@ scoped resource.
 [748]: https://github.com/datum-cloud/enhancements/issues/748
 [758]: https://github.com/datum-cloud/enhancements/issues/758
 [759]: https://github.com/datum-cloud/enhancements/issues/759
+[flux-operator]: https://glama.ai/mcp/servers/@controlplaneio-fluxcd/flux-operator/blob/06e1897fcf773428155c5f6b9aadb5538169bb5c/internal/controller/entitlement_controller.go
+[gcp-marketplace-k8s]: https://github.com/GoogleCloudPlatform/marketplace-k8s-app-tools/blob/master/docs/billing-integration.md
