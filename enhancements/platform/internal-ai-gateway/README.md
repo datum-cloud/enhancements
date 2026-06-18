@@ -38,10 +38,10 @@ Beyond the immediate cost problem, Datum's product direction involves running an
 
 ### Goals
 
-- **Single SSO-gated endpoint** — one hostname, one identity provider (staging Zitadel), one org-owned provider quota shared across staff.
+- **Single SSO-gated endpoint** — one hostname, one identity provider (Google), one org-owned provider quota shared across staff.
 - **Two backends** — Anthropic via `AIServiceBackend` with `schema: Anthropic` and `BackendSecurityPolicy` of type `AnthropicAPIKey`; Qwen running on internal compute via an `AIServiceBackend` with an OpenAI-compatible schema.
 - **JWT validation at the edge** — `SecurityPolicy` attached to the `HTTPRoute` so every path is gated; no unauthenticated bypass route.
-- **Two interchangeable client flows** — Flow A (`datumctl auth get-token` via `apiKeyHelper`, suitable for any client that can shell out) and Flow B (native OIDC app with PKCE, for clients that speak OIDC directly).
+- **Two interchangeable client flows** — Flow A (`gcloud auth print-identity-token` via `apiKeyHelper`, suitable for any client that can shell out) and Flow B (native OIDC app with PKCE against Google, for clients that speak OIDC directly).
 - **Provider credentials never on client machines** — keys are held in GCP Secret Manager, synced into cluster via External Secrets + Workload Identity, injected upstream-only by `BackendSecurityPolicy`.
 - **Upstream-only configuration** — every resource is a stock Envoy AI Gateway, Envoy Gateway, or Gateway API CRD. Not building on top in the first iteration.
 
@@ -58,22 +58,22 @@ Beyond the immediate cost problem, Datum's product direction involves running an
 When a request arrives, the gateway:
 
 1. Terminates TLS using a cert-manager-issued certificate.
-2. Validates the `Authorization: Bearer <jwt>` against the configured Zitadel `SecurityPolicy` (issuer, audience, remote JWKS).
+2. Validates the `Authorization: Bearer <jwt>` against the configured Google `SecurityPolicy` (issuer, audience, remote JWKS).
 3. Strips the client `Authorization` header.
 4. Injects the org-owned provider credential from the matching `BackendSecurityPolicy`.
 5. Establishes a hostname-verified TLS connection to the upstream provider (`BackendTLSPolicy`) and proxies the request.
 
 ### User Stories
 
-#### Story 1: Staff engineer connects Claude Code via datumctl
+#### Story 1: Staff engineer connects Claude Code via gcloud
 
-An engineer with `datumctl` installed and an active staging login creates a Claude Code profile pointing at the internal gateway:
+An engineer with `gcloud` installed and authenticated as their `@datum.net` account creates a Claude Code profile pointing at the internal gateway:
 
 ```bash
 mkdir -p ~/datum-claude/
 cat > ~/datum-claude/settings.json <<'EOF'
 {
-  "apiKeyHelper": "datumctl auth get-token",
+  "apiKeyHelper": "gcloud auth print-identity-token --audiences=<google-oauth-client-id>",
   "env": {
     "ANTHROPIC_BASE_URL": "https://staging-internal-ai-gateway.datum.net/anthropic",
     "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "1800000"
@@ -83,11 +83,11 @@ EOF
 CLAUDE_CONFIG_DIR=~/datum-claude claude
 ```
 
-Claude Code invokes `datumctl auth get-token` every 30 minutes, attaches the resulting JWT as a bearer token, and the gateway substitutes the org Anthropic key upstream. The engineer's personal key is no longer used; usage appears under the org account.
+Claude Code invokes the helper every 30 minutes, attaches the resulting Google ID token as a bearer token, and the gateway substitutes the org Anthropic key upstream. The engineer's personal key is no longer used; usage appears under the org account.
 
 #### Story 2: Staff engineer connects a native desktop client
 
-A desktop AI tool that speaks OIDC natively initiates the authorization-code flow against the Flow B OIDC application, opens the system browser, the engineer authenticates with Zitadel, and PKCE completes on a loopback redirect. The tool stores the resulting JWT and refresh token locally. Subsequent requests refresh the token as needed. From the gateway's perspective this is indistinguishable from Flow A — both produce JWTs against the same audience.
+A desktop AI tool that speaks OIDC natively initiates the authorization-code flow against the Flow B OIDC application, opens the system browser, the engineer authenticates with their `@datum.net` Google account, and PKCE completes on a loopback redirect. The tool stores the resulting Google ID token and refresh token locally. Subsequent requests refresh the token as needed. From the gateway's perspective this is indistinguishable from Flow A — both produce Google ID tokens against the same audience.
 
 #### Story 3: Provider key rotation
 
@@ -101,7 +101,7 @@ The same applies to the Qwen backend: if the tunnel endpoint is unreachable or r
 
 #### Story 5: JWT expiry mid-session
 
-An engineer's JWT expires during a long Claude Code session. `datumctl auth get-token` detects the expiry on the next invocation and performs a silent refresh. The client retries with the new token; the user sees a brief delay and no interactive prompt.
+An engineer's Google ID token expires during a long Claude Code session. On the next `apiKeyHelper` invocation, `gcloud auth print-identity-token` transparently refreshes the underlying OAuth 2.0 credentials and issues a new ID token. The client retries with the new token; the user sees a brief delay and no interactive prompt.
 
 ### Risks and Mitigations
 
@@ -109,9 +109,9 @@ An engineer's JWT expires during a long Claude Code session. `datumctl auth get-
 | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Shared Anthropic key leakage.** The key is a single high-value credential in cluster. | Stored in GCP Secret Manager. Synced via External Secrets + Workload Identity. Never written to Git. Injected upstream-only by `BackendSecurityPolicy`; never echoed in responses. Client `Authorization` header is stripped before upstream. |
 | **Unauthenticated access.** A misconfigured route could expose the provider key.        | `SecurityPolicy` is attached to the `HTTPRoute` itself — every path is gated. No bypass route exists. The hostname is not publicly advertised.                                                                                                |
-| **Token replay across environments.**                                                   | JWT audience is bound to the staging Datum Cloud project ID; the JWKS URI points at the staging issuer. Tokens from any other project or environment fail validation.                                                                         |
+| **Token replay across environments.**                                                   | JWT audience is bound to the Google OAuth client ID registered for this gateway. Tokens issued for any other audience fail validation.                                                                                                         |
 | **Large-payload abuse.** The 50 MiB buffer could be used to exhaust proxy memory.       | Accepted for the current trust radius; will be tightened once usage data is available.                                                                                                                                                        |
-| **Desktop refresh token theft.** Flow B issues refresh tokens to desktop clients.       | The native OIDC app is a public client with PKCE and loopback-only redirect URIs (OAuth 2.1 / RFC 8252). Refresh tokens can be revoked at Zitadel.                                                                                            |
+| **Desktop refresh token theft.** Flow B issues refresh tokens to desktop clients.       | The native OIDC app is a public client with PKCE and loopback-only redirect URIs (OAuth 2.1 / RFC 8252). Refresh tokens can be revoked via the Google OAuth app console or Google Workspace admin.                                            |
 | **Cost runaway on the shared org account.**                                             | Bounded by Anthropic's per-account limits; Anthropic billing alerts are the leading indicator.                                                                                                                                                |
 | **Pre-1.0 upstream CRD shapes.**                                                        | We track upstream and contribute back rather than forking. The blast radius of a breaking change is one staging cluster.                                                                                                                      |
 
@@ -131,7 +131,7 @@ An engineer's JWT expires during a long Claude Code session. `datumctl auth get-
 - `ClientTrafficPolicy` — 50 MiB buffer limit for LLM payloads
 - `ExternalSecret` — syncs Anthropic key from GCP Secret Manager hourly
 
-**Done looks like:** staff engineers can point Claude Code, Claude Desktop, OpenCode, or Pi at the gateway using either `datumctl auth get-token` or a native OIDC flow; requests reach both Anthropic and Qwen; provider credentials never leave the cluster.
+**Done looks like:** staff engineers can point Claude Code, Claude Desktop, OpenCode, or Pi at the gateway using either `gcloud auth print-identity-token` or a native OIDC flow; requests reach both Anthropic and Qwen; provider credentials never leave the cluster.
 
 **Intentionally not wired up in v1:** per-user rate limiting, prompt caching, model deflection, additional providers, and any production deployment.
 
@@ -140,7 +140,7 @@ An engineer's JWT expires during a long Claude Code session. `datumctl auth get-
 ```
 Desktop / CLI client
         │
-        │  HTTPS, Bearer <Zitadel JWT>
+        │  HTTPS, Bearer <Google ID token>
         ▼
    staging-internal-ai-gateway.datum.net  ──►  Envoy AI Gateway (staging, mcp-gateway fleet)
                                         │
@@ -313,12 +313,12 @@ spec:
       name: ai-gateway-route
   jwt:
     providers:
-      - name: datum-cloud-auth
-        issuer: https://auth.staging.env.datum.net
+      - name: google
+        issuer: https://accounts.google.com
         audiences:
-          - "<staging-datum-cloud-project-id>"
+          - "<google-oauth-client-id>"
         remoteJWKS:
-          uri: https://auth.staging.env.datum.net/oauth/v2/keys
+          uri: https://www.googleapis.com/oauth2/v3/certs
 ```
 
 #### `ClientTrafficPolicy`
@@ -362,28 +362,18 @@ spec:
 
 ### Authentication and Authorization
 
-All access is gated by staging Zitadel. JWTs are validated against the issuer's JWKS endpoint and pinned to the staging Datum Cloud project audience.
+All access is gated by Google as the identity provider. Google ID tokens are validated at the edge against Google's JWKS endpoint and pinned to the OAuth client ID audience registered for this gateway.
 
-The authorization boundary in v1 is "is Datum staff." JWT validation alone is not sufficient — the staging project contains accounts beyond Datum staff — so an additional enforcement mechanism is required. The options are unresolved:
+The authorization boundary in v1 is "is Datum staff." This is enforced at authentication time by restricting the Google OAuth app to the `@datum.net` hosted domain (`hd`) in the Google Cloud Console. Only accounts in the Datum Google Workspace can obtain tokens for this client ID — no allowlist, no groups claim, no per-request `ext_authz` service. The `hd` claim appears in issued tokens as evidence of this restriction but is not itself the enforcement mechanism; the OAuth app domain restriction is.
 
-<<[UNRESOLVED how to restrict access to Datum staff]>>
+**Rejected alternatives:** email allowlist (manual maintenance burden), JWT `groups` claim (token bloat concerns, explored in [milo-os/zitadel-provider#115](https://github.com/milo-os/zitadel-provider/pull/115)), `is_staff` boolean claim (same mechanism as groups, less flexible), `ext_authz` (requires a new service to build and operate), Zitadel-as-IdP with claim injection (all of the above complexity without solving the staff boundary cleanly).
 
-The staging Zitadel project contains more than Datum staff, so JWT validation alone is not a sufficient boundary. Options:
+**Client flows.** Two interchangeable mechanisms produce Google ID tokens the gateway accepts:
 
-- **Email allowlist** — check the `email` claim already present in every Zitadel JWT. No new infrastructure; requires manual maintenance as staff changes.
-- **JWT `groups` claim** — check a claim encoding Milo `GroupMembership`, injected via a Zitadel `preaccesstoken` action. Explored in [milo-os/zitadel-provider#115](https://github.com/milo-os/zitadel-provider/pull/115) but token bloat concerns were raised.
-- **JWT `is_staff` boolean claim** — same mechanism as groups but a single boolean rather than a membership list, avoiding the bloat concern. Less flexible if finer grained access is needed later.
-- **`ext_authz`** — Envoy calls an external service per request to make the access decision, enabling real-time membership checks without baking anything into the token. Requires a new service to build and operate.
-- **Google as IdP** — replace Zitadel with Google OAuth; `@datum.net` domain restriction is enforced at authentication time. Breaks `datumctl`-based auth flows.
+- **Flow A — `gcloud` identity token.** Clients invoke `gcloud auth print-identity-token --audiences=<google-oauth-client-id>` to fetch a fresh token per request or TTL. Requires `gcloud` installed and authenticated as a `@datum.net` account. Suitable for any client that can shell out for credentials.
+- **Flow B — native OIDC application with PKCE.** A public OAuth 2.0 client registered in Google Cloud Console: authorization-code flow with PKCE, loopback redirect URIs only, refresh tokens enabled. Follows the OAuth 2.1 native-app pattern ([RFC 8252](https://datatracker.ietf.org/doc/html/rfc8252)). The OAuth client ID is published via a ConfigMap so in-cluster components can reference it without hard-coding.
 
-<<[/UNRESOLVED]>>
-
-**Client flows.** Two interchangeable mechanisms produce JWTs the gateway accepts:
-
-- **Flow A — `datumctl` OIDC application.** Clients invoke `datumctl auth get-token` to fetch a fresh JWT per request or TTL. Suitable for any client that can shell out for credentials.
-- **Flow B — native OIDC application with PKCE.** A public OIDC client provisioned in staging Zitadel: authorization-code flow with PKCE, loopback redirect URIs only, refresh tokens enabled. Follows the OAuth 2.1 native-app pattern ([RFC 8252](https://datatracker.ietf.org/doc/html/rfc8252)). The client ID is published via a ConfigMap so in-cluster components can reference it without hard-coding.
-
-Both flows produce JWTs against the same audience; the choice is determined by client capability.
+Both flows produce Google ID tokens against the same audience; the choice is determined by client capability.
 
 ### Token Handling
 
