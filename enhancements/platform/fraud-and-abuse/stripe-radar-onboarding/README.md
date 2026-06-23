@@ -22,10 +22,8 @@ latest-milestone: "v0.0"
   - [Option B: MaxMind plus Stripe Radar](#option-b-maxmind-plus-stripe-radar)
   - [stripe-provider: Radar capture and projection](#stripe-provider-radar-capture-and-projection)
   - [Billing service: payment-method side effects](#billing-service-payment-method-side-effects)
-  - [Cloud portal: CRD-driven card collection](#cloud-portal-crd-driven-card-collection)
   - [Fraud service: trigger and provider adapters](#fraud-service-trigger-and-provider-adapters)
   - [Policy examples](#policy-examples)
-  - [Platform access gating](#platform-access-gating)
 - [Cross-repo work breakdown](#cross-repo-work-breakdown)
 - [Production readiness review questionnaire](#production-readiness-review-questionnaire)
   - [Feature enablement and rollback](#feature-enablement-and-rollback)
@@ -512,51 +510,11 @@ func isPaymentMethodAttached(a *billingv1alpha1.BillingAccount) bool {
 When the condition flips False to True, fraud creates `FraudEvaluation` if a policy
 lists `BillingPaymentMethodAttached`. No direct billing-to-fraud RPC.
 
-### Cloud portal: CRD-driven card collection
-
-The portal is provider-aware. It does not call billing REST endpoints for SetupIntent.
-Flow from [payment-methods.md](https://github.com/milo-os/billing/blob/main/docs/enhancements/payment-methods.md):
-
-1. Create `PaymentMethod` (class injected by webhook).
-2. Watch `StripePaymentMethod` until `status.setupIntent.clientSecret` is set.
-3. Load publishable key from `StripeProviderConfig` via `PaymentMethodClass.spec.parametersRef`.
-4. Confirm with Stripe.js.
-5. Watch `PaymentMethod.status.phase` until `Active`.
-6. Patch `BillingAccount.spec.defaultPaymentMethodRef` if needed.
-7. Watch `FraudEvaluation` or onboarding aggregate status.
-
-Illustrative portal code:
-
-```typescript
-// app/onboarding/payment-step.tsx (illustrative — CRD watch, not REST)
-async function waitForClientSecret(paymentMethodName: string, namespace: string): Promise<string> {
-  for (;;) {
-    const spm = await kubeGet("stripe.billing.miloapis.com/v1alpha1", "StripePaymentMethod", namespace, `${paymentMethodName}-stripe`);
-    const secret = spm?.status?.setupIntent?.clientSecret;
-    if (secret) return secret;
-    await sleep(1000);
-  }
-}
-
-async function confirmCard(stripe: Stripe, elements: StripeElements, clientSecret: string) {
-  const { error, setupIntent } = await stripe.confirmSetup({
-    elements,
-    clientSecret,
-    redirect: "if_required",
-  });
-  if (error) throw error;
-  return setupIntent;
-}
-
-async function waitForActivePaymentMethod(name: string, namespace: string) {
-  for (;;) {
-    const pm = await kubeGet("billing.miloapis.com/v1alpha1", "PaymentMethod", namespace, name);
-    if (pm?.status?.phase === "Active") return pm;
-    if (pm?.status?.phase === "Failed") throw new Error("payment method failed");
-    await sleep(1000);
-  }
-}
-```
+Portal integration for card collection and onboarding gating is tracked in
+[#762](https://github.com/datum-cloud/enhancements/issues/762) and follows the
+CRD watch flow in
+[payment-methods.md](https://github.com/milo-os/billing/blob/main/docs/enhancements/payment-methods.md).
+This doc does not specify portal implementation.
 
 ### Fraud service: trigger and provider adapters
 
@@ -649,30 +607,6 @@ Keep it for environments without payment collection.
 ### Policy examples
 
 See [Option A](#option-a-stripe-radar-only) and [Option B](#option-b-maxmind-plus-stripe-radar).
-
-### Platform access gating
-
-Portal watches fraud state after `PaymentMethodAttached`:
-
-```typescript
-async function waitForFraudDecision(userUID: string, timeoutMs = 30000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const evals = await kubeList("fraud.miloapis.com/v1alpha1", "FraudEvaluation", {
-      labelSelector: `fraud.miloapis.com/user=${userUID}`,
-    });
-    const latest = evals.items?.[0];
-    if (latest?.status?.phase === "Completed") {
-      return latest.status.decision as "NONE" | "REVIEW" | "DEACTIVATE";
-    }
-    await sleep(1000);
-  }
-  return "timeout";
-}
-```
-
-In OBSERVE mode, `REVIEW` still allows the user through; staff get alerts. AUTO mode
-blocks until approval.
 
 ## Cross-repo work breakdown
 
