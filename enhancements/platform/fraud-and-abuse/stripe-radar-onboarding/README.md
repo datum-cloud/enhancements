@@ -10,6 +10,7 @@ latest-milestone: "v0.0"
 - [Motivation](#motivation)
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
+- [Current state in the codebase](#current-state-in-the-codebase)
 - [Proposal](#proposal)
   - [User stories](#user-stories)
   - [Notes and constraints](#notes-and-constraints)
@@ -19,12 +20,13 @@ latest-milestone: "v0.0"
   - [Data we pass into fraud scoring](#data-we-pass-into-fraud-scoring)
   - [Option A: Stripe Radar only](#option-a-stripe-radar-only)
   - [Option B: MaxMind plus Stripe Radar](#option-b-maxmind-plus-stripe-radar)
-  - [Cloud portal: collecting the card](#cloud-portal-collecting-the-card)
-  - [Billing service: persisting payment signals](#billing-service-persisting-payment-signals)
-  - [Fraud controller: provider adapters](#fraud-controller-provider-adapters)
-  - [Triggering evaluation after payment setup](#triggering-evaluation-after-payment-setup)
+  - [stripe-provider: Radar capture and projection](#stripe-provider-radar-capture-and-projection)
+  - [Billing service: payment-method side effects](#billing-service-payment-method-side-effects)
+  - [Cloud portal: CRD-driven card collection](#cloud-portal-crd-driven-card-collection)
+  - [Fraud service: trigger and provider adapters](#fraud-service-trigger-and-provider-adapters)
   - [Policy examples](#policy-examples)
   - [Platform access gating](#platform-access-gating)
+- [Cross-repo work breakdown](#cross-repo-work-breakdown)
 - [Production readiness review questionnaire](#production-readiness-review-questionnaire)
   - [Feature enablement and rollback](#feature-enablement-and-rollback)
   - [Monitoring requirements](#monitoring-requirements)
@@ -36,129 +38,154 @@ latest-milestone: "v0.0"
 
 ## Summary
 
-Datum's current fraud pipeline runs at user creation with MaxMind and sanctions
-screening. That works for email and IP signals, but it misses the strongest signal we
-will have during onboarding: whether the card Stripe accepts is suspicious.
+Datum's fraud pipeline today runs at user creation with MaxMind. That catches email
+and session signals, but it runs before onboarding collects a payment method, so it
+misses card and Radar data entirely.
 
-This enhancement moves the primary fraud evaluation to after the user adds a payment
-method in the cloud portal. Stripe Radar supplies payment-side risk data. We can use
-Radar on its own, or feed Stripe fields into MaxMind's minFraud API alongside the
-existing identity signals.
-
-The onboarding UI is still in progress ([#762](https://github.com/datum-cloud/enhancements/issues/762)),
-and billing is not finished ([#763](https://github.com/datum-cloud/enhancements/issues/763)).
-This doc describes the backend and portal wiring so fraud scoring and payment collection
-land together instead of as two separate follow-ups.
+This enhancement moves the primary signup fraud evaluation to after a user confirms a
+payment instrument during onboarding. Stripe Radar supplies payment-side risk; MaxMind
+can consume the normalized card metadata the billing API already models. The work spans
+three repos (`billing`, a new `stripe-provider` service, and `fraud`) and follows the
+CRD-based payment architecture in the billing repo, not a REST billing API.
 
 Parent design: [Fraud and Abuse Prevention API](../README.md).
 
+Payment architecture (authoritative): [Payment Methods](https://github.com/milo-os/billing/blob/main/docs/enhancements/payment-methods.md) in the billing repository.
+
 ## Motivation
 
-Issue [#763](https://github.com/datum-cloud/enhancements/issues/763) already states the
-intent: payment methods at signup should improve fraud scoring. Issue [#737](https://github.com/datum-cloud/enhancements/issues/737)
-lists Stripe Radar research as an explicit deliverable. The v1 fraud API
-([#505](https://github.com/datum-cloud/enhancements/issues/505)) deliberately skipped
-payment data; `PaymentSubmitted` and `BillingProfile` sources were marked future work.
+Issue [#763](https://github.com/datum-cloud/enhancements/issues/763) states that payment
+methods at signup should improve fraud scoring. Issue [#737](https://github.com/datum-cloud/enhancements/issues/737)
+includes Stripe Radar research. The parent fraud enhancement ([#505](https://github.com/datum-cloud/enhancements/issues/505))
+deferred payment data to a later phase.
 
-Collecting a card during onboarding gives us billing country, card fingerprint, CVC
-check results, and Radar risk scores. Running fraud checks only at `UserCreated` means
-we score users before we have that data, then never re-score them when we do.
+The billing repo already defines `PaymentMethod`, `PaymentMethodClass`, and a
+provider-controller pattern where **`stripe-provider`** owns SetupIntents and
+`StripePaymentMethod` CRDs. The fraud repo already has a
+`BillingPaymentMethodAttached` trigger on branch
+`feat/billing-payment-method-fraud-trigger`. This doc connects those pieces and adds
+Radar-specific fields where they belong: on the Stripe provider CRD, projected into
+billing account status for the fraud resolver.
 
 ### Goals
 
-- Run the main fraud pipeline after a user successfully attaches a payment method during
-  onboarding, not at account creation.
-- Add a built-in `stripe-radar` FraudProvider adapter (or equivalent webhook provider)
-  that reads Radar outcomes from Stripe objects we already create for billing.
-- Pass Stripe payment fields into MaxMind when both providers are enabled.
-- Keep sanctions screening (watchman) on the pipeline; it does not depend on payment data.
-- Start in OBSERVE mode, same as the existing fraud rollout.
-- Block or flag platform access based on `FraudEvaluation` before the user leaves the
-  onboarding loading step.
+- Run the main fraud pipeline after payment method attach, not at `UserCreated`.
+- Implement Stripe integration in **`stripe-provider`**, not in the billing operator.
+- Capture Radar outcomes during SetupIntent confirmation and surface them to fraud
+  scoring without storing PAN or CVC in Milo.
+- Reuse the existing fraud trigger name `BillingPaymentMethodAttached` and the
+  MaxMind `CreditCard` input path already implemented in the fraud repo.
+- Add a `stripe-radar` fraud provider type that scores from projected billing status
+  (no live Stripe call during evaluation unless manually refreshed).
+- Start in OBSERVE mode before any AUTO enforcement during onboarding.
 
 ### Non-Goals
 
-- Building the full onboarding UI (tracked separately in #762).
-- Replacing Stripe with another payment processor.
-- Charging users during onboarding. Card collection uses SetupIntent, not a real charge.
-- Auto-deactivating users in production on day one. OBSERVE first, AUTO later.
-- Storing full PAN or CVC in Milo. Stripe Elements keeps card data off our servers.
+- Building the full onboarding UI ([#762](https://github.com/datum-cloud/enhancements/issues/762)).
+- Adding Stripe SDK code to the billing operator (explicitly out of scope per payment
+  methods design).
+- REST endpoints such as `POST /billingAccounts/{id}/setup-intent` (not part of the
+  billing architecture).
+- Charging users during onboarding (SetupIntent only).
+- Auto-deactivating users on day one.
+
+## Current state in the codebase
+
+This section records what exists today so the proposal does not reinvent the wrong layer.
+
+| Component | Exists today | Notes |
+|-----------|--------------|-------|
+| `PaymentMethod` / `PaymentMethodClass` CRDs | Yes (`billing` repo) | Normalized card fields on `PaymentMethod.status.details` including BIN, AVS, CVC for fraud |
+| `stripe-provider` service | **No** | Designed in billing payment-methods doc; not in repo yet |
+| Stripe SDK in billing operator | **No** | By design; provider controllers own Stripe |
+| `BillingPaymentMethodAttached` fraud trigger | Yes (`fraud`, feature branch) | Watches `BillingAccount` condition flip |
+| `BillingAccountConditionPaymentMethodAttached` | **Planned** | Referenced by fraud; not on billing `main` yet |
+| `BillingAccount.status.paymentMethod` summary | **Planned** | Fraud resolver already reads `BIN`, `Last4`, `Country`, AVS, CVC |
+| MaxMind with card metadata | Yes (`fraud`) | `buildRequest` forwards `CreditCard` when present |
+| `stripe-radar` FraudProvider | **No** | Only `maxmind` is registered today |
+| Portal onboarding UI | **Partial** | #762; must watch CRDs per payment-methods design |
+
+The first version of this enhancement doc incorrectly assumed a REST billing service
+that called Stripe and fraud directly. That conflicts with the billing repo. The
+sections below follow the provider-controller model.
 
 ## Proposal
 
-Shift the default `FraudPolicy` trigger from `UserCreated` to `PaymentMethodAttached`
-(a new event name; see [Triggering evaluation](#triggering-evaluation-after-payment-setup)).
+Shift the default signup `FraudPolicy` trigger from `UserCreated` to
+`BillingPaymentMethodAttached`.
 
 At a high level:
 
-1. User authenticates and gets a Milo `User` (unchanged).
-2. Portal onboarding creates a billing account and collects a card through Stripe
-   Elements.
-3. Billing service confirms the SetupIntent, stores the Stripe customer and payment
-   method references, and copies Radar outcome fields onto the billing account status.
-4. Billing emits `PaymentMethodAttached` (via annotation, event, or explicit API call).
-5. Fraud controller runs the configured pipeline and updates `FraudEvaluation`.
-6. Portal polls or watches onboarding state and either continues or shows a review or
-   decline path.
+1. User authenticates; Milo creates `User` (no fraud evaluation yet).
+2. Portal creates `PaymentMethod`; `stripe-provider` creates `StripePaymentMethod` and
+   SetupIntent.
+3. Portal confirms card via Stripe.js using `StripePaymentMethod.status.setupIntent.clientSecret`.
+4. `stripe-provider` handles `setup_intent.succeeded`, copies Radar outcome to
+   `StripePaymentMethod.status`, projects normalized fields to `PaymentMethod.status`.
+5. Billing operator sets `BillingAccountConditionPaymentMethodAttached=True` and
+   projects a fraud-friendly summary to `BillingAccount.status.paymentMethod`.
+6. Fraud `BillingPaymentMethodAttachedTriggerReconciler` creates `FraudEvaluation`.
+7. Fraud pipeline runs MaxMind (with card fields) and optionally `stripe-radar`.
+8. Portal loading step waits for evaluation completion before granting access.
 
 <<[UNRESOLVED radar-only vs combined pipeline]>>
 Two viable defaults:
 
-- **Radar only** for the payment stage: cheaper if we already pay for Radar through
-  Stripe billing, fewer external API calls, weaker on email/IP-only abuse before card entry.
-- **MaxMind then Radar** (or parallel): better coverage, two vendors to operate, ~$0.02
-  extra per evaluation on top of Stripe.
+- **Radar only** after attach: no extra MaxMind cost per signup; weaker on email/IP-only
+  signals if we drop the `UserCreated` pass entirely.
+- **MaxMind + Radar** after attach: uses card metadata MaxMind already accepts; ~$0.02
+  per evaluation; Radar catches payment patterns MaxMind misses.
 
-Recommendation for first ship: MaxMind + watchman + Stripe Radar in one pipeline,
-Radar in a dedicated stage after payment fields exist. Revisit if Radar-only OBSERVE
-data is strong enough on its own.
+Recommendation: MaxMind + `stripe-radar` in one post-attach pipeline, OBSERVE mode
+first. Keep a lightweight `UserCreated` MaxMind pass only if card-testing abuse shows
+up before attach.
 <<[/UNRESOLVED]>>
 
 ### User stories
 
 #### New user completes onboarding with a clean card
 
-A user signs up, fills in billing account details, and adds a Visa through Stripe
-Elements. The billing service confirms the SetupIntent, sees Radar `risk_level: normal`,
-and triggers fraud evaluation. MaxMind returns a low score, watchman finds no sanctions
-match, and the evaluation decision is `NONE`. The portal loading screen finishes and the
-user enters the org.
+A user signs up, creates a billing account, and adds a card. `stripe-provider` confirms
+the SetupIntent with Radar `risk_level: normal`. Billing sets
+`PaymentMethodAttached=True`. Fraud runs MaxMind and Radar; decision is `NONE`. The
+portal loading screen finishes.
 
 #### Stripe flags elevated risk
 
-Same flow, but Radar returns `risk_level: elevated` with a high risk score. In OBSERVE
-mode the user still proceeds, but staff get a `FraudThresholdExceeded` event and the
-`FraudEvaluation` shows `REVIEW`. In AUTO mode (later), platform access stays blocked
-until an operator approves via `PlatformAccessApproval`.
+Same flow, but Radar returns `elevated`. In OBSERVE mode the user still proceeds; staff
+see `FraudThresholdExceeded` and `FraudEvaluation` decision `REVIEW`. AUTO mode (later)
+blocks until `PlatformAccessApproval`.
 
 #### User abandons onboarding before adding a card
 
-The user exists in Milo but has no payment method. No `PaymentMethodAttached` event
-fires, so no fraud evaluation runs and platform access stays limited to the onboarding
-screens. This is intentional friction.
+No `PaymentMethod` reaches `Active`, billing never sets `PaymentMethodAttached`, fraud
+does not run, and platform access stays on onboarding screens.
 
 ### Notes and constraints
 
-- Radar evaluates the SetupIntent confirmation attempt. We do not need a separate charge
-  for onboarding fraud scoring.
-- MaxMind's minFraud API accepts billing address and payment instrument metadata. We
-  map Stripe fields we already have; we never send raw card numbers to MaxMind.
-- The existing v1 fraud doc waits for audit log IP data. That still helps for MaxMind,
-  but payment-triggered evaluation can run immediately because the portal has client IP
-  at submit time and can pass it through the billing API request.
-- Users who cannot use a card (enterprise overflow path from #730) need a whitelist or
-  manual approval path that skips `PaymentMethodAttached` and uses a staff-triggered
-  evaluation instead.
+- The billing operator must not import Stripe. All Radar API interaction lives in
+  `stripe-provider`.
+- `PaymentMethod.status.details` already documents fields "useful for downstream fraud
+  scoring" (BIN, country, AVS, CVC). Radar-specific fields stay on
+  `StripePaymentMethod` and are copied into `BillingAccount.status.paymentMethod` for
+  fraud consumption.
+- Fraud resolves the user's billing account via label
+  `iam.miloapis.com/owner-user=<uid>` (written by Milo's auto-billing-account
+  controller).
+- Session IP and user agent come from the identity `Session` API today, not portal HTTP
+  headers passed through a billing REST layer.
+- Enterprise overflow paths (#730) need staff whitelist or manual evaluation; they skip
+  the payment attach trigger.
 
 ### Risks and mitigations
 
 | Risk | Mitigation |
 |------|------------|
-| False positives block real customers | OBSERVE mode first; tune thresholds on production data; manual REVIEW before AUTO |
-| Stripe outage during onboarding | FailOpen on Radar provider; allow retry in portal; do not hard-lock user without fallback messaging |
-| MaxMind outage | Existing FailOpen policy; Radar stage still runs |
-| PCI scope creep | Stripe Elements + SetupIntent only; store Stripe IDs and outcome metadata, not card numbers |
-| Users stuck if evaluation is slow | Portal timeout with "still checking" state; async completion via polling `FraudEvaluation` or onboarding status |
+| False positives block real customers | OBSERVE first; tune thresholds; manual REVIEW |
+| Stripe outage during onboarding | Portal retry; `PaymentMethod` stays `AwaitingConfirmation` or `Failed` with clear UX |
+| Fraud runs before billing projection completes | Trigger on `PaymentMethodAttached` condition, set only after status summary is written |
+| PCI scope creep | Stripe Elements + SetupIntent; store IDs and outcomes only |
+| stripe-provider not shipped yet | Fraud trigger can land behind feature flag until provider projects status |
 
 ## Design details
 
@@ -168,54 +195,71 @@ screens. This is intentional friction.
 User signs in (IdP)
        |
        v
-Create Milo User                    <-- no fraud evaluation here anymore
+Milo User created                         (no fraud eval)
        |
        v
-Portal: billing account form
+Portal creates PaymentMethod CRD
        |
        v
-Stripe Elements: SetupIntent        <-- card collected client-side
+stripe-provider creates StripePaymentMethod + SetupIntent
        |
        v
-Billing service confirms SetupIntent
-  - save stripeCustomerId
-  - save stripePaymentMethodId
-  - copy radar outcome to status
+Portal reads clientSecret, confirms via Stripe.js
        |
        v
-Emit PaymentMethodAttached
+stripe-provider: setup_intent.succeeded webhook / reconcile
+  - write Radar outcome on StripePaymentMethod.status
+  - patch PaymentMethod.status (phase Active, details)
        |
        v
-Fraud controller: pipeline
-  (watchman + maxmind + stripe-radar)
+billing operator watches PaymentMethod
+  - set BillingAccount PaymentMethodAttached=True
+  - project status.paymentMethod summary for fraud
        |
        v
-Portal: loading step completes or shows blocked/review state
+fraud BillingPaymentMethodAttached trigger
+  - create FraudEvaluation
+  - pipeline: maxmind (+ stripe-radar)
+       |
+       v
+Portal waits on FraudEvaluation / onboarding status
 ```
-
-Sanctions screening can stay in the pipeline even though it only needs name fields from
-`User`. It does not need to wait for payment data.
 
 ### Data we pass into fraud scoring
 
-Fields assembled at `PaymentMethodAttached` time:
+Fraud's `provider.Input` is assembled by the existing resolver (`User`, `Session`,
+`BillingAccount.status.paymentMethod`). Proposed additions are marked **new**.
 
-| Canonical field | Source | Used by |
-|-----------------|--------|---------|
-| `emailAddress`, `firstName`, `lastName` | `User` | MaxMind, watchman |
-| `ipAddress`, `userAgent` | Portal request headers (and audit log when available) | MaxMind |
-| `billingCountry`, `billingPostalCode`, `billingCity` | Billing account address | MaxMind |
-| `cardCountry`, `cardFunding`, `cardBrand`, `cardLast4` | Stripe PaymentMethod | MaxMind |
-| `stripeRiskScore`, `stripeRiskLevel` | Stripe SetupIntent / latest attempt outcome | stripe-radar adapter |
-| `stripePaymentMethodId`, `stripeCustomerId` | Billing account status | audit metadata only |
+| Field | Source | Used by |
+|-------|--------|---------|
+| `EmailAddress`, names | `User` CRD | MaxMind |
+| `IPAddress`, `UserAgent`, `TrackingToken` | Identity `Session` | MaxMind |
+| `CreditCard.IssuerIDNumber`, `LastDigits`, `Country`, AVS, CVC | `BillingAccount.status.paymentMethod` (from `PaymentMethod.details`) | MaxMind (already wired) |
+| `StripeRiskScore`, `StripeRiskLevel` **new** | Projected from `StripePaymentMethod.status.radar` | `stripe-radar` provider |
+| Billing address on account | `BillingAccount.spec.contactInfo.address` | MaxMind billing (future resolver extension) |
+
+MaxMind mapping today (already in `fraud/internal/provider/maxmind/maxmind.go`):
+
+```go
+if input.CreditCard.HasAny() {
+    cc := &creditCardField{
+        LastDigits: input.CreditCard.LastDigits,
+        Country:    input.CreditCard.Country,
+        AVSResult:  input.CreditCard.AVSResult,
+        CVVResult:  input.CreditCard.CVVResult,
+    }
+    if input.CreditCard.IssuerIDNumber != "" {
+        cc.Issuer = &creditCardIssuer{IIN: input.CreditCard.IssuerIDNumber}
+    }
+    req.CreditCard = cc
+}
+```
 
 ### Option A: Stripe Radar only
 
-Use Radar as the only payment-risk provider. Keep watchman for sanctions. Drop MaxMind
-from the post-payment pipeline (or run a cheap pre-payment MaxMind pass only if we still
-want email/IP signal before card entry).
-
-FraudPolicy sketch:
+Use Radar for payment risk after attach. Optionally keep a cheap `UserCreated` MaxMind
+pass before card entry; drop MaxMind from the post-attach policy if Radar-only OBSERVE
+data is strong enough.
 
 ```yaml
 apiVersion: fraud.miloapis.com/v1alpha1
@@ -224,17 +268,6 @@ metadata:
   name: onboarding-payment
 spec:
   stages:
-    - name: sanctions-screening
-      providers:
-        - providerRef:
-            name: watchman
-      thresholds:
-        - minScore: 80
-          action: REVIEW
-        - minScore: 95
-          action: DEACTIVATE
-      required: true
-
     - name: stripe-radar
       providers:
         - providerRef:
@@ -244,32 +277,28 @@ spec:
           action: REVIEW
         - minScore: 85
           action: DEACTIVATE
-      required: false
 
   enforcement:
     mode: OBSERVE
 
   triggers:
     - type: Event
-      event: PaymentMethodAttached
+      event: BillingPaymentMethodAttached
 ```
-
-Stripe maps `risk_level` to our 0-100 scale in the adapter:
 
 | Stripe `risk_level` | Normalized score |
 |---------------------|------------------|
 | normal | 20 |
 | elevated | 70 |
 | highest | 95 |
-| unknown / missing | 50 (neutral, flagged in reasons) |
+| unknown / missing | 50 |
 
-When Stripe exposes a numeric `risk_score` on the attempt outcome, prefer that value
-and map 0-100 directly.
+Prefer numeric `risk_score` from the SetupIntent attempt when Stripe returns it.
 
 ### Option B: MaxMind plus Stripe Radar
 
-Run both in one evaluation after payment setup. MaxMind gets richer input because billing
-address and card metadata exist. Radar catches payment patterns MaxMind will not see.
+Default recommendation. Both providers run in the post-attach evaluation. MaxMind uses
+card metadata from billing status; Radar uses projected Stripe fields.
 
 ```yaml
 apiVersion: fraud.miloapis.com/v1alpha1
@@ -282,14 +311,6 @@ spec:
       providers:
         - providerRef:
             name: maxmind
-          inputMapping:
-            fields:
-              ipAddress: "device.ip_address"
-              emailAddress: "email.address"
-              userAgent: "device.user_agent"
-              billingCountry: "billing.address.country"
-              billingPostalCode: "billing.address.postal_code"
-              cardCountry: "payment.credit_card.issuer_id_country"  # mapped from Stripe country
         - providerRef:
             name: stripe-radar
       thresholds:
@@ -297,253 +318,308 @@ spec:
           action: REVIEW
         - minScore: 90
           action: DEACTIVATE
-      required: false
-      shortCircuit:
-        skipWhenBelow: 15
-
-    - name: sanctions-screening
-      providers:
-        - providerRef:
-            name: watchman
-      required: true
 
   enforcement:
     mode: OBSERVE
 
   triggers:
     - type: Event
-      event: PaymentMethodAttached
+      event: BillingPaymentMethodAttached
 ```
 
-Stage decision logic stays the same as the parent fraud API: highest severity action
-wins across executed providers.
+### stripe-provider: Radar capture and projection
 
-### Cloud portal: collecting the card
-
-Illustrative React flow using Stripe.js. Assumes billing API exposes
-`POST /orgs/{org}/billingAccounts/{id}/setup-intent` and
-`POST /orgs/{org}/billingAccounts/{id}/payment-method`.
-
-```typescript
-// app/onboarding/payment-step.tsx (illustrative)
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
-
-async function createSetupIntent(billingAccountId: string): Promise<{ clientSecret: string }> {
-  const res = await fetch(`/api/billing/accounts/${billingAccountId}/setup-intent`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      // Forward client IP for fraud input; prefer edge-injected header in production.
-      "X-Forwarded-For": await fetch("/api/client-ip").then((r) => r.text()),
-    },
-  });
-  if (!res.ok) throw new Error("setup intent failed");
-  return res.json();
-}
-
-function PaymentForm({ billingAccountId, onComplete }: { billingAccountId: string; onComplete: () => void }) {
-  const stripe = useStripe();
-  const elements = useElements();
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!stripe || !elements) return;
-
-    const { error, setupIntent } = await stripe.confirmSetup({
-      elements,
-      confirmParams: {
-        return_url: `${window.location.origin}/onboarding/complete`,
-      },
-      redirect: "if_required",
-    });
-
-    if (error) {
-      // Show card decline or validation error in UI.
-      return;
-    }
-
-    if (setupIntent?.status === "succeeded" && setupIntent.payment_method) {
-      // Tell billing to attach PM and kick off fraud evaluation.
-      await fetch(`/api/billing/accounts/${billingAccountId}/payment-method`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          stripeSetupIntentId: setupIntent.id,
-          stripePaymentMethodId:
-            typeof setupIntent.payment_method === "string"
-              ? setupIntent.payment_method
-              : setupIntent.payment_method.id,
-        }),
-      });
-      onComplete();
-    }
-  }
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <PaymentElement />
-      <button type="submit">Continue</button>
-    </form>
-  );
-}
-```
-
-The portal loading step after submit polls onboarding status until fraud evaluation
-completes or times out.
-
-### Billing service: persisting payment signals
-
-After the portal posts the confirmed SetupIntent, billing retrieves the Stripe objects,
-updates the billing account, and requests fraud evaluation.
-
-```go
-// internal/billing/payment_method.go (illustrative)
-func (s *Service) AttachPaymentMethod(ctx context.Context, req AttachPaymentMethodRequest) error {
-    si, err := s.stripe.SetupIntents.Get(req.StripeSetupIntentID, nil)
-    if err != nil {
-        return fmt.Errorf("get setup intent: %w", err)
-    }
-    if si.Status != stripe.SetupIntentStatusSucceeded {
-        return ErrSetupIntentNotSucceeded
-    }
-
-    pm, err := s.stripe.PaymentMethods.Get(req.StripePaymentMethodID, nil)
-    if err != nil {
-        return fmt.Errorf("get payment method: %w", err)
-    }
-
-    riskScore, riskLevel := extractRadarOutcome(si)
-
-    account, err := s.store.GetBillingAccount(ctx, req.BillingAccountID)
-    if err != nil {
-        return err
-    }
-
-    account.Spec.DefaultPaymentMethodRef = req.StripePaymentMethodID
-    account.Status.Stripe = billingv1alpha1.StripeStatus{
-        CustomerID:        account.Status.Stripe.CustomerID,
-        PaymentMethodID:   pm.ID,
-        RiskScore:         riskScore,
-        RiskLevel:         riskLevel,
-        CardCountry:       pm.Card.Country,
-        CardFunding:       string(pm.Card.Funding),
-        CardBrand:         string(pm.Card.Brand),
-        CardLast4:         pm.Card.Last4,
-        SetupIntentID:     si.ID,
-        AttachedAt:        metav1.Now(),
-    }
-
-    if err := s.store.UpdateBillingAccount(ctx, account); err != nil {
-        return err
-    }
-
-    return s.fraud.RequestEvaluation(ctx, fraudeval.Request{
-        UserRef:      req.UserRef,
-        Trigger:      fraudeval.TriggerPaymentMethodAttached,
-        BillingRef:   account.Name,
-        ClientIP:     req.ClientIP,
-        UserAgent:    req.UserAgent,
-    })
-}
-
-func extractRadarOutcome(si *stripe.SetupIntent) (score *int64, level string) {
-    if si.LatestAttempt == nil || si.LatestAttempt.RiskScore == 0 {
-        return nil, "unknown"
-    }
-    scoreVal := si.LatestAttempt.RiskScore
-    return &scoreVal, string(si.LatestAttempt.RiskLevel)
-}
-```
-
-Extend `BillingAccount.status` (exact shape TBD with billing API owners):
+`stripe-provider` is the only component that calls the Stripe API. Extend
+`StripePaymentMethod.status` with Radar fields when confirming SetupIntent:
 
 ```yaml
-apiVersion: billing.miloapis.com/v1alpha1
-kind: BillingAccount
+apiVersion: stripe.billing.miloapis.com/v1alpha1
+kind: StripePaymentMethod
 metadata:
-  name: org-acme-billing
+  name: corp-visa-stripe
   namespace: org-acme
-spec:
-  displayName: ACME Engineering
-  address:
-    country: US
-    postalCode: "94107"
-    city: San Francisco
 status:
   phase: Active
-  stripe:
-    customerId: cus_abc123
-    paymentMethodId: pm_xyz789
-    setupIntentId: seti_456
+  stripeCustomerId: cus_abc123
+  stripePaymentMethodId: pm_xyz789
+  setupIntent:
+    id: seti_456
+    clientSecret: seti_456_secret_xxx
+  confirmedAt: "2026-06-23T10:15:00Z"
+  instrument:
+    type: card
+    card:
+      brand: visa
+      last4: "4242"
+      country: US
+  radar:
     riskScore: 12
     riskLevel: normal
-    cardCountry: US
-    cardFunding: credit
-    cardBrand: visa
-    cardLast4: "4242"
-    attachedAt: "2026-06-23T10:15:00Z"
-  fraudEvaluationRef:
-    name: user-12345
+    outcomeType: authorized
 ```
 
-### Fraud controller: provider adapters
-
-#### stripe-radar adapter
-
-Reads canonical input populated from `BillingAccount.status.stripe`. Does not call
-Stripe again if billing already copied the outcome (avoids duplicate API traffic and
-race conditions). Optionally re-fetches from Stripe when `forceRefresh: true` on manual
-re-evaluation.
+Illustrative Go in `stripe-provider` after `setup_intent.succeeded`:
 
 ```go
-// internal/controllers/fraud/providers/stripe_radar.go (illustrative)
-type StripeRadarAdapter struct {
-    stripe *stripe.Client // optional; used for refresh only
-}
-
-func (a *StripeRadarAdapter) Evaluate(ctx context.Context, input fraud.Input) (fraud.ProviderResult, error) {
-    score, ok := input.Float("stripeRiskScore")
-    level := input.String("stripeRiskLevel")
-
-    if !ok {
-        score = normalizeRiskLevel(level)
+func (r *StripePaymentMethodReconciler) applySetupIntentOutcome(
+    ctx context.Context,
+    spm *stripev1alpha1.StripePaymentMethod,
+    si *stripe.SetupIntent,
+) error {
+    attempt := si.LatestAttempt
+    if attempt != nil {
+        spm.Status.Radar = &stripev1alpha1.RadarOutcome{
+            RiskScore:   attempt.RiskScore,
+            RiskLevel:   string(attempt.RiskLevel),
+            OutcomeType: string(attempt.Outcome.Type),
+        }
     }
 
-    reasons := []string{}
-    if level != "" && level != "normal" {
-        reasons = append(reasons, "stripe_risk_level_"+level)
-    }
-    if input.String("cardCountry") != "" && input.String("billingCountry") != "" &&
-        input.String("cardCountry") != input.String("billingCountry") {
-        reasons = append(reasons, "card_country_mismatch")
-    }
+    spm.Status.Phase = stripev1alpha1.PhaseActive
+    spm.Status.StripePaymentMethodID = si.PaymentMethod.ID
 
-    return fraud.ProviderResult{
-        Score:    score,
-        Reasons:  reasons,
-        Metadata: map[string]any{
-            "stripePaymentMethodId": input.String("stripePaymentMethodId"),
-            "stripeRiskLevel":       level,
-        },
-    }, nil
-}
-
-func normalizeRiskLevel(level string) float64 {
-    switch level {
-    case "normal":
-        return 20
-    case "elevated":
-        return 70
-    case "highest":
-        return 95
-    default:
-        return 50
+    if err := r.patchPaymentMethodDetails(ctx, spm, si); err != nil {
+        return err
     }
+    return r.Status().Update(ctx, spm)
 }
 ```
 
-FraudProvider resource:
+Project normalized card fields onto the parent `PaymentMethod` (billing-owned status
+subresource), matching fields already defined on `PaymentMethodCardDetails`:
+
+```go
+func (r *StripePaymentMethodReconciler) patchPaymentMethodDetails(
+    ctx context.Context,
+    spm *stripev1alpha1.StripePaymentMethod,
+    si *stripe.SetupIntent,
+) error {
+    pm := &billingv1alpha1.PaymentMethod{}
+    key := client.ObjectKey{
+        Namespace: spm.Namespace,
+        Name:      spm.Spec.PaymentMethodRef.Name,
+    }
+    if err := r.Get(ctx, key, pm); err != nil {
+        return err
+    }
+
+    card := si.PaymentMethod.Card
+    pm.Status.Phase = billingv1alpha1.PaymentMethodPhaseActive
+    pm.Status.Details = &billingv1alpha1.PaymentMethodDetails{
+        Type: billingv1alpha1.PaymentMethodInstrumentTypeCard,
+        Card: &billingv1alpha1.PaymentMethodCardDetails{
+            Brand:                      string(card.Brand),
+            Last4:                      card.Last4,
+            Country:                    card.Country,
+            ExpiryMonth:                int32(card.ExpMonth),
+            ExpiryYear:                 int32(card.ExpYear),
+            IssuerIdentificationNumber: card.IIN,
+            AVSResult:                  mapAVS(si.LatestAttempt),
+            CVCResult:                  mapCVC(si.LatestAttempt),
+        },
+    }
+    return r.Status().Update(ctx, pm)
+}
+```
+
+RBAC boundary (from payment-methods design): `stripe-provider` patches
+`PaymentMethod.status` only; billing operator owns the CRD spec.
+
+### Billing service: payment-method side effects
+
+Billing does not call Stripe or fraud. When a `PaymentMethod` linked to a
+`BillingAccount` becomes `Active`, the billing operator:
+
+1. Projects a fraud summary onto `BillingAccount.status.paymentMethod`.
+2. Sets `BillingAccountConditionPaymentMethodAttached=True` (triggers fraud).
+3. Optionally sets `DefaultPaymentMethodReady` when `spec.defaultPaymentMethodRef`
+   points at the active method (condition exists today).
+
+Proposed billing API additions:
+
+```go
+const BillingAccountConditionPaymentMethodAttached = "PaymentMethodAttached"
+
+type BillingAccountPaymentMethodSummary struct {
+    PaymentMethodRef PaymentMethodRef `json:"paymentMethodRef"`
+    BIN              string           `json:"bin,omitempty"`
+    Last4            string           `json:"last4,omitempty"`
+    Country          string           `json:"country,omitempty"`
+    AVSResult        string           `json:"avsResult,omitempty"`
+    CVCResult        string           `json:"cvcResult,omitempty"`
+    StripeRiskScore  *int64           `json:"stripeRiskScore,omitempty"`
+    StripeRiskLevel  string           `json:"stripeRiskLevel,omitempty"`
+    AttachedAt       metav1.Time      `json:"attachedAt,omitempty"`
+}
+
+type BillingAccountStatus struct {
+    // ... existing fields ...
+    PaymentMethod *BillingAccountPaymentMethodSummary `json:"paymentMethod,omitempty"`
+}
+```
+
+Illustrative controller logic:
+
+```go
+func (r *BillingAccountReconciler) reconcilePaymentMethodAttached(
+    ctx context.Context,
+    account *billingv1alpha1.BillingAccount,
+    pm *billingv1alpha1.PaymentMethod,
+    radar *billingv1alpha1.RadarSummary, // read from PaymentMethod annotation or status extension
+) {
+    summary := &billingv1alpha1.BillingAccountPaymentMethodSummary{
+        PaymentMethodRef: billingv1alpha1.PaymentMethodRef{Name: pm.Name},
+        AttachedAt:       metav1.Now(),
+    }
+    if pm.Status.Details != nil && pm.Status.Details.Card != nil {
+        c := pm.Status.Details.Card
+        summary.BIN = c.IssuerIdentificationNumber
+        summary.Last4 = c.Last4
+        summary.Country = c.Country
+        summary.AVSResult = c.AVSResult
+        summary.CVCResult = c.CVCResult
+    }
+    if radar != nil {
+        summary.StripeRiskScore = radar.RiskScore
+        summary.StripeRiskLevel = radar.RiskLevel
+    }
+    account.Status.PaymentMethod = summary
+
+    apimeta.SetStatusCondition(&account.Status.Conditions, metav1.Condition{
+        Type:   billingv1alpha1.BillingAccountConditionPaymentMethodAttached,
+        Status: metav1.ConditionTrue,
+        Reason: "PaymentMethodActive",
+    })
+}
+```
+
+How Radar reaches billing: `stripe-provider` copies `StripePaymentMethod.status.radar`
+onto the `PaymentMethod` via a status annotation (short term) or a small shared status
+extension agreed with billing owners. Billing reads that when building the account
+summary. Long term, only fraud-relevant normalized fields belong on
+`BillingAccount.status`; raw Stripe IDs stay on `StripePaymentMethod`.
+
+Fraud trigger (already implemented on `feat/billing-payment-method-fraud-trigger`):
+
+```go
+func isPaymentMethodAttached(a *billingv1alpha1.BillingAccount) bool {
+    c := apimeta.FindStatusCondition(a.Status.Conditions,
+        billingv1alpha1.BillingAccountConditionPaymentMethodAttached)
+    return c != nil && c.Status == metav1.ConditionTrue
+}
+```
+
+When the condition flips False to True, fraud creates `FraudEvaluation` if a policy
+lists `BillingPaymentMethodAttached`. No direct billing-to-fraud RPC.
+
+### Cloud portal: CRD-driven card collection
+
+The portal is provider-aware. It does not call billing REST endpoints for SetupIntent.
+Flow from [payment-methods.md](https://github.com/milo-os/billing/blob/main/docs/enhancements/payment-methods.md):
+
+1. Create `PaymentMethod` (class injected by webhook).
+2. Watch `StripePaymentMethod` until `status.setupIntent.clientSecret` is set.
+3. Load publishable key from `StripeProviderConfig` via `PaymentMethodClass.spec.parametersRef`.
+4. Confirm with Stripe.js.
+5. Watch `PaymentMethod.status.phase` until `Active`.
+6. Patch `BillingAccount.spec.defaultPaymentMethodRef` if needed.
+7. Watch `FraudEvaluation` or onboarding aggregate status.
+
+Illustrative portal code:
+
+```typescript
+// app/onboarding/payment-step.tsx (illustrative — CRD watch, not REST)
+async function waitForClientSecret(paymentMethodName: string, namespace: string): Promise<string> {
+  for (;;) {
+    const spm = await kubeGet("stripe.billing.miloapis.com/v1alpha1", "StripePaymentMethod", namespace, `${paymentMethodName}-stripe`);
+    const secret = spm?.status?.setupIntent?.clientSecret;
+    if (secret) return secret;
+    await sleep(1000);
+  }
+}
+
+async function confirmCard(stripe: Stripe, elements: StripeElements, clientSecret: string) {
+  const { error, setupIntent } = await stripe.confirmSetup({
+    elements,
+    clientSecret,
+    redirect: "if_required",
+  });
+  if (error) throw error;
+  return setupIntent;
+}
+
+async function waitForActivePaymentMethod(name: string, namespace: string) {
+  for (;;) {
+    const pm = await kubeGet("billing.miloapis.com/v1alpha1", "PaymentMethod", namespace, name);
+    if (pm?.status?.phase === "Active") return pm;
+    if (pm?.status?.phase === "Failed") throw new Error("payment method failed");
+    await sleep(1000);
+  }
+}
+```
+
+### Fraud service: trigger and provider adapters
+
+#### Resolver extension
+
+Extend `resolvePaymentMethod` (already reads `status.paymentMethod`) to copy Radar
+fields into `provider.Input`:
+
+```go
+func (r *Resolver) resolvePaymentMethod(ctx context.Context, userUID string, input *provider.Input) error {
+    // ... existing BillingAccount lookup ...
+    pm := pick.Status.PaymentMethod
+    input.CreditCard = provider.CreditCard{
+        IssuerIDNumber: pm.BIN,
+        LastDigits:     pm.Last4,
+        Country:        pm.Country,
+        AVSResult:      pm.AVSResult,
+        CVVResult:      pm.CVCResult,
+    }
+    if pm.StripeRiskScore != nil {
+        input.StripeRiskScore = *pm.StripeRiskScore
+    }
+    input.StripeRiskLevel = pm.StripeRiskLevel
+    return nil
+}
+```
+
+Add optional Radar fields to `provider.Input` (new):
+
+```go
+type Input struct {
+    // ... existing fields ...
+    StripeRiskScore int64
+    StripeRiskLevel string
+}
+```
+
+#### stripe-radar provider (new)
+
+Register alongside MaxMind in `supportedProviderTypes`. Reads projected billing status;
+does not call Stripe during normal evaluation.
+
+```go
+type StripeRadar struct{}
+
+func (StripeRadar) Name() string { return "stripe-radar" }
+
+func (StripeRadar) Evaluate(ctx context.Context, input provider.Input) provider.Result {
+    if input.StripeRiskScore > 0 {
+        return provider.Result{Score: float64(input.StripeRiskScore)}
+    }
+    switch input.StripeRiskLevel {
+    case "normal":
+        return provider.Result{Score: 20}
+    case "elevated":
+        return provider.Result{Score: 70}
+    case "highest":
+        return provider.Result{Score: 95}
+    default:
+        return provider.Result{Score: 50}
+    }
+}
+```
 
 ```yaml
 apiVersion: fraud.miloapis.com/v1alpha1
@@ -552,220 +628,90 @@ metadata:
   name: stripe-radar
 spec:
   type: stripe-radar
-  onFailure: FailOpen
-  timeout: 2s
-  inputMapping:
-    fields:
-      stripeRiskScore: "stripeRiskScore"
-      stripeRiskLevel: "stripeRiskLevel"
-      stripePaymentMethodId: "stripePaymentMethodId"
-      cardCountry: "cardCountry"
-      billingCountry: "billingCountry"
+  config: {}
+  failurePolicy: FailOpen
 ```
 
-#### MaxMind adapter with payment fields
+Update `FraudProvider` CRD validation to allow `stripe-radar` in addition to `maxmind`.
 
-When billing address and card metadata exist, extend the existing MaxMind request builder:
+#### Trigger wiring (exists)
 
-```go
-// internal/controllers/fraud/providers/maxmind.go (illustrative extension)
-func buildMinFraudRequest(input fraud.Input) minfraud.Request {
-    req := minfraud.Request{
-        Device: minfraud.Device{
-            IPAddress:      input.String("ipAddress"),
-            UserAgent:      input.String("userAgent"),
-            AcceptLanguage: input.String("acceptLanguage"),
-        },
-        Email: minfraud.Email{
-            Address: input.String("emailAddress"),
-            Domain:  input.String("emailDomain"),
-        },
-    }
+`BillingPaymentMethodAttachedTriggerReconciler` in
+`fraud/internal/controller/billingpaymentmethodattached_trigger_controller.go` already:
 
-    if input.Has("billingCountry") {
-        req.Billing = minfraud.Billing{
-            Country: input.String("billingCountry"),
-            Postal:  input.String("billingPostalCode"),
-            City:    input.String("billingCity"),
-        }
-    }
+- Watches `BillingAccount` updates where `PaymentMethodAttached` flips to True
+- Finds a `FraudPolicy` with `event: BillingPaymentMethodAttached`
+- Creates `FraudEvaluation` keyed by `iam.miloapis.com/owner-user` label
 
-    if input.Has("cardCountry") {
-        req.Payment = minfraud.Payment{
-            Processor: "stripe",
-            WasAuthorized: false, // SetupIntent only; no charge yet
-            CreditCard: minfraud.CreditCard{
-                Country: input.String("cardCountry"),
-                Brand:   input.String("cardBrand"),
-                Last4:   input.String("cardLast4"),
-            },
-        }
-    }
-
-    return req
-}
-```
-
-### Triggering evaluation after payment setup
-
-Introduce `PaymentMethodAttached` as a first-class trigger event (name bikeshedding OK;
-`PaymentSubmitted` from the parent doc is broader and may include actual charges later).
-
-Implementation options, in preference order:
-
-1. **Billing calls fraud service directly** after persisting Stripe status (simplest,
-   synchronous request, controller creates or updates `FraudEvaluation`).
-2. **Annotation on BillingAccount** `fraud.miloapis.com/evaluate=true` watched by fraud
-   controller (more Kubernetes-native, slightly more latency).
-3. **Explicit FraudEvaluation create** from billing with `spec.trigger.event:
-   PaymentMethodAttached` (matches how registration could work).
-
-Example of option 3:
-
-```yaml
-apiVersion: fraud.miloapis.com/v1alpha1
-kind: FraudEvaluation
-metadata:
-  name: user-12345
-spec:
-  userRef:
-    name: user-12345
-  policyRef:
-    name: onboarding-payment
-  trigger:
-    type: Event
-    event: PaymentMethodAttached
-    billingAccountRef:
-      name: org-acme-billing
-      namespace: org-acme
-```
-
-Controller input assembly adds a billing account fetch:
-
-```go
-func (r *FraudEvaluationReconciler) assembleInput(ctx context.Context, eval *fraudv1alpha1.FraudEvaluation) (fraud.Input, error) {
-    input := fraud.Input{}
-
-    user, err := r.getUser(ctx, eval.Spec.UserRef.Name)
-    if err != nil {
-        return nil, err
-    }
-    input.Merge(userFields(user))
-
-    if ref := eval.Spec.Trigger.BillingAccountRef; ref != nil {
-        acct, err := r.getBillingAccount(ctx, ref.Namespace, ref.Name)
-        if err != nil {
-            return nil, err
-        }
-        input.Merge(billingStripeFields(acct))
-        input.Merge(billingAddressFields(acct))
-    }
-
-    if eval.Spec.Trigger.ClientIP != "" {
-        input.Set("ipAddress", eval.Spec.Trigger.ClientIP)
-    }
-
-    return input, nil
-}
-```
-
-Deprecate `UserCreated` as the primary trigger for new signups once this ships. Keep it
-configurable for environments without billing enabled.
+Deprecate `UserCreated` as the primary signup trigger once billing projection ships.
+Keep it for environments without payment collection.
 
 ### Policy examples
 
 See [Option A](#option-a-stripe-radar-only) and [Option B](#option-b-maxmind-plus-stripe-radar).
 
-Default recommendation: Option B in OBSERVE mode for at least one release cycle.
-
 ### Platform access gating
 
-Onboarding completion checks fraud state before granting full portal access:
+Portal watches fraud state after `PaymentMethodAttached`:
 
 ```typescript
-// app/onboarding/wait-for-fraud.ts (illustrative)
-type OnboardingStatus = {
-  paymentMethodAttached: boolean;
-  fraudEvaluation?: {
-    phase: "Pending" | "Completed" | "Error";
-    decision: "NONE" | "REVIEW" | "DEACTIVATE";
-  };
-};
-
-export async function waitForOnboardingReady(userId: string, timeoutMs = 30000): Promise<"ready" | "review" | "blocked" | "timeout"> {
+async function waitForFraudDecision(userUID: string, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
-
   while (Date.now() < deadline) {
-    const status: OnboardingStatus = await fetch(`/api/onboarding/status/${userId}`).then((r) => r.json());
-
-    if (!status.paymentMethodAttached) {
-      return "blocked";
+    const evals = await kubeList("fraud.miloapis.com/v1alpha1", "FraudEvaluation", {
+      labelSelector: `fraud.miloapis.com/user=${userUID}`,
+    });
+    const latest = evals.items?.[0];
+    if (latest?.status?.phase === "Completed") {
+      return latest.status.decision as "NONE" | "REVIEW" | "DEACTIVATE";
     }
-
-    const eval_ = status.fraudEvaluation;
-    if (!eval_ || eval_.phase === "Pending") {
-      await new Promise((r) => setTimeout(r, 1000));
-      continue;
-    }
-
-    if (eval_.decision === "DEACTIVATE") return "blocked";
-    if (eval_.decision === "REVIEW") return "review";
-    return "ready";
+    await sleep(1000);
   }
-
   return "timeout";
 }
 ```
 
-In OBSERVE mode, `REVIEW` still returns `ready` for the user but surfaces the case to
-staff. AUTO mode maps `REVIEW` or `DEACTIVATE` to blocked or manual approval flows.
+In OBSERVE mode, `REVIEW` still allows the user through; staff get alerts. AUTO mode
+blocks until approval.
+
+## Cross-repo work breakdown
+
+| Repo | Work |
+|------|------|
+| **stripe-provider** (new) | `StripePaymentMethod` CRD, SetupIntent lifecycle, webhook handler, Radar capture, project to `PaymentMethod.status` |
+| **billing** | `PaymentMethodAttached` condition, `status.paymentMethod` projection, watch `PaymentMethod` phase changes |
+| **fraud** | Merge `feat/billing-payment-method-fraud-trigger`, add `stripe-radar` provider, extend resolver for Radar fields, tune policies |
+| **cloud-portal** | Onboarding screens that watch CRDs (#762) |
+| **milo** | Ensure auto-created `BillingAccount` carries `iam.miloapis.com/owner-user` label (already expected by fraud) |
 
 ## Production readiness review questionnaire
 
 ### Feature enablement and rollback
 
-#### How can this feature be enabled / disabled in a live cluster?
-
-- Configure `FraudPolicy` with `PaymentMethodAttached` trigger and desired providers.
-- Set `enforcement.mode: OBSERVE` for initial rollout.
-- Disable by switching trigger back to `UserCreated` only, or deleting the payment-stage
-  providers from the policy.
-- Billing feature flag can skip fraud request on attach without blocking card save.
-
-#### Does enabling the feature change any default behavior?
-
-Yes, for new signups: fraud evaluation moves from registration time to after payment
-method attach. Users who never add a card will not have a completed fraud evaluation.
-
-#### Can the feature be disabled once it has been enabled?
-
-Yes. Existing `FraudEvaluation` resources remain. Onboarding can bypass fraud polling
-via portal feature flag.
+- Enable: deploy `stripe-provider`, billing projection, fraud trigger + `stripe-radar`
+  provider, `FraudPolicy` with `BillingPaymentMethodAttached` in OBSERVE mode.
+- Disable: revert policy trigger to `UserCreated` only; leave payment collection
+  working without Radar scoring.
+- Billing and fraud can ship independently behind feature flags until projection is
+  consistent.
 
 ### Monitoring requirements
 
-Metrics (extend existing fraud metrics from parent doc):
-
-- `fraud_evaluations_total{trigger="PaymentMethodAttached",decision=...}`
-- `fraud_onboarding_blocked_total` (portal-reported or derived from decisions)
-- `billing_payment_method_attach_total{outcome=...}`
-- `billing_stripe_radar_level{level=...}` histogram or counter
-
-Events:
-
-- `PaymentMethodAttached`
-- `FraudThresholdExceeded` with `trigger=PaymentMethodAttached`
-- `FraudEvaluationCompleted`
+- `fraud_evaluations_total{trigger="BillingPaymentMethodAttached",decision=...}`
+- `billing_payment_method_attached_total`
+- `stripe_setup_intent_outcome{level=...}` (stripe-provider metrics)
+- Activity timeline events from payment method policy (planned in billing config)
 
 ### Dependencies
 
-| Dependency | Usage | Outage impact |
-|------------|-------|---------------|
-| Stripe API | SetupIntent, PaymentMethod, Radar outcome | Cannot complete onboarding payment step |
-| MaxMind minFraud | Optional identity/payment enrichment | FailOpen; Radar and watchman still run |
-| moov-io/watchman | Sanctions | FailClosed per existing policy |
-| Billing API | Persist PM, emit evaluation trigger | Blocks onboarding completion |
-| Cloud portal onboarding UI | Collect card, poll fraud status | No user-facing flow |
+| Dependency | Role |
+|------------|------|
+| **stripe-provider** | SetupIntent, Radar capture, `PaymentMethod` status projection |
+| **billing operator** | `PaymentMethodAttached` condition and fraud summary |
+| **fraud operator** | Trigger + MaxMind + stripe-radar providers |
+| **Stripe Radar** | Evaluates SetupIntent confirmation |
+| **MaxMind minFraud** | Identity + card metadata scoring |
+| **cloud-portal** | CRD-driven onboarding UI |
 
 Related issues: [#505](https://github.com/datum-cloud/enhancements/issues/505),
 [#737](https://github.com/datum-cloud/enhancements/issues/737),
@@ -775,44 +721,37 @@ Related issues: [#505](https://github.com/datum-cloud/enhancements/issues/505),
 ## Implementation history
 
 - 2026-06-23: Initial proposal (provisional).
+- 2026-06-23: Revised to align with billing payment-methods CRD architecture, existing
+  fraud `BillingPaymentMethodAttached` trigger, and stripe-provider ownership of Stripe.
 
 ## Drawbacks
 
-- Onboarding gets longer: users must add a card before full platform access.
-- Couples fraud rollout to billing and Stripe integration readiness.
-- Two-provider pipelines cost more and need separate threshold tuning.
-- Radar on SetupIntent may behave differently than Radar on real charges; chargeback
-  signal arrives later at first actual payment.
+- Depends on `stripe-provider` existing; fraud-onboarding cannot ship end-to-end without it.
+- More moving parts than a monolithic billing REST service, but matches the platform
+  extensibility model.
+- Radar on SetupIntent may differ from Radar on first real charge.
+- Cross-repo coordination on `BillingAccount.status.paymentMethod` shape.
 
 ## Alternatives
 
-### Keep fraud at UserCreated, re-run at payment attach
+### Billing service owns Stripe (rejected)
 
-Run a lightweight MaxMind pass at signup, then a full pass at payment. More evaluations,
-more cost, but catches obvious abuse before card entry. Worth it if card-testing abuse
-becomes a problem.
+Single service calling Stripe and fraud directly. Rejected in billing payment-methods
+design: couples billing to one provider and breaks the Gateway-style extensibility model.
 
-### Stripe Radar only, no Milo fraud API
+### Radar-only scoring in stripe-provider with no fraud API
 
-Call Radar in billing and branch in application code without `FraudEvaluation` resources.
-Faster to hack together, worse audit trail, does not reuse staff portal fraud tooling
-from #505.
+Branch in stripe-provider on Radar level and set a `BillingAccount` annotation to block
+access. Fast to prototype, no `FraudEvaluation` audit trail, bypasses staff portal
+fraud tooling.
 
-### $0 auth instead of SetupIntent
+### $0 PaymentIntent instead of SetupIntent
 
-Run a zero-amount PaymentIntent to force a charge-shaped Radar evaluation. Stronger signal,
-worse UX, possible issuer declines on $0 auths. Not recommended for v1.
-
-### Webhook-only Stripe integration
-
-Use `FraudProvider` type `webhook` pointing at a small service that wraps Stripe Radar
-rules. More moving parts than a built-in adapter.
+Stronger Radar signal, worse UX, unnecessary for signup card-on-file.
 
 ## Infrastructure needed
 
-- Stripe account with Radar enabled (included on standard Stripe pricing tiers; confirm
-  Radar for Fraud Teams if we need custom rules later).
-- Secrets: `stripe-secret-key` in billing service, existing `maxmind-credentials` in
-  fraud-system namespace.
-- Billing API endpoints for SetupIntent creation and payment method attach (part of #763).
-- Portal onboarding routes from #762.
+- Stripe account with Radar enabled.
+- `stripe-provider` deployment with webhook endpoint and secret key.
+- Existing MaxMind credentials for fraud operator.
+- `PaymentMethodClass` + `StripeProviderConfig` installed by platform operators.
