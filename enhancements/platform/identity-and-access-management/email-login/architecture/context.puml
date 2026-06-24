@@ -1,0 +1,32 @@
+@startuml context
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Email Login — System Context
+
+Person(new_user, "New User", "Signs up with email and password; no Google or GitHub account required")
+Person(existing_user, "Existing OAuth User", "Adds email credentials to an existing Google or GitHub account")
+
+System(auth_ui, "auth-ui\n(auth.datum.net)", "Zitadel login v2 Next.js app. Hosts /register, /password, /verify, and /password/reset routes.")
+System(cloud_portal, "cloud-portal\n(cloud.datum.net)", "Datum Cloud web portal. Account settings page shows linked sign-in methods.")
+
+System_Ext(email_provider, "Email Delivery Service", "Sends Zitadel verification and password-reset emails.\nNot yet provisioned — blocking pre-requisite.")
+System_Ext(google, "Google OAuth", "Existing identity provider")
+System_Ext(github, "GitHub OAuth", "Existing identity provider")
+
+System(milo, "Milo Control Plane", "Kubernetes-based control plane. Stores User and UserIdentity resources. Runs the UserWaitlistController.")
+
+Rel(new_user, auth_ui, "Registers with email/password", "HTTPS")
+Rel(existing_user, auth_ui, "Links email credential", "HTTPS")
+Rel(new_user, cloud_portal, "Manages account after verification", "HTTPS")
+Rel(existing_user, cloud_portal, "Manages sign-in methods", "HTTPS")
+
+Rel(auth_ui, google, "Delegates OAuth login", "OIDC")
+Rel(auth_ui, github, "Delegates OAuth login", "OIDC")
+Rel(auth_ui, milo, "Creates User on registration\n(via actions server)", "gRPC / Kubernetes API")
+
+Rel(email_provider, new_user, "Delivers verification link\nand password-reset email", "SMTP → email")
+Rel(milo, existing_user, "Sends waitlist notification\n(separate path from Zitadel SMTP)", "notification.miloapis.com")
+
+@enduml
