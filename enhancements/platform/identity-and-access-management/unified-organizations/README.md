@@ -13,13 +13,9 @@ Related: [milo-os/milo#636](https://github.com/milo-os/milo/issues/636)
 - [Summary](#summary)
 - [What is an organization?](#what-is-an-organization)
   - [Definition](#definition)
-  - [Why organizations exist](#why-organizations-exist)
-  - [How organizations relate to the rest of the platform](#how-organizations-relate-to-the-rest-of-the-platform)
-  - [Organization lifecycle](#organization-lifecycle-today)
-- [Product Change](#product-change)
-  - [What changes for users](#what-changes-for-users)
-  - [Why we are doing this](#why-we-are-doing-this)
-  - [Benefits](#benefits)
+  - [How organizations relate to the platform](#how-organizations-relate-to-the-platform)
+  - [Organization lifecycle](#organization-lifecycle)
+- [User experience](#user-experience)
 - [Motivation](#motivation)
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
@@ -39,187 +35,125 @@ Related: [milo-os/milo#636](https://github.com/milo-os/milo/issues/636)
 
 ## Summary
 
-Organizations today carry an immutable `Personal | Standard` type. That field
-does not store billing data or change the org resource model. Both values are
-the same `Organization` kind: namespace, projects, memberships. What
-`spec.type` actually controls is quota tier, how the org was provisioned,
-validation rules, portal UX, and observability labels.
+An organization is how a customer teams up on Datum Cloud. It groups people,
+holds their projects, and ties together access, quota, and billing. After this
+enhancement, every organization works the same way: one kind of org, no Personal
+or Standard split, no second-class workspace created at signup.
 
-We want one kind of organization. Business vs individual belongs on org contact
-and billing data, not on a frozen enum. Existing Personal and Standard orgs
-should behave like Standard orgs after migration: 10-project quota (not 2),
-editable display names, team invites enabled, no Personal badge or sort-first
-treatment.
+Users get a default organization when they sign up. They complete a short
+onboarding flow (contact details, then a billing account with a valid payment
+method) before they can use the rest of the platform. The org they start with is
+the org they keep. A solo developer who later incorporates updates contact
+details instead of creating a new workspace. Team invites, billing settings, and
+editable display names are available from the start.
+
+Individual vs business is contact information on the org, not a permanent label
+frozen at creation time.
 
 ## What is an organization?
 
-This section describes how organizations work **today**, so the change proposed
-later has a clear starting point. It defines what an organization _is_, why it
-exists, and how it relates to everything else in the platform, as currently
-implemented, not as we intend it to end up. Where today's behavior is the thing
-this enhancement changes, that is called out explicitly and detailed in
-[Product Change](#product-change) and the [Proposal](#proposal).
-
 ### Definition
 
-An organization is the top-level tenant in Datum Cloud. It is the boundary that
-owns resources, groups the people who work on them, and anchors quota and
-billing. Everything a customer does on the platform happens inside an
-organization.
+An organization is the top-level tenant in Datum Cloud. It is a group of people
+working together on projects and consuming resources from the platform. Most
+day-to-day work happens inside projects; the organization is where membership,
+access, quota, and billing come together.
 
-Today, every organization also carries an immutable `spec.type` of `Personal`
-or `Standard`. Both are the same `Organization` kind, with the same fields and
-the same namespace, projects, and memberships model. The type is a label that
-drives quota tier, provisioning, validation, and portal UX, not a structurally
-different object. Collapsing these two into a single kind is the core of this
-enhancement (see [Product Change](#product-change)).
+Each organization has:
 
-An organization plays four roles:
+- Members with roles scoped to that org.
+- Projects that hold the workloads and resources users actually operate.
+- Contact information (`spec.contactInfo`) for who the org is and how to reach
+  them. Required: email and name. Optional: address and business name.
+- One or more billing accounts, each with its own contact, currency, and payment
+  method. Billing contact stays separate from org contact.
+- Quota grants (for example, a default of 10 projects per org).
 
-- **Workspace.** Projects and the resources inside them live here.
-- **Team boundary.** People are invited into it and assigned roles.
-- **Isolation boundary.** Resources in one org are isolated from every other org.
-- **Commercial anchor.** Quota is granted to it, and billing accounts attach to it.
+There is no org "type." Whether someone is an individual or a business is a
+property of their contact details, and they can update those at any time.
 
-### Why organizations exist
-
-Organizations exist so the platform has a single, stable answer to four
-questions:
-
-| Question                        | Organization's role                                                                                                                        |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Who owns this resource?**     | Every project and workload belongs to exactly one organization.                                                                            |
-| **Who is allowed to touch it?** | Access is granted by membership + roles scoped to the organization.                                                                        |
-| **How much can they use?**      | Quota (e.g. project count) is granted to the organization. Today the amount depends on `spec.type` (Personal = 2 projects, Standard = 10). |
-| **Who pays?**                   | Billing accounts attach to the org.                                                                                                        |
-
-Without this boundary, there would be nowhere to attach access control, quota,
-billing, or isolation. The organization is the join point for all of them.
-
-### How organizations relate to the rest of the platform
+### How organizations relate to the platform
 
 ```mermaid
 flowchart TD
-  user[User] -- membership + role --> org["Organization<br/>(spec.type: Personal | Standard)"]
+  user[User] -- membership + role --> org[Organization]
   org -- contains --> project[Projects]
   project -- contains --> workloads[Workloads / resources]
-  org -- granted --> quota["Quota grants<br/>(2 projects if Personal, 10 if Standard)"]
+  org -- has --> contact[Org contact info]
+  org -- granted --> quota[Quota grants]
   org -- has 0..n --> billing[Billing accounts]
-  billing -- has its own --> billingContact[Billing contact + address]
+  billing -- has --> payment[Payment method]
 ```
 
-| Relationship                        | Cardinality                               | Notes (today)                                                                                                    |
-| ----------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **User ↔ Organization**             | many-to-many via `OrganizationMembership` | A user can belong to many orgs; an org has many members. Roles are scoped to the org.                            |
-| **Organization → Projects**         | one-to-many                               | Projects are namespaced under the org and hold the actual workloads/resources.                                   |
-| **Organization → Quota**            | one-to-many grants                        | Allowances are granted to the org, not the user. The amount is type-dependent today (2 vs 10 projects).          |
-| **Organization → Billing accounts** | one-to-many                               | An org can have **multiple** billing accounts, each with its own contact, address, currency, and payment method. |
+| Relationship | Cardinality | Notes |
+|--------------|-------------|-------|
+| User ↔ Organization | many-to-many via membership | A user can belong to many orgs with different roles in each. |
+| Organization → Projects | one-to-many | Projects are where users do most of their work. Resources live in projects. |
+| Organization → Contact info | one | Tenancy-level identity. Separate from any billing contact. |
+| Organization → Quota | one-to-many grants | Allowances attach to the org, not the user. |
+| Organization → Billing accounts | one-to-many | An org can have multiple billing accounts. There is no single "the billing address" to fall back on, which is why org contact carries its own optional address. |
 
-Two things are worth calling out today because they drive decisions later in
-this document:
+Access and quota both resolve through the organization. That is why a user can
+collaborate across several orgs with different roles and limits in each.
 
-- **The org has no contact record of its own.** Today an organization is
-  identified only by its name/display name and `spec.type`. The only contact and
-  address data lives on `BillingAccount.spec.contactInfo`. Because an org can
-  have **multiple** billing accounts (each with its own address), there is no
-  single "the org address." This enhancement adds a tenancy-level
-  `spec.contactInfo` to the organization itself (see
-  [Product Change](#product-change)).
-- **Quota and access attach to the org, not the user.** A user's permissions
-  and a workspace's limits both resolve through the organization, which is why a
-  user can collaborate across several orgs with different roles and limits in
-  each.
+### Organization lifecycle
 
-### Organization lifecycle (today)
+1. **Created** when a user signs up (default org) or when they create an
+   additional org in the portal.
+2. **Identified** by a stable, opaque system name and an editable display name.
+   Users do not pick resource slugs.
+3. **Onboarded** through contact details and a billing account with a valid
+   payment method. Full platform access opens once onboarding is complete.
+4. **Operated** with members, projects, and billing added over time.
 
-- **Created** in two ways: a `Personal` org is auto-created as a default
-  workspace when a user signs up (datum controller, named
-  `personal-org-{hash(userUID)}`); `Standard` orgs are created on demand via the
-  portal, where the user picks a resource slug.
-- **Identified** by `metadata.name` (a `personal-org-*` hash or a user-chosen
-  slug) plus a human-readable display name. Personal-org display names are
-  locked; Standard-org names are editable.
-- **Constrained by type.** Personal orgs are capped at 2 projects, have team
-  and billing settings hidden in the portal, and show a "Personal" badge.
-  Standard orgs get 10 projects and full settings.
-- **Operated** within its quota, with members invited (Standard) and roles
-  assigned over time.
-- **Billed** through one or more billing accounts attached when the org is ready
-  to pay for usage.
+Completion is recorded with a one-time annotation on the org
+(`resourcemanager.miloapis.com/onboarding-completed-at`), stamped by a
+controller when contact info is complete and a billing account has a usable
+payment method. See [Signup and onboarding](#3-signup-and-onboarding) for
+implementation detail.
 
-## Product Change
+## User experience
 
-This enhancement removes the distinction between "Personal" and "Standard"
-organizations. Today, when a user signs up, we silently create a constrained
-"Personal" workspace: capped at 2 projects, locked display name, no team
-invites, no billing settings, and a "Personal" badge in the portal. To run a
-real workload or invite a teammate, the user has to abandon that workspace and
-create a separate "Standard" organization from scratch.
+**Signup.** A user signs up and gets a default organization automatically, with
+a neutral display name they can change later.
 
-After this change there is one kind of organization. Every org behaves like
-today's Standard org, and "individual vs business" is captured through editable
-organization contact details (`spec.contactInfo`) rather than a frozen type
-field that can never be changed.
+**Onboarding.** Before they can use the platform, they provide org contact info
+(email and name required; address and business name optional) and set up a
+billing account with a valid payment method. The portal walks them through
+contact first, then billing.
 
-### What changes for users
+**Day to day.** Every org has the same capabilities: invite teammates, manage
+billing, rename the org, create projects up to the org quota. There is no
+Personal badge, no hidden settings, no cap that forces a user to recreate their
+workspace to grow.
 
-- **One workspace that grows with you.** The org created at signup is a
-  full-featured organization. A solo developer who later incorporates keeps the
-  same workspace, projects, and history, with no migration to a new org.
-- **No more Personal limits.** All orgs get the Standard 10-project quota
-  (up from 2), editable display names, team invites, and billing/team settings.
-- **Cleaner signup.** We no longer ask users to invent a resource slug. They
-  provide a display name and contact details; the system assigns a stable,
-  opaque identifier behind the scenes.
-- **An onboarding step before access.** Before full platform access, we collect
-  organization contact info (name/business name, email, address) and a billing
-  account with a valid payment method. This replaces the implicit "what type are
-  you?" decision with explicit, always-editable information.
-- **No Personal badge or special-casing** in the portal. Every org is treated
-  the same.
+**Additional orgs.** Users can create more organizations from the portal. They
+provide a display name; the system assigns the internal identifier.
 
-### Why we are doing this
-
-The `Personal | Standard` type was an immutable enum that acted as a product
-proxy for "individual vs business," even though it never stored billing
-identity (that already lives on `BillingAccount.spec.contactInfo`). Because it
-was immutable, users could not convert a personal workspace into a business one,
-so they had to start over. Internally, the same enum drove quota tier,
-provisioning, validation, and portal UX, so a single product label was quietly
-coupled to behavior across five repositories. Collapsing to one org kind and
-moving "who you are" onto editable contact data removes that conflation.
-
-### Benefits
-
-- **Better onboarding and growth path.** Users are never trapped in a
-  second-class workspace. The org they start with is the org they keep.
-- **Higher effective limits.** Existing personal orgs move from 2 to 10
-  projects, which reduces friction for active users.
-- **Simpler mental model.** An org is an org. Business vs individual is contact
-  data, not a permanent label.
-- **Lower maintenance cost.** Removing type-based branching from controllers,
-  quota policies, admission rules, and both portals means fewer code paths and
-  less drift between repos.
-- **Flexible identity.** Organizations can update contact and business details
-  at any time without recreating resources.
+**What goes away.** The Personal/Standard split, locked display names on
+auto-created orgs, the 2-project Personal cap, and the pattern where a user
+must abandon their signup workspace and start a new org to invite a teammate or
+run a serious workload.
 
 ## Motivation
 
-The type split causes real problems:
+Today we maintain two organization types, Personal and Standard, even though
+they are the same resource underneath. The type drives quota, portal UX, and
+provisioning rules, and it stands in loosely for "individual vs business" even
+though that information belongs on contact and billing records.
 
-- A solo developer who later incorporates cannot convert their org. They create
-  a new Standard org and leave the old workspace behind.
-- "Personal" means both "auto-created default workspace" and, in product terms,
-  "not a business," even though billing identity is stored elsewhere.
-- Auto-created personal orgs add UI clutter (badge, sort-first, immutable name)
-  before the user has decided what they want.
-- Controllers, quota policies, admission rules, membership status cache, and
-  both portals branch on `spec.type` for what is essentially the same resource.
+That causes a few user-visible problems:
 
-Billing identity (name, businessName, address, taxIds) already lives on
-`BillingAccount.spec.contactInfo` in the billing service. Org type is only a
-product proxy for "individual vs business," not the billing record itself. That
-conflation is the problem.
+- A user who outgrows a Personal workspace cannot convert it. They create a new
+  Standard org and leave projects behind.
+- Signup creates a constrained Personal org before the user has chosen how they
+  want to work.
+- The same enum branches behavior across controllers, quota policies, admission
+  rules, and both portals for what is essentially one kind of object.
+
+Billing identity already lives on `BillingAccount.spec.contactInfo`. Org type
+was never the billing record; it was a product label that could not be changed.
+This enhancement removes the label and puts identity where it belongs.
 
 ### Goals
 
@@ -739,55 +673,24 @@ flowchart TD
 
 #### Onboarding completion annotation
 
-Full platform access is gated on completing onboarding. Onboarding is complete
-when the org has complete contact info (email + name) **and** at least one
-`BillingAccount` with a valid payment method. A billing account that exists but
-has no usable payment method does not count. Until both hold, cloud-portal keeps
-the user in the onboarding flow (contact details first, then billing) and does
-not grant access to the rest of the platform. We record completion with an
-annotation rather than a spec or status field, because it is a one-time
-lifecycle marker that the portal, staff tooling, analytics, and policies can
-read cheaply without parsing related resources.
+Full platform access requires completed onboarding: org contact info (email +
+name) and a billing account whose `DefaultPaymentMethodReady` condition is
+`True`. A billing account without a usable payment method does not count. Until
+both hold, the portal keeps the user in the onboarding flow.
 
-| Annotation                                             | Value             | Set by     | Meaning                                                                                                                      |
-| ------------------------------------------------------ | ----------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `resourcemanager.miloapis.com/onboarding-completed-at` | RFC3339 timestamp | controller | Contact info is complete and the org namespace has a `BillingAccount` whose `DefaultPaymentMethodReady` condition is `True`. |
+| Annotation | Value | Set by | Meaning |
+|------------|-------|--------|---------|
+| `resourcemanager.miloapis.com/onboarding-completed-at` | RFC3339 timestamp | controller | Contact info is complete and the org has a billing account with a valid payment method. |
 
-**Billing signal (confirmed against the billing service).** The billing API
-already publishes exactly the signal we need, so the controller does not touch
-Stripe or provider internals:
+The controller watches `Organization` and `BillingAccount` resources and
+stamps the annotation once. It is set once and not removed if billing later
+changes. The portal gate reads the annotation rather than recomputing the
+condition on every request.
 
-- `BillingAccount.status.conditions[type=DefaultPaymentMethodReady]` (constant
-  `BillingAccountConditionDefaultPaymentMethodReady`) is set `True` by the
-  billing service's `BillingAccountReconciler` when the account's
-  `spec.defaultPaymentMethodRef` points at a `PaymentMethod` in the `Active`
-  phase (success reason `Ready`). Downstream services (invoicing, charge
-  processing) already gate on this condition rather than on account phase, so
-  reusing it keeps onboarding consistent with billing.
-- A `PaymentMethod` reaches `Active` (and its own `InstrumentReady` condition
-  becomes `True`) once a provider attaches a usable instrument. The Stripe
-  provider that does this is implemented and deployed (`milo-os/stripe-provider`,
-  a controller-runtime operator on the official `stripe-go` SDK, API group
-  `stripe.billing.miloapis.com/v1alpha1`). It creates a Stripe Customer and a
-  card SetupIntent, surfaces the client secret on
-  `StripePaymentMethod.status.setupIntent.clientSecret` for the portal, and on
-  the `setup_intent.succeeded` webhook patches the billing `PaymentMethod` to
-  `phase=Active` + `InstrumentReady=True`. Billing's `BillingAccountReconciler`
-  then raises `DefaultPaymentMethodReady`. So the whole chain that backs this
-  onboarding gate already exists; the gate just reads the end of it.
-
-Rules:
-
-- The annotation is **set once** and not removed if a billing account is later
-  detached or its payment method later expires. Onboarding is a milestone, not a
-  live status. (If we need a live "currently has valid billing" signal, that is a
-  separate concern, ideally derived from `BillingAccount` status directly rather
-  than this annotation.)
-- A controller is the source of truth, not the portal. It watches `Organization`
-  and `BillingAccount` so the marker is correct regardless of how billing was
-  attached (portal, API, or migration).
-- The portal reads the annotation to drive onboarding banners, checklists, and
-  "add billing" prompts, instead of recomputing the condition on every request.
+Payment readiness comes from the existing billing API: the
+`DefaultPaymentMethodReady` condition on `BillingAccount`, set when the
+referenced `PaymentMethod` is `Active`. The stripe-provider handles the card
+SetupIntent flow that moves a payment method to `Active`.
 
 Example:
 
