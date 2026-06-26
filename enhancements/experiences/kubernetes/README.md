@@ -4,8 +4,9 @@
 
 Kubernetes is how teams work with Datum Cloud without leaving their cluster
 workflow — exposing services, wiring up connectivity, and more through standard
-resources like the Gateway API and Ingress, with no need to learn Datum-specific
-tooling. Today that experience is delivered by an operator that handles all
+resources like the [Gateway API](https://kubernetes.io/docs/concepts/services-networking/gateway/)
+and [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/), with no
+need to learn Datum-specific tooling. Today that experience is delivered by an operator that handles all
 connectivity to Datum Cloud's edge network behind the scenes — no inbound firewall
 rules, public IPs, or cluster exposure required. It's a first-class experience,
 and this section collects the enhancements that shape it: how Datum integrates
