@@ -39,7 +39,7 @@ a third party who wants to publish a plugin must either get it merged into
 Datum's repository or hand users a raw `owner/repo` string with no description,
 no search, and no signal about whether it is safe.
 
-This enhancement opens the plugin ecosystem. It lets **anyone** — a community
+Opening the plugin ecosystem changes that. It lets **anyone** — a community
 author, an open-source project, or an enterprise platform team — publish their
 own catalog of `datumctl` plugins, and lets users **register** those catalogs
 and **browse, search, and install** from them through the same friendly
@@ -55,15 +55,12 @@ taps, Claude Code plugin marketplaces — while keeping Datum's curated catalog 
 the trusted default and making the moment a user adopts a third-party catalog an
 explicit, informed choice.
 
-This enhancement also recognizes that Datum Cloud is built on the **milo-os**
-platform: many of the services a user works with originate as milo-os services,
-and so do the CLI plugins that drive them. A service repository typically exports
-more than one binary — the service itself, and, separately, its CLI plugin — so a
-milo-os plugin follows a platform naming convention, `milo-<command>` (for example
-`milo-ipam`). That name keeps the plugin distinct from the service's own binaries
-and is host-agnostic: a single `milo-<command>` artifact installs into `datumctl`
-and any other milo-os-based CLI from a catalog, with no `datumctl`-specific build.
-The user still types the unprefixed command (`datumctl ipam`). The first concrete
+Datum Cloud is also built on the **milo-os** platform, and that shapes the
+design: many of the services a user works with — and the CLI plugins that drive
+them — originate as milo-os services. A milo-os service should be able to publish
+a single plugin that installs into `datumctl`, and into any other milo-os-based
+CLI, straight from a catalog — rather than shipping a separate host-branded binary
+for each. To the user the command is simply `datumctl ipam`. The first concrete
 case is the milo-os IPAM service.
 
 ## Motivation
@@ -134,11 +131,10 @@ discoverable, friendly, and safe.
 - **Guaranteeing the quality or safety of third-party plugins.** Datum provides
   trust *signals* and integrity verification, not an endorsement of every plugin
   in every catalog a user chooses to add.
-- **Standardizing the full cross-platform plugin protocol.** This enhancement
-  decouples a plugin's *binary name* from the host CLI so milo-os plugins install
-  into `datumctl`. Standardizing the entire plugin contract (the manifest, and the
-  context and credentials a host passes to a plugin) across every milo-os-based
-  platform is a larger, separate effort noted here only as a direction.
+- **Standardizing the full cross-platform plugin protocol.** Decoupling a plugin's
+  *binary name* from the host CLI — so milo-os plugins install into `datumctl` — is
+  in scope. Standardizing the entire plugin *contract* across every milo-os-based
+  platform is a larger, separate effort, noted here only as a direction.
 - **Defining the implementation rollout or sequencing.** This document describes
   the intended product experience and vision; engineering sequencing is out of
   scope here.
@@ -241,22 +237,20 @@ persistent badge so they never lose track of which plugins are third-party.
 
 #### Story 5: A milo-os service ships one plugin that works in Datum Cloud
 
-The milo-os IPAM service repository builds the IPAM **service** binary (`ipam`)
-and, separately, publishes its **CLI plugin** as `milo-ipam`, following the
-milo-os plugin convention. Because Datum Cloud is built on milo-os, that plugin is
-published to a catalog and a Datum Cloud user installs it like any other:
+The milo-os IPAM service publishes its CLI plugin to a catalog, and a Datum Cloud
+user installs it like any other plugin:
 
 ```console
 $ datumctl plugin install ipam
 $ datumctl ipam prefix claim --pool staging-backbone --length 24
 ```
 
-The IPAM team didn't build a `datumctl`-specific binary or maintain a separate
-`datumctl-ipam` release — the same `milo-ipam` artifact installs into `datumctl`,
-and into any future milo-os-based CLI, straight from the catalog. The `milo-`
-prefix keeps the plugin distinct from the service's own `ipam` binary, while to
-the user the command is simply `datumctl ipam`, inheriting their Datum identity,
-organization, and project.
+The IPAM team didn't build or maintain a `datumctl`-specific release — one plugin
+artifact installs into `datumctl`, and into any future milo-os-based CLI, straight
+from the catalog. To the user the command is simply `datumctl ipam`, inheriting
+their Datum identity, organization, and project. (The naming convention that keeps
+one artifact portable across hosts is covered in
+[Design Details](#plugin-binaries-and-platform-shared-plugins).)
 
 ### Notes/Constraints/Caveats
 
@@ -503,48 +497,30 @@ personal catalog, a company catalog, and Datum's curated catalog.
 
 ### Plugin binaries and platform-shared plugins
 
-Datum Cloud is built on the **milo-os** platform, and many of its capabilities are
-milo-os services. A service repository typically exports more than one binary — the
-service itself (the IPAM service binary is named `ipam`) and, separately, its CLI
-plugin. For that plugin to install into `datumctl` cleanly, its binary name has to
-do two things: stay independent of any single host CLI's brand, *and* clearly
-identify itself as a plugin rather than as some other binary the service ships.
+A milo-os service can ship one CLI plugin that installs into `datumctl` and into
+any other milo-os-based CLI. For that to work, the plugin's binary name has to stay
+independent of any single host's brand while still identifying itself as a plugin —
+a service repository often ships several binaries, including the service itself.
 
-**milo-os plugins follow the `milo-<command>` convention.** The IPAM plugin binary
-is `milo-ipam` — not the service's `ipam`, and not a host-branded `datumctl-ipam`.
-The `milo-` prefix marks it as a milo-os platform plugin: distinct from the
-service's other binaries, and recognized by *any* milo-os-based CLI. A milo-os
-service therefore publishes one plugin artifact that the whole ecosystem can
-install. The user types the unprefixed command (`datumctl ipam`); `datumctl` strips
-the prefix to derive it.
+milo-os plugins use a `milo-<command>` convention: the IPAM plugin is `milo-ipam`,
+distinct from the service's own `ipam` binary and recognized by any milo-os-based
+CLI. datumctl-native plugins keep the existing `datumctl-<command>` form. Either
+way the user types the unprefixed command (`datumctl ipam`), and a catalog entry
+can name exactly which binary in a release archive is the plugin.
 
-**datumctl recognizes two plugin prefixes.** `milo-<command>` for portable milo-os
-platform plugins, and `datumctl-<command>` for datumctl-native plugins (for
-example, a community plugin that isn't a milo-os service). Both resolve to the same
-kind of `datumctl <command>` invocation.
+The prefix is also a security boundary for binaries found on `PATH`: `datumctl`
+treats a `PATH` binary as a plugin only when it carries a known prefix, so an
+unrelated program named `ipam` is never run as a command. Catalog-installed plugins
+are additionally integrity-checked and recorded.
 
-**Catalog installs pick the plugin binary, never the service binary.** A catalog
-entry can name exactly which binary in the release archive is the plugin, and when
-auto-detecting, `datumctl` honors the `milo-`/`datumctl-` convention. So even when a
-service bundles its service binary and its plugin in the same archive, the plugin is
-the one installed.
-
-**Manual PATH installs use the same convention, and it is a security boundary.** A
-binary a user drops on their `PATH` is discovered as a plugin only when it is named
-`milo-<command>` or `datumctl-<command>`. `datumctl` never treats an unprefixed
-binary it merely finds on `PATH` as a plugin — otherwise an unrelated program named
-`ipam` could be run as a `datumctl` command. The prefix is both the discovery signal
-and the trust boundary for `PATH` binaries; catalog-installed plugins are
-additionally integrity-checked and recorded in the install record.
-
-A natural next step — beyond the scope of this document — is to standardize the
-plugin *contract itself* (the manifest, and the context and credentials a host
-passes to a plugin) at the milo-os level, so that "build a plugin once, run it on
-any milo-os platform" holds end-to-end, not just for the binary name.
+Standardizing the plugin *contract itself* — the manifest, and the context and
+credentials a host passes to a plugin — across every milo-os platform is a natural
+next step beyond this document, so "build once, run on any milo-os platform" holds
+end-to-end, not just for the binary name.
 
 ## Production Readiness Review Questionnaire
 
-This enhancement is a **client-side `datumctl` feature**. It introduces no Datum
+This is a **client-side `datumctl` feature**. It introduces no Datum
 control-plane components, API types, or server-side services, so most of the
 cluster-oriented PRR questionnaire does not apply. The relevant readiness
 considerations are captured below.
@@ -614,7 +590,7 @@ considerations are captured below.
   within the broader ecosystem.
 - **Rely on direct source installs (`owner/repo`) for everything third-party.**
   This works mechanically but provides no discovery, no curated metadata, and no
-  trust signal — exactly the gaps this enhancement closes. It remains available as
+  trust signal — exactly the gaps named-catalog discovery closes. It remains available as
   a power-user escape hatch.
 - **Build a centralized Datum-hosted marketplace first.** A hosted aggregator
   (à la Artifact Hub) is attractive but is a larger investment that presumes
