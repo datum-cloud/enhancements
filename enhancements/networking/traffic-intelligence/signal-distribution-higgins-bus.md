@@ -8,24 +8,28 @@
 
 Higgins Bus is the pub/sub transport layer for Total Load Balancing, built on MoQ Transport (MOQT). It carries signals — geo data, named IP lists, and future routing intelligence — from authoritative sources to every edge PoP and consumer in near real-time.
 
-The decision to build on MOQT reflects a broader conviction about where this protocol is heading. MoQ is emerging as a foundation layer not just for platform coordination — routing signals, health state, geo data — but for the AI workloads that will run alongside them: token streaming from inference workers, worker discovery without a registry, job scheduling across a distributed compute fleet, and agent-to-agent pipeline handoffs. These are the same fan-out and coordination problems, carrying different payloads. Building Higgins Bus on MOQT now means the relay infrastructure established here extends naturally to serve inference and agent use cases as they mature — one fabric, not two systems built side by side.
-
 ---
 
 ## Why MOQT
+
+This is an unconventional choice worth explaining. MOQT was not designed for network signal distribution — it was designed for low-latency media streaming: delivering live video to large audiences with sub-second glass-to-glass latency. The media industry has spent years solving that problem, and the result is a protocol with relay fan-out, track-based subscription, QUIC-native transport, relay-level authentication, and subscriber-side filtering all baked in. Those properties turn out to be exactly what distributing routing signals across a global edge network requires.
 
 Total Load Balancing has two hard requirements for its distribution layer:
 
 1. **Low-latency fan-out** — changes must reach every edge PoP in seconds, not minutes
 2. **No central broker bottleneck** — the distribution path must survive a single node failure and scale to hundreds of PoPs
 
-MOQT is a pub/sub protocol built on QUIC and WebTransport, designed for exactly this shape of problem. Key properties:
+MOQT fits both. Key properties:
 
 - **QUIC-native** — no head-of-line blocking, connection migration, and low-latency stream setup make it well-suited for WAN distribution across geographically dispersed PoPs
 - **Relay topology** — MOQT relays fan out subscriptions at the network edge, so a single publisher reaches many subscribers without a hub-and-spoke bottleneck
 - **Track-based model** — named tracks with monotonic object sequences map cleanly to the "one named list = one update stream" shape of our distribution problem
+- **Authentication** — relay-native authentication controls which publishers can write to which tracks and which subscribers can receive them. PoP agents authenticate to receive platform tracks; customer systems are scoped to their org namespace. No bespoke auth layer required.
+- **Subscriber-side filtering** — consumers subscribe only to the tracks they need. A DNS system subscribes to health and geo tracks; a WAF subscribes to IP lists. Unrelated signal traffic never reaches a consumer that doesn't need it — the relay enforces this, not application logic.
 - **Object TTLs** — built-in expiry semantics match the TTL requirements for named IP lists
 - **Protocol maturity** — MOQT is an active IETF draft (moq-transport); the spec is stable enough to build on and aligns with the existing moqstream infrastructure investment
+
+The other part of the bet is timing. As agents take on more coordination work — routing inference jobs, streaming tokens back to clients, handing off between pipeline stages — the need for a low-latency, authenticated, relay-fanned-out fabric becomes more obvious. The media industry's investment in relay infrastructure, authentication models, object delivery semantics, and interoperability all carry over directly. Building Higgins Bus on MOQT now means that infrastructure extends naturally to serve inference and agent use cases as they mature — one fabric, not two systems built side by side.
 
 ---
 
@@ -232,3 +236,5 @@ The TSDB is not in the critical path for live delivery. If unavailable:
 **No durable relay history.** MOQT relays do not store message history. The Durable Replay section above describes the time-series storage approach for subscribers that need historical context. For named lists, current state is always sufficient — the most recent object is the full authoritative state. For GeoDB deltas, a PoP that misses a delta sequence falls back to pulling the current full snapshot.
 
 **Object storage dependency.** The GeoDB hybrid model introduces a dependency on object storage for snapshot distribution. This is a deliberate trade-off: it keeps MOQT in its sweet spot (real-time, small-to-medium objects) while using the right tool for bulk artifact distribution.
+
+**Relay-level caching (watch).** Active work in the MoQ community is adding object caching at the relay layer, driven by video catch-up and on-demand playback use cases. For those scenarios, a subscriber that joins late or reconnects can retrieve recent objects from relay cache rather than requiring the origin to retransmit. If this capability stabilizes, it maps directly onto the Higgins Bus reconnect problem: a PoP offline for seconds to minutes could replay missed signal objects from relay cache without involving the TSDB at all. For signal types where intermediate state transitions matter — a PoP cycling through HEALTHY → DEGRADED → UNHEALTHY while a subscriber was offline — relay caching would be a cleaner solution than the current TSDB handoff pattern for short recovery windows. This does not change the TSDB design, which covers long-term retention and AI workload history that relay cache will never hold. Worth tracking as the spec evolves.

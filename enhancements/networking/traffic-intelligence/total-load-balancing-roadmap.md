@@ -14,7 +14,7 @@ The roadmap is organized around four phases, each building on the foundation est
 
 Phase 1 establishes the three foundational systems that every later phase depends on: Higgins Bus as the signal distribution fabric, Nate as the active health probe infrastructure, and Beard as the DDoS detection and scrubbing layer. On top of that foundation, Zava gains its first active use of the platform's new real-time awareness — Compute location discovery via EDS.
 
-### Higgins Bus
+### Higgins Bus — Signal Distribution
 
 | # | Task | Description |
 |---|---|---|
@@ -24,7 +24,7 @@ Phase 1 establishes the three foundational systems that every later phase depend
 | 1.4 | **PoP subscriber agents** | Deploy subscriber agents at each PoP. Agents receive published objects from the regional relay and serve signal data to local consumers (Envoy, DNS, ALB) in-process — no round-trip to a central service on the request path. |
 | 1.5 | **Named IP list distribution** | First production use of Higgins Bus: customer-managed and platform-managed named IP lists distributed to every PoP. Each list is a track; every update is a new object carrying the full list payload, a monotonic sequence number, and a TTL. Updates propagate within QUIC's latency budget — typically sub-second from commit to enforcement. |
 
-### Nate
+### Nate — Active Health Checks
 
 | # | Task | Description |
 |---|---|---|
@@ -33,7 +33,7 @@ Phase 1 establishes the three foundational systems that every later phase depend
 | 1.8 | **Latency measurement** | Instrument connection time, TLS handshake time, time-to-first-byte, and total response time across probe types. Publish p50/p95/p99 latency per probe origin region in the HealthStatus object. |
 | 1.9 | **Per-region health status** | Aggregate probe results by region. HealthStatus includes a per-region breakdown alongside the overall status, allowing consumers to distinguish PoP-local issues from regional network issues. |
 
-### Beard
+### Beard — DDoS Scrubbing
 
 | # | Task | Description |
 |---|---|---|
@@ -43,7 +43,7 @@ Phase 1 establishes the three foundational systems that every later phase depend
 | 1.13 | **RTBH (last resort)** | Implement Remote Triggered Black Hole via GoBGP. RTBH requires explicit customer opt-in or a platform-defined volume threshold. All announcements are time-bounded; the control plane monitors for attack cessation and withdraws as soon as conditions allow. |
 | 1.14 | **Attack-state signals to Higgins Bus** | Publish attack state (clean / elevated / mitigating / blackholed), attack class, intensity (bps/pps), active mitigation mode, and affected prefixes to `platform/ddos/pop/{pop-id}` on every state transition and on a heartbeat during active attacks. Enables downstream consumers to distinguish attack-induced degradation from infrastructure failure. |
 
-### Zava
+### Zava — Envoy / L7
 
 | # | Task | Description |
 |---|---|---|
@@ -62,7 +62,7 @@ Phase 1 establishes the three foundational systems that every later phase depend
 
 Geo signals from Roy Kent are introduced across the full stack in dependency order: distribution first, then the consumers. Higgins Bus delivers GeoDB snapshots to every PoP. Zava enforces geo-based policy and enriches requests. Jamie Tartt steers DNS to the nearest healthy PoP. Beard incorporates geo data into XDP scrubbing rules. Nate integrates with routing consumers.
 
-### Jamie Tartt
+### Jamie Tartt — DNS / GSLB
 
 | # | Task | Description |
 |---|---|---|
@@ -72,7 +72,7 @@ Geo signals from Roy Kent are introduced across the full stack in dependency ord
 | 2.4 | **GeoSteeringPolicy resource** | Implement the customer-facing `GeoSteeringPolicy` CRD. Customers configure geo steering on/off, DNS TTL, fallback behavior, and sovereignty rules per zone. The control plane translates policies into PowerDNS zone configuration. |
 | 2.5 | **EDNS Client Subnet** | Configure PowerDNS ECS handling. When a resolver includes an ECS option, use the client subnet for the geo lookup rather than the resolver IP. Document accuracy implications for clients behind ECS-absent resolvers. |
 
-### Zava
+### Zava — Envoy / L7
 
 | # | Task | Description |
 |---|---|---|
@@ -80,14 +80,14 @@ Geo signals from Roy Kent are introduced across the full stack in dependency ord
 | 2.7 | **Request metadata enrichment** | Set `x-datum-geo-country`, `x-datum-geo-region`, `x-datum-asn`, and `x-datum-ip-type` on every request. Downstream services and WAF rules consume these headers without performing their own geo lookups. |
 | 2.8 | **IP type policy** | Use IP type signal (residential / datacenter / proxy / VPN / satellite) to apply differential rate limits or route requests to a scrubbing path before they reach the Compute upstream. |
 
-### Roy Kent
+### Roy Kent — Geo / ASN / IP Type
 
 | # | Task | Description |
 |---|---|---|
 | 2.9 | **GeoDB distribution via Higgins Bus** | Publish GeoDB version notifications to `platform/geodb/version`. PoP subscriber agents pull the current snapshot from object storage on notification and install it locally. Where the vendor supports incremental feeds, publish delta patches to `platform/geodb/delta/{version}` to avoid full re-downloads. |
 | 2.10 | **ASN and IP type signals** | Extend the PoP-local GeoDB with ASN and IP type data. Make Autonomous System Number (carrier, cloud provider, peering relationship) and IP type (residential, datacenter, proxy, VPN, satellite) available to all local consumers alongside geo data. |
 
-### Nate
+### Nate — Active Health Checks
 
 | # | Task | Description |
 |---|---|---|
@@ -96,7 +96,7 @@ Geo signals from Roy Kent are introduced across the full stack in dependency ord
 | 2.13 | **Customer-defined HealthChecks** | Implement the `HealthCheck` and `HealthCheckPolicy` CRDs. Customers configure probes targeting their own origins, third-party APIs, or private endpoints accessible via Connectors. Customer health results published to `org/{org-id}/health/{check-id}`. |
 | 2.14 | **Roy Kent geo for probe selection** | Use Roy Kent GeoDB to inform probe location selection — choose origin PoPs with ASN diversity within each region to distinguish PoP-local issues from single-ISP outages. |
 
-### Beard
+### Beard — DDoS Scrubbing
 
 | # | Task | Description |
 |---|---|---|
@@ -105,7 +105,7 @@ Geo signals from Roy Kent are introduced across the full stack in dependency ord
 | 2.17 | **DNS attack-state integration (Jamie Tartt)** | Confirm Beard's `platform/ddos/pop/{pop-id}` signal is consumed by Jamie Tartt's PowerDNS control plane for PoP deprioritization during active attacks. Validate that GSLB and Nate health signals are interpreted independently so attack-induced degradation is not confused with infrastructure failure. |
 | 2.18 | **Coraza L7 escalation** | Establish the signal flow from Coraza (Envoy WASM WAF) to the Beard mitigation control plane. When Coraza identifies HTTP flood or slowloris source IPs, Beard escalates to the XDP layer — blocking at L3 before packets reach Envoy. Coordinate per-source rate limit tightening between layers. |
 
-### Higgins Bus
+### Higgins Bus — Signal Distribution
 
 | # | Task | Description |
 |---|---|---|
@@ -119,14 +119,14 @@ Geo signals from Roy Kent are introduced across the full stack in dependency ord
 
 Add RTT, packet loss, and congestion as first-class routing inputs across the stack. Jamie Tartt begins scoring PoPs by measured path quality rather than geographic distance alone. Zava scores and weights upstreams dynamically. Nate latency signals feed the scoring model. Beard's attack-state integrates directly into Envoy's routing weight model.
 
-### Jamie Tartt
+### Jamie Tartt — DNS / GSLB
 
 | # | Task | Description |
 |---|---|---|
 | 3.1 | **RTT-proxied PoP scoring** | Incorporate RTT signal from Higgins Bus into PowerDNS PoP selection. Prefer PoPs with lower measured path latency to the client over pure geographic proximity. Geographic distance remains the fallback where RTT signal is unavailable. |
 | 3.2 | **Weighted multi-PoP answers** | When multiple PoPs serve the same region, return weighted answers based on path quality scores. Distribute load across healthy PoPs in proportion to their current score rather than returning a single best PoP. |
 
-### Zava
+### Zava — Envoy / L7
 
 | # | Task | Description |
 |---|---|---|
@@ -134,7 +134,7 @@ Add RTT, packet loss, and congestion as first-class routing inputs across the st
 | 3.4 | **Congestion-aware spillover** | When a PoP's congestion signal exceeds a threshold, reduce its EDS endpoint weight rather than removing it entirely — graceful degradation keeps endpoints in rotation at reduced capacity rather than creating binary in/out state. |
 | 3.5 | **Policy-over-performance** | Establish evaluation order: sovereignty constraints eliminate candidates first; latency scoring applies within compliant candidates only. Performance optimization never overrides policy. |
 
-### Nate
+### Nate — Active Health Checks
 
 | # | Task | Description |
 |---|---|---|
@@ -142,14 +142,14 @@ Add RTT, packet loss, and congestion as first-class routing inputs across the st
 | 3.7 | **Throughput checks** | Implement download and upload throughput probes on a separate, lower-frequency schedule. Throughput signals inform congestion-aware spillover — a PoP with degraded throughput under load should receive reduced weight before it becomes unavailable. |
 | 3.8 | **Extended protocol support** | Add TLS, DNS, gRPC, and ICMP probe types. Extended protocol coverage improves health signal accuracy for infrastructure components not reachable over plain HTTP. |
 
-### Beard
+### Beard — DDoS Scrubbing
 
 | # | Task | Description |
 |---|---|---|
 | 3.9 | **Attack-state into Envoy routing** | Wire Beard's `platform/ddos/pop/{pop-id}` attack-state signal into Envoy's EDS endpoint weight model. When a PoP is mitigating an attack, reduce the EDS weight of its endpoints rather than waiting for passive outlier detection or Nate health transitions to catch the degradation. |
 | 3.10 | **Endpoint weight reduction under attack** | When Beard signals an active attack against a specific endpoint or prefix, reduce that endpoint's EDS weight directly. This is the L7 counterpart to the L3/L4 inline scrubbing — both layers respond to the same attack state simultaneously. |
 
-### Higgins Bus
+### Higgins Bus — Signal Distribution
 
 | # | Task | Description |
 |---|---|---|
@@ -161,20 +161,20 @@ Add RTT, packet loss, and congestion as first-class routing inputs across the st
 
 Add hard-constraint sovereignty enforcement at both DNS and L7. Extend the routing decision layer to inference-bound traffic — model locality and GPU availability join geography and health as routing inputs. Make geo and health signals available to Compute workloads. Deliver L4 customer-configurable load balancing for Compute targets. Complete Higgins Bus with durable replay for historical analysis and AI workload history requirements.
 
-### Jamie Tartt
+### Jamie Tartt — DNS / GSLB
 
 | # | Task | Description |
 |---|---|---|
 | 4.1 | **Sovereignty enforcement** | Implement hard jurisdiction constraints in GSLB. A non-compliant PoP is excluded from the DNS answer set regardless of proximity or health. Sovereignty rules are evaluated before proximity or quality scoring — no performance signal overrides a compliance constraint. |
 | 4.2 | **Jurisdiction-aware PoP selection** | Maintain a PoP jurisdiction registry in the control plane mapping each PoP to its legal jurisdiction. Translate customer `GeoSteeringPolicy` sovereignty rules into PowerDNS routing logic that excludes non-compliant PoPs per client region. |
 
-### Dani Rojas
+### Dani Rojas — Cilium / L4
 
 | # | Task | Description |
 |---|---|---|
 | 4.3 | **Compute-target L4 routing** | Implement customer-configurable L4 load balancing for Compute targets via `L4LoadBalancerPolicy` and Gateway API. Cilium routes TCP/UDP traffic to Compute instances based on policy — a transport-layer complement to Zava's L7 routing for workloads that do not require HTTP-level decisions. |
 
-### Zava
+### Zava — Envoy / L7
 
 | # | Task | Description |
 |---|---|---|
@@ -183,26 +183,26 @@ Add hard-constraint sovereignty enforcement at both DNS and L7. Extend the routi
 | 4.6 | **Inference routing** | Route inference-bound requests to the Compute endpoint best positioned to serve — model warm, low current load, within sovereignty constraints — applying the same scoring and policy model as standard routing extended with inference-specific attributes. |
 | 4.7 | **GPU weight modifier** | Extend the Compute location data model with GPU utilization. Apply as a weight modifier in Envoy EDS so saturated GPU nodes receive progressively less traffic before they become unavailable. |
 
-### Roy Kent
+### Roy Kent — Geo / ASN / IP Type
 
 | # | Task | Description |
 |---|---|---|
 | 4.8 | **Geo for Compute workloads** | Make the GeoDB available to Compute workloads via enriched request headers forwarded from Envoy (established in Phase 2). Provide a local GeoDB SDK for Compute functions that need direct lookups for data residency enforcement, personalisation, or model selection without an external round-trip. |
 
-### Nate
+### Nate — Active Health Checks
 
 | # | Task | Description |
 |---|---|---|
 | 4.9 | **Connector-based probing** | Enable probes to reach targets inside customer networks, private cloud environments, or non-public endpoints via Datum Connectors. The probe agent routes through the Connector tunnel; the HealthCheck spec references the Connector by name. |
 | 4.10 | **Compute endpoint health checks** | Extend probe targets to include Compute instances directly. Health state for individual Compute endpoints feeds EDS and informs GPU weight modifiers — a Compute node that is reachable but failing health checks is removed from routing before inference requests are sent to it. |
 
-### Beard
+### Beard — DDoS Scrubbing
 
 | # | Task | Description |
 |---|---|---|
 | 4.11 | **Compute endpoint protection** | Extend Beard detection and scrubbing to traffic targeting Compute instances and inference endpoints. GPU nodes under volumetric attack trigger the same XDP/eBPF and FlowSpec response as any other PoP target. Per-prefix attack state published to `org/{org-id}/ddos/{prefix}`. |
 
-### Higgins Bus
+### Higgins Bus — Signal Distribution
 
 | # | Task | Description |
 |---|---|---|
