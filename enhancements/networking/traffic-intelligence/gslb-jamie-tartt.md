@@ -43,7 +43,7 @@ Jamie Tartt (GSLB / PowerDNS)   ← geo + health + policy → PoP selection
 Selected PoP Anycast Address
       │
       ▼
-Dani Rojas (Cilium L4)  →  Zava (Envoy L7)  →  Origin / UFO Compute
+Dani Rojas (Cilium L4)  →  Zava (Envoy L7)  →  Origin / Compute
 ```
 
 GSLB consumes two signal types from Total Load Balancing:
