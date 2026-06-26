@@ -147,8 +147,9 @@ discoverable, friendly, and safe.
 
 Introduce the concept of multiple, named **plugin catalogs** (called *indexes*
 in command syntax, consistent with the existing internal model and with the
-`kubectl krew` ecosystem familiar to this audience). Datum's curated catalog is
-the reserved default; users never have to think about it. Anyone can stand up an
+`kubectl krew` ecosystem familiar to this audience). Datum's curated catalog,
+named `datum`, is the reserved default; users never have to think about it.
+Anyone can stand up an
 additional catalog by hosting a manifest file, and users register it by name:
 
 ```console
@@ -274,7 +275,8 @@ organization, and project.
   display name, description, and owner travel with each catalog so listings read
   like a marketplace, not a list of URLs.
 - **Catalog-qualified naming resolves ambiguity.** A bare plugin name resolves
-  against the default catalog first; when the same name exists in more than one
+  against the official `datum` catalog first; when the same name exists in more
+  than one
   catalog, `datumctl` does not guess — it shows the user the options and asks them
   to qualify the name (e.g. `acme/deploy`).
 - **A central hub is a possible future, not a requirement.** The decentralized,
@@ -318,8 +320,8 @@ try to impersonate the official one.
 
 *Mitigations:* Catalog-qualified addressing makes every plugin unambiguously
 referrable (`acme/deploy`), and `datumctl` refuses to guess on a bare-name
-collision. The default catalog name and Datum's catalog identity are reserved so
-third parties cannot present themselves as official.
+collision. The `datum` catalog name (and its `default` alias) and Datum's catalog
+identity are reserved, so third parties cannot present themselves as official.
 
 #### Risk: Ecosystem fragmentation and uneven quality
 
@@ -364,7 +366,7 @@ $ datumctl plugin index add local ./my-catalog
 # See what's registered, with a friendly, marketplace-style listing.
 $ datumctl plugin index list
 NAME        TYPE       PLUGINS  TRUST         DESCRIPTION
-default     official   12       official      Datum-curated plugins
+datum       official   12       official      Datum-curated plugins
 acme        custom     3        third-party   ACME internal Datum tooling
 community   custom     31       third-party   Community-contributed plugins
 
@@ -380,7 +382,7 @@ regardless of how a catalog is rated.
 ### Installing with catalog-aware addressing
 
 ```console
-$ datumctl plugin install zonesync          # bare name -> default catalog
+$ datumctl plugin install zonesync          # bare name -> datum (official) catalog
 $ datumctl plugin install acme/deploy       # catalog-qualified
 $ datumctl plugin install owner/repo@v1.2.0 # direct from a release (unchanged)
 ```
@@ -391,7 +393,7 @@ instead of guessing:
 ```console
 $ datumctl plugin install deploy
 Error: "deploy" is available from multiple catalogs. Choose one:
-  datumctl plugin install default/deploy   Datum guided deploy        (official)
+  datumctl plugin install datum/deploy     Datum guided deploy        (official)
   datumctl plugin install acme/deploy      ACME guided deploy         (third-party)
 ```
 
@@ -403,7 +405,7 @@ guess:
 ```console
 $ datumctl plugin search dns
 NAME    INDEX      VERSION  TRUST         DESCRIPTION
-dns     default    v1.2.3   official      Manage Datum Cloud DNS zones
+dns     datum      v1.2.3   official      Manage Datum Cloud DNS zones
 zonex   community  v2.1.0   third-party   Bulk zone import/export
 $ datumctl plugin search dns --index acme   # scope to one catalog
 ```
@@ -417,7 +419,7 @@ place:
 $ datumctl plugin browse
 ┌─ Datum Plugin Catalog ───────────────────────────────────┐
 │ Filter: dns_                                             │
-│ › dns     default    official      Manage DNS zones       │
+│ › dns     datum      official      Manage DNS zones       │
 │   zonex   community  third-party   Bulk zone import       │
 │ ↑/↓ move   / filter   enter details   i install   q quit  │
 └──────────────────────────────────────────────────────────┘
@@ -428,7 +430,7 @@ $ datumctl plugin browse
 Provenance is never ambiguous. Every surface — `search`, `index list`, `browse`,
 the install confirmation, and the list of installed plugins — shows a badge:
 
-- **official** — Datum's reserved, curated default catalog.
+- **official** — Datum's reserved, curated catalog, named `datum`.
 - **third-party** — any catalog the user has added.
 
 The installed-plugins listing additionally shows which catalog each plugin came
