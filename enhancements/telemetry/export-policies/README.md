@@ -1,79 +1,10 @@
 ---
 status: provisional
 stage: alpha
-latest-milestone: "v0.1"
+latest-milestone: "v0.3"
 ---
-<!--
-Inspired by https://github.com/kubernetes/enhancements/tree/master/keps/NNNN-kep-template
 
-Goals are aligned in principle with those described at https://github.com/kubernetes/enhancements/blob/master/keps/sig-architecture/0000-kep-process/README.md
-
-Recommended reading:
-  - https://developers.google.com/tech-writing
--->
-
-<!--
-**Note:** When your Enhancement is complete, all of these comment blocks should be removed.
-
-To get started with this template:
-
-- [ ] **Make a copy of this template directory.**
-  Copy this template into the desired path and name it `short-descriptive-title`.
-- [ ] **Fill out this file as best you can.**
-  At minimum, you should fill in the "Summary" and "Motivation" sections.
-  These should be easy if you've preflighted the idea of the Enhancement with the
-  appropriate stakeholders.
-- [ ] **Create a PR for this Enhancement.**
-  Assign it to stakeholders who are sponsoring this process.
-- [ ] **Merge early and iterate.**
-  Avoid getting hung up on specific details and instead aim to get the goals of
-  the Enhancement clarified and merged quickly. The best way to do this is to just
-  start with the high-level sections and fill out details incrementally in
-  subsequent PRs.
-
-Just because a Enhancement is merged does not mean it is complete or approved. Any Enhancement
-marked as `provisional` is a working document and subject to change. You can
-denote sections that are under active debate as follows:
-
-```
-<<[UNRESOLVED optional short context or usernames ]>>
-Stuff that is being argued.
-<<[/UNRESOLVED]>>
-```
-
-When editing RFCs, aim for tightly-scoped, single-topic PRs to keep discussions
-focused. If you disagree with what is already in a document, open a new PR
-with suggested changes.
-
-One Enhancement corresponds to one "feature" or "enhancement" for its whole lifecycle.
-You do not need a new Enhancement to move from beta to GA, for example. If
-new details emerge that belong in the Enhancement, edit the Enhancement. Once a feature has
-become "implemented", major changes should get new RFCs.
-
-The canonical place for the latest set of instructions (and the likely source
-of this file) is [here](/docs/rfcs/template/README.md).
-
-**Note:** Any PRs to move a Enhancement to `implementable`, or significant changes once
-it is marked `implementable`, must be approved by each of the Enhancement approvers.
-If none of those approvers are still appropriate, then changes to that list
-should be approved by the remaining approvers and/or the owning SIG (or
-SIG Architecture for cross-cutting RFCs).
--->
-
-<!-- omit from toc -->
 # Telemetry Export Policies
-
-<!--
-This is the title of your Enhancement. Keep it short, simple, and descriptive. A good
-title can help communicate what the Enhancement is and should be considered as part of
-any review.
--->
-
-<!--
-A table of contents is helpful for quickly jumping to sections of a Enhancement and for
-highlighting any additional information provided beyond the standard Enhancement
-template.
--->
 
 - [Summary](#summary)
 - [Motivation](#motivation)
@@ -87,30 +18,14 @@ template.
   - [Configuring Sources](#configuring-sources)
     - [MVP Metric Source Configuration](#mvp-metric-source-configuration)
     - [Target Metric Source Configuration](#target-metric-source-configuration)
+    - [Log Source Configuration](#log-source-configuration)
   - [Configuring Sinks](#configuring-sinks)
     - [Prometheus Remote Write](#prometheus-remote-write)
     - [OpenTelemetry](#opentelemetry)
+- [Alternatives](#alternatives)
 - [Implementation History](#implementation-history)
 
 ## Summary
-
-<!--
-This section is incredibly important for producing high-quality, user-focused
-documentation such as release notes or a development roadmap. It should be
-possible to collect this information before implementation begins, in order to
-avoid requiring implementors to split their attention between writing release
-notes and implementing the feature itself. Enhancement editors should help to ensure
-that the tone and content of the `Summary` section is useful for a wide audience.
-
-A good summary is probably at least a paragraph in length.
-
-Both in this section and below, follow the guidelines of the [documentation
-style guide]. In particular, wrap lines to a reasonable length, to make it
-easier for reviewers to cite specific portions, and to minimize diff churn on
-updates.
-
-[documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
--->
 
 Users will be able to create Export Policies on Datum Cloud to configure how
 telemetry from resources they create in Datum Cloud (Gateways, Workloads,
@@ -127,11 +42,6 @@ telemetry data that is received from Datum Cloud resources.
 
 ## Motivation
 
-<!--
-This section is for explicitly listing the motivation, goals, and non-goals of
-this Enhancement.  Describe why the change is important and the benefits to users.
--->
-
 Datum Cloud users want visibility into the resources they create on Datum Cloud
 so they can understand the health of their infrastructure. For example, users
 that configure L7 Gateways in our networking services will want metrics around
@@ -144,11 +54,6 @@ configurable export policies, we empower consumers to control how telemetry data
 is exported to their existing telemetry platform.
 
 ### Goals
-
-<!--
-List the specific goals of the Enhancement. What is it trying to achieve? How will we
-know that this has succeeded?
--->
 
 - Provide a mechanism for consumers to configure how telemetry for resources
   they've created is exported to their existing telemetry system
@@ -164,33 +69,34 @@ know that this has succeeded?
 
 ### Non-Goals
 
-<!--
-What is out of scope for this Enhancement? Listing non-goals helps to focus discussion
-and make progress.
--->
-
 - Mandating a specific third-party provider.
 - Managing consumer-side ingestion costs or quotas.
 
 ## Proposal
 
-<!--
-This is where we get down to the specifics of what the proposal actually is.
-This should have enough detail that reviewers can understand exactly what
-you're proposing, but should not include things like API designs or
-implementation. What is the desired outcome and how do we measure success?.
-The "Design Details" section below is for the real
-nitty-gritty.
--->
-
 Users will be able to configure one or more **ExportPolicy** within Datum Cloud
 projects to control how telemetry data published by resources in their projects
-are exported to third-party telemetry systems. ExportPolicies will support
-configuring a single sink to configure how telemetry data is exported. Users
-will be able to choose from [multiple sink protocols](#supported-sink-protocols)
-to choose the one that works best for their platform or use-case.
+are exported to third-party telemetry systems.
 
- An export policy will allow users to exporting data to any [OpenTelemetry
+> [!NOTE]
+>
+> **Org/hierarchy on the export path.** The platform stores telemetry against
+> only its origin project; org and folder relationships are resolved at read
+> time and are absent from stored records. ExportPolicy is where hierarchy
+> re-enters: an org-scoped export policy can route logs from all descendant
+> projects to a single sink, using the hierarchy to make the routing decision.
+> The records themselves are not annotated with org metadata — hierarchy governs
+> which ExportPolicy applies, not what gets written into the exported record.
+> This mirrors Google Cloud Logging's [aggregated sinks][agg-sinks] model.
+
+[agg-sinks]: https://docs.cloud.google.com/logging/docs/export/aggregated_sinks_overview
+
+ExportPolicies will support configuring a single sink to control how telemetry
+data is exported. Users will be able to choose from
+[multiple sink protocols](#supported-sink-protocols) to choose the one that
+works best for their platform or use-case.
+
+An export policy will allow users to exporting data to any [OpenTelemetry
 protocol (OTLP)][OTLP] compatible endpoint.
 
 > [!NOTE]
@@ -244,50 +150,7 @@ accepting telemetry data.
 > that’s failing to export to configured sink endpoints. After those limits are
 > reached, we will no longer be able to guarantee at-least once delivery.
 
-<!-- ### User Stories (Optional) -->
-
-<!--
-Detail the things that people will be able to do if this Enhancement is implemented.
-Include as much detail as possible so that people can understand the "how" of
-the system. The goal here is to make this feel real for users without getting
-bogged down.
--->
-
-<!-- #### Story 1 -->
-
-<!-- #### Story 2 -->
-
-<!-- ### Notes/Constraints/Caveats (Optional) -->
-
-<!--
-What are the caveats to the proposal?
-What are some important details that didn't come across above?
-Go in to as much detail as necessary here.
-This might be a good place to talk about core concepts and how they relate.
--->
-
-<!-- ### Risks and Mitigations -->
-
-<!--
-What are the risks of this proposal, and how do we mitigate? Think broadly.
-For example, consider both security and how this will impact the larger
-software ecosystem.
-
-How will security be reviewed, and by whom?
-
-How will UX be reviewed, and by whom?
-
-Consider including folks who also work outside of your immediate team.
--->
-
 ## Design Details
-
-<!--
-This section should contain enough information that the specifics of your
-change are understandable. This may include API specs (though not always
-required) or even code snippets. If there's any ambiguity about HOW your
-proposal will be implemented, this is the place to discuss them.
--->
 
 Users will be able to manage one or more **ExportPolicy** resources in Datum
 Cloud Projects to configure how they would like telemetry from resources they
@@ -310,6 +173,14 @@ To start, export policies will only support exporting **Metric** data from
 resources created on Datum Cloud. Users will be able to leverage a [metricsql]
 query to filter which metrics they'd like to receive. An empty query means all
 metrics will be exported.
+
+> [!WARNING]
+>
+> **MetricsQL coupling:** The `metricsql` source field ties the ExportPolicy
+> API to a VictoriaMetrics-specific query language. If the metrics backend changes
+> (e.g. to Prometheus or Thanos), this field would require a breaking API change.
+> The backend-agnostic `resourceSelectors` approach is the intended long-term
+> direction but is not yet implemented.
 
 [metricsql]: https://docs.victoriametrics.com/metricsql/
 
@@ -396,6 +267,53 @@ spec:
                 kind: ["*"]
 ```
 
+#### Log Source Configuration
+
+> [!NOTE]
+>
+> Log sources require the log collection CRDs (LogDefinition, LogCollectionPolicy)
+> described in [definition-policy](../definition-policy/) and the ingest pipeline
+> described in [logs](../logs/). Log source support in ExportPolicy is planned for
+> Phase 1 sub-issue 4.
+
+Customers can export log data by declaring a `logs` source. Log sources select
+by resource kind and log category, using the same `resourceSelectors` model as
+the metric source target configuration.
+
+```yaml
+apiVersion: telemetry.datumapis.com/v1alpha1
+kind: ExportPolicy
+metadata:
+  name: gateway-logs-export
+spec:
+  sources:
+    - name: gateway-access-logs
+      logs:
+        resourceSelectors:
+          - group: networking.datumapis.com
+            kind: HTTPProxy
+        # allLogs selects all log types declared by matching LogDefinitions.
+        # Individual log names can also be listed explicitly.
+        categories:
+          - allLogs
+  sinks:
+    - name: my-loki
+      sources:
+        - gateway-access-logs
+      target:
+        openTelemetry:
+          http:
+            endpoint: "https://logs.example.com/otlp"
+          authentication:
+            bearer:
+              secretRef:
+                name: loki-credentials
+```
+
+Log export respects `LogRedactionPolicy` rules — attributes marked `drop` or
+`hash` in a redaction policy are transformed before the record leaves the
+platform, including before it reaches the export agent.
+
 ### Configuring Sinks
 
 Users can configure multiple sinks to control how telemetry data is exported to
@@ -481,351 +399,48 @@ spec:
             backoffDuration: 2s   # Delay between retry attempts
 ```
 
-<!-- ## Production Readiness Review Questionnaire -->
-
-<!--
-
-Production readiness reviews are intended to ensure that features are observable,
-scalable and supportable; can be safely operated in production environments, and
-can be disabled or rolled back in the event they cause increased failures in
-production.
-
-See more in the PRR Enhancement at https://git.k8s.io/enhancements/keps/sig-architecture/1194-prod-readiness.
-
-The production readiness review questionnaire must be completed and approved
-for the Enhancement to move to `implementable` status and be included in the release.
--->
-
-<!-- ### Feature Enablement and Rollback -->
-
-<!--
-This section must be completed when targeting alpha to a release.
--->
-
-<!-- #### How can this feature be enabled / disabled in a live cluster? -->
-
-<!--
-Pick one of these and delete the rest.
--->
-<!--
-- [ ] Feature gate
-  - Feature gate name:
-  - Components depending on the feature gate:
-- [ ] Other
-  - Describe the mechanism:
-  - Will enabling / disabling the feature require downtime of the control plane?
-  - Will enabling / disabling the feature require downtime or reprovisioning of a node? -->
-
-<!-- #### Does enabling the feature change any default behavior? -->
-
-<!--
-Any change of default behavior may be surprising to users or break existing
-automations, so be extremely careful here.
--->
-
-<!-- #### Can the feature be disabled once it has been enabled (i.e. can we roll back the enablement)? -->
-
-<!--
-Describe the consequences on existing workloads (e.g., if this is a runtime
-feature, can it break the existing applications?).
-
-Feature gates are typically disabled by setting the flag to `false` and
-restarting the component. No other changes should be necessary to disable the
-feature.
--->
-
-<!-- #### What happens if we reenable the feature if it was previously rolled back? -->
-
-<!-- #### Are there any tests for feature enablement/disablement? -->
-
-<!-- ### Rollout, Upgrade and Rollback Planning -->
-
-<!--
-This section must be completed when targeting beta to a release.
--->
-
-<!-- #### How can a rollout or rollback fail? Can it impact already running workloads? -->
-
-<!--
-Try to be as paranoid as possible - e.g., what if some components will restart
-mid-rollout?
-
-Be sure to consider highly-available clusters, where, for example,
-feature flags will be enabled on some servers and not others during the
-rollout. Similarly, consider large clusters and how enablement/disablement
-will rollout across nodes.
--->
-
-<!-- #### What specific metrics should inform a rollback? -->
-
-<!--
-What signals should users be paying attention to when the feature is young
-that might indicate a serious problem?
--->
-
-<!-- #### Were upgrade and rollback tested? Was the upgrade->downgrade->upgrade path tested? -->
-
-<!--
-Describe manual testing that was done and the outcomes.
-Longer term, we may want to require automated upgrade/rollback tests, but we
-are missing a bunch of machinery and tooling and can't do that now.
--->
-
-<!-- #### Is the rollout accompanied by any deprecations and/or removals of features, APIs, fields of API types, flags, etc.? -->
-
-<!--
-Even if applying deprecation policies, they may still surprise some users.
--->
-
-<!-- ### Monitoring Requirements -->
-
-<!--
-This section must be completed when targeting beta to a release.
-
-For GA, this section is required: approvers should be able to confirm the
-previous answers based on experience in the field.
--->
-
-<!-- #### How can an operator determine if the feature is in use by workloads? -->
-
-<!--
-Ideally, this should be a metric. Operations against the API (e.g., checking if
-there are objects with field X set) may be a last resort. Avoid logs or events
-for this purpose.
--->
-
-<!-- #### How can someone using this feature know that it is working for their instance? -->
-
-<!--
-For instance, if this is an instance-related feature, it should be possible to
-determine if the feature is functioning properly for each individual instance.
-Pick one more of these and delete the rest.
-Please describe all items visible to end users below with sufficient detail so
-that they can verify correct enablement and operation of this feature.
-Recall that end users cannot usually observe component logs or access metrics.
--->
-<!--
-- [ ] Events
-  - Event Reason:
-- [ ] API .status
-  - Condition name:
-  - Other field:
-- [ ] Other (treat as last resort)
-  - Details: -->
-
-<!-- #### What are the reasonable SLOs (Service Level Objectives) for the enhancement? -->
-
-<!--
-This is your opportunity to define what "normal" quality of service looks like
-for a feature.
-
-It's impossible to provide comprehensive guidance, but at the very
-high level (needs more precise definitions) those may be things like:
-  - per-day percentage of API calls finishing with 5XX errors <= 1%
-  - 99% percentile over day of absolute value from (job creation time minus expected
-    job creation time) for cron job <= 10%
-  - 99.9% of /health requests per day finish with 200 code
-
-These goals will help you determine what you need to measure (SLIs) in the next
-question.
--->
-
-<!-- #### What are the SLIs (Service Level Indicators) an operator can use to determine the health of the service? -->
-
-<!--
-Pick one more of these and delete the rest.
--->
-
-<!-- - [ ] Metrics
-  - Metric name:
-  - [Optional] Aggregation method:
-  - Components exposing the metric:
-- [ ] Other (treat as last resort)
-  - Details: -->
-
-<!-- #### Are there any missing metrics that would be useful to have to improve observability of this feature? -->
-
-<!--
-Describe the metrics themselves and the reasons why they weren't added (e.g., cost,
-implementation difficulties, etc.).
--->
-
-<!-- ### Dependencies -->
-
-<!--
-This section must be completed when targeting beta to a release.
--->
-
-<!-- #### Does this feature depend on any specific services running in the cluster? -->
-
-<!--
-Think about both cluster-level services (e.g. metrics-server) as well
-as node-level agents (e.g. specific version of CRI). Focus on external or
-optional services that are needed. For example, if this feature depends on
-a cloud provider API, or upon an external software-defined storage or network
-control plane.
-
-For each of these, fill in the following—thinking about running existing user workloads
-and creating new ones, as well as about cluster-level services (e.g. DNS):
-  - [Dependency name]
-    - Usage description:
-      - Impact of its outage on the feature:
-      - Impact of its degraded performance or high-error rates on the feature:
--->
-
-<!-- ### Scalability -->
-
-<!--
-For alpha, this section is encouraged: reviewers should consider these questions
-and attempt to answer them.
-
-For beta, this section is required: reviewers must answer these questions.
-
-For GA, this section is required: approvers should be able to confirm the
-previous answers based on experience in the field.
--->
-
-<!-- #### Will enabling / using this feature result in any new API calls? -->
-
-<!--
-Describe them, providing:
-  - API call type (e.g. PATCH workloads)
-  - estimated throughput
-  - originating component(s) (e.g. Workload, Network, Controllers)
-Focusing mostly on:
-  - components listing and/or watching resources they didn't before
-  - API calls that may be triggered by changes of some resources
-    (e.g. update of object X triggers new updates of object Y)
-  - periodic API calls to reconcile state (e.g. periodic fetching state,
-    heartbeats, leader election, etc.)
--->
-
-<!-- #### Will enabling / using this feature result in introducing new API types? -->
-
-<!--
-Describe them, providing:
-  - API type
-  - Supported number of objects per cluster
-  - Supported number of objects per namespace (for namespace-scoped objects)
--->
-
-<!-- #### Will enabling / using this feature result in any new calls to the cloud provider? -->
-
-<!--
-Describe them, providing:
-  - Which API(s):
-  - Estimated increase:
--->
-
-<!-- #### Will enabling / using this feature result in increasing size or count of the existing API objects? -->
-
-<!--
-Describe them, providing:
-  - API type(s):
-  - Estimated increase in size: (e.g., new annotation of size 32B)
-  - Estimated amount of new objects: (e.g., new Object X for every existing Pod)
--->
-
-<!-- #### Will enabling / using this feature result in increasing time taken by any operations covered by existing SLIs/SLOs? -->
-
-<!--
-Look at the [existing SLIs/SLOs].
-
-Think about adding additional work or introducing new steps in between
-(e.g. need to do X to start a container), etc. Please describe the details.
-
-[existing SLIs/SLOs]: https://git.k8s.io/community/sig-scalability/slos/slos.md#kubernetes-slisslos
--->
-
-<!-- #### Will enabling / using this feature result in non-negligible increase of resource usage in any components? -->
-
-<!--
-Things to keep in mind include: additional in-memory state, additional
-non-trivial computations, excessive access to disks (including increased log
-volume), significant amount of data sent and/or received over network, etc.
-This through this both in small and large cases, again with respect to the
-[supported limits].
-
-[supported limits]: https://git.k8s.io/community//sig-scalability/configs-and-limits/thresholds.md
--->
-
-<!-- #### Can enabling / using this feature result in resource exhaustion of some node resources (PIDs, sockets, inodes, etc.)? -->
-
-<!--
-Focus not just on happy cases, but primarily on more pathological cases.
-
-Are there any tests that were run/should be run to understand performance
-characteristics better and validate the declared limits?
--->
-
-<!-- ### Troubleshooting -->
-
-<!--
-This section must be completed when targeting beta to a release.
-
-For GA, this section is required: approvers should be able to confirm the
-previous answers based on experience in the field.
-
-The Troubleshooting section currently serves the `Playbook` role. We may consider
-splitting it into a dedicated `Playbook` document (potentially with some monitoring
-details). For now, we leave it here.
--->
-
-<!-- #### How does this feature react if the API server is unavailable? -->
-
-<!-- #### What are other known failure modes? -->
-
-<!--
-For each of them, fill in the following information by copying the below template:
-  - [Failure mode brief description]
-    - Detection: How can it be detected via metrics? Stated another way:
-      how can an operator troubleshoot without logging into a master or worker node?
-    - Mitigations: What can be done to stop the bleeding, especially for already
-      running user workloads?
-    - Diagnostics: What are the useful log messages and their required logging
-      levels that could help debug the issue?
-      Not required until feature graduated to beta.
-    - Testing: Are there any tests for failure mode? If not, describe why.
--->
-
-<!-- #### What steps should be taken if SLOs are not being met to determine the problem? -->
+## Alternatives
+
+**Push directly from the platform OTel Collector to tenant sinks** — the OTel
+Collector gateway already receives all telemetry. It could be configured to fan
+out directly to tenant-configured endpoints. Rejected: the gateway Collector sees
+all tenants; per-tenant routing without strong isolation is a security risk.
+The intended export model is a NATS consumer push, not a Collector push: a
+durable consumer per ExportPolicy is scoped to `telemetry.<signal>.<project_id>`
+by NATS ACL, so isolation is enforced at the subject layer rather than in
+application routing code.
+
+**MetricsQL pull as the permanent export model for metrics** — the current
+VictoriaMetrics pipeline uses export agents that query VictoriaMetrics via
+MetricsQL and push results to the customer sink. This is the implemented
+approach for the v0.3 launch and is reflected in the MVP source configuration
+above. It is not the intended long-term model. Once metrics move to the NATS +
+ClickHouse pipeline (see [metrics](../metrics/)), the export path becomes the
+same NATS consumer push used for logs — a durable consumer on
+`telemetry.metrics.<project_id>` streams records directly to the sink. The
+MetricsQL dependency is a transitional artifact of the current scrape-based
+pipeline, not a design goal.
+
+**Shared export agent per cluster** — a single export agent serving all
+ExportPolicies, with internal tenant routing, rather than one agent per policy.
+Rejected: a shared agent is a higher blast-radius component. A misconfiguration
+in tenant isolation logic could expose cross-tenant data. Dedicated agents limit
+the scope of any failure to a single policy.
+
+**Self-managed collection with platform credentials** — provide tenants with
+direct credentials to query VictoriaMetrics or ClickHouse and let them run their
+own OTel Collectors. Rejected: requires granting tenants database-level access,
+which expands the trust boundary significantly. It also provides no self-service
+UX, no delivery guarantees, and no Datum control plane visibility into what is
+being exported.
 
 ## Implementation History
-
-<!--
-Major milestones in the lifecycle of a Enhancement should be tracked in this section.
-Major milestones might include:
-- the `Summary` and `Motivation` sections being merged, signaling acceptance
-- the `Proposal` section being merged, signaling agreement on a proposed design
-- the date implementation started
-- the first release where an initial version of the Enhancement was available
-- the version where the Enhancement graduated to general availability
-- when the Enhancement was retired or superseded
--->
 
 - 2025-03-11 - Define initial enhancement goals, system architecture, and API
   design
 - 2025-04-22 - Initial implementation of the Export Policy API ([v0.1.0])
+- 2026-06-26 - ExportPolicy v0.3.0 shipped in [milo-os/telemetry]; log source
+  configuration and alternatives documented; MetricsQL coupling callout added
 
-[v0.1.0]: https://github.com/datum-cloud/telemetry-services-operator/releases/tag/v0.1.0
-
-<!-- ## Drawbacks -->
-
-<!--
-Why should this Enhancement _not_ be implemented?
--->
-
-<!-- ## Alternatives -->
-
-<!--
-What other approaches did you consider, and why did you rule them out? These do
-not need to be as detailed as the proposal, but should include enough
-information to express the idea and why it was not acceptable.
--->
-
-<!-- ## Infrastructure Needed (Optional) -->
-
-<!--
-Use this section if you need things from another party. Examples include a
-new repos, external services, compute infrastructure.
--->
+[v0.1.0]: https://github.com/milo-os/telemetry/releases/tag/v0.1.0
+[milo-os/telemetry]: https://github.com/milo-os/telemetry
