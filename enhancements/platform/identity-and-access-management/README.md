@@ -24,6 +24,11 @@ This document is intended to serve as a parent overview, with links to detailed
 documentation for individual components and enhancements made to the IAM system
 over time.
 
+### Related enhancements
+
+- [Unified organizations](./unified-organizations/) — collapse Personal/Standard
+  org types, add org-level contactInfo, and unify onboarding ([milo-os/milo#636](https://github.com/milo-os/milo/issues/636))
+
 ## System Architecture
 
 ![](./iam.png)
