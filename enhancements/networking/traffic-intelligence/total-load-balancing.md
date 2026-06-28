@@ -33,7 +33,7 @@ Total Load Balancing is the decision layer that sits between inbound traffic and
 
 The output at any given component is a **decision**: which PoP, which upstream, allow or block, which inference endpoint — and why.
 
-Signals are distributed to consumers using [Higgins Bus](signal-distribution-higgins-bus.md) — a QUIC-native pub/sub transport (MOQT) that carries signals as named tracks to every edge PoP. Each signal type occupies its own track namespace, so relay infrastructure established by the Roy Kent Project scales to carry all future signal traffic without architectural changes.
+Signals are distributed to consumers using [Higgins Bus](signal-distribution-higgins-bus.md) — a QUIC-native pub/sub transport (MOQT) that carries signals as named tracks to every edge PoP. Each signal type occupies its own track namespace, so the Higgins Bus relay infrastructure scales to carry all future signal traffic without architectural changes.
 
 ---
 
@@ -44,7 +44,7 @@ Datum uses a three-layer load balancing architecture. Every layer consumes Total
 | Layer | Technology | Customer-Configurable | Scope |
 |---|---|---|---|
 | **DNS / GSLB** | [Jamie Tartt / PowerDNS](gslb-jamie-tartt.md) | Via `GeoSteeringPolicy` | Outermost steering layer — operates before any connection is established; routes users to the right PoP based on geography, health, and DDoS state |
-| **L4 (transport)** | [Dani Rojas / Cilium](l4-load-balancing-dani-rojas.md) | For compute targets | Routes TCP/UDP traffic to UFO Compute or other customer compute; platform-managed in front of Envoy |
+| **L4 (transport)** | [Dani Rojas / Cilium](l4-load-balancing-dani-rojas.md) | For compute targets | Routes TCP/UDP traffic to Compute instances and other customer compute; platform-managed in front of Envoy |
 | **L7 (application)** | [Zava / Envoy](envoy-routing-zava.md) | Via delivery policies | HTTP/HTTPS routing, TLS termination, WAF (Coraza), origin selection, header manipulation |
 
 See [Jamie Tartt](gslb-jamie-tartt.md) for the GSLB design, PowerDNS GeoIP backend, and health-aware failover. See [Dani Rojas](l4-load-balancing-dani-rojas.md) for the Cilium design and customer configuration model. See [Zava](envoy-routing-zava.md) for the full Envoy routing feature map and integration details.
@@ -86,12 +86,13 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 
 | Project | Signals / Scope | Status |
 |---|---|---|
-| [The Roy Kent Project](ip-geo-roy-kent.md) | Geography, ASN, IP Type | In progress |
-| [The Nate Project](health-checks-nate.md) | Health (Availability, Latency, Throughput) | Early definition |
 | [Jamie Tartt](gslb-jamie-tartt.md) | GSLB / DNS — geo + health-aware PoP steering | Early definition |
 | [Dani Rojas](l4-load-balancing-dani-rojas.md) | L4 load balancing — Cilium, customer-configurable for compute targets | Early definition |
 | [Zava](envoy-routing-zava.md) | L7 routing — geo, health, WAF (Coraza), policy, protocol | Early definition |
+| [The Roy Kent Project](ip-geo-roy-kent.md) | Geography, ASN, IP Type | In progress |
+| [The Nate Project](health-checks-nate.md) | Health (Availability, Latency, Throughput) | Early definition |
 | [The Beard Project](ddos-scrubbing-beard.md) | DDoS detection and scrubbing — inline XDP/eBPF, BGP FlowSpec, RTBH | Early definition |
+| [Higgins Bus](signal-distribution-higgins-bus.md) | MOQT/QUIC signal distribution — carries all routing intelligence to every edge PoP in near real-time | In progress |
 | TBD | RTT, Packet Loss, Congestion | Not started |
 | TBD | Sovereignty, Risk | Not started |
 | TBD | Model Locality, GPU Availability | Not started |
@@ -100,7 +101,11 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 
 ## Distribution Transport
 
-Signals are distributed platform-wide using **Higgins Bus** — a QUIC-native publish/subscribe transport (MOQT) where each signal type is a named track. Consumers subscribe to the tracks they need; relay infrastructure fans out updates to all edge PoPs.
+Signals are distributed platform-wide using **Higgins Bus** — a QUIC-native publish/subscribe transport built on MOQT (Media over QUIC Transport). Every signal type occupies its own named track; consumers subscribe to the tracks they need and relay infrastructure fans out updates to every edge PoP in near real-time.
+
+The choice of MOQT reflects where the internet is heading. Rather than building a proprietary signaling protocol, Datum applies an internet-scale, standards-based distribution protocol to network intelligence — the same way the media industry uses it for content delivery. The relay infrastructure, authentication model, object delivery semantics, and interoperability work that the media industry has invested in all carry over directly.
+
+The result is a shared stream of operational truth. Every component that makes a routing decision — DNS, L4, L7, WAF, AI gateway — subscribes to the same signals and operates from the same current view of health, geography, latency, capacity, policy, and cost. A PoP health event is not a local secret known only to the layer that detected it; it becomes an immediate input to every routing decision across the platform. Total Load Balancing is only possible because Higgins Bus makes the intelligence available everywhere at once.
 
 Each Total Load Balancing project extends the track namespace:
 
