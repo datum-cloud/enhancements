@@ -169,7 +169,7 @@ OTLP-NATS bridge (extracts datum.project.id → telemetry.metrics.<project_id>)
     └──► ExportPolicy consumer (future)
 ```
 
-See [nats-ingest-pipeline](../nats-ingest-pipeline/) for the hub/edge topology
+See [ingest-pipeline](../ingest-pipeline/) for the hub/edge topology
 and durability design.
 
 ## Alternatives

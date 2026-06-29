@@ -192,7 +192,7 @@ them against the set of `LogDefinition` resources for matching resource kinds.
 For each matched kind and category, the reconciler configures the OTel Collector
 to route matching log records into the platform pipeline (`telemetry.logs.<project_id>`
 via the NATS bridge). See [logs](../logs/) and
-[nats-ingest-pipeline](../nats-ingest-pipeline/) for the pipeline design.
+[ingest-pipeline](../ingest-pipeline/) for the pipeline design.
 
 #### Redaction
 

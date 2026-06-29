@@ -102,7 +102,7 @@ OTLP-NATS bridge (extracts datum.project.id → publishes to telemetry.logs.<pro
     └──► customer export consumer (export-policies)
 ```
 
-See [nats-ingest-pipeline](../nats-ingest-pipeline/) for full topology and
+See [ingest-pipeline](../ingest-pipeline/) for full topology and
 component-level design.
 
 ### Bridge processing
