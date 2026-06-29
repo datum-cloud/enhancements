@@ -6,7 +6,7 @@
 
 ---
 
-The first Total Load Balancing projects will focus on making geo data broadly available and reusable across the platform. DNS will consume it for Global Server Load Balancing (GSLB). Envoy will use it for ACL enforcement and endpoint load balancing decisions. UFO workloads will leverage it for localization, sovereignty awareness, and regional application behavior. Internally, we think of this as the "Roy Kent Project," inspired by Roy Kent:
+The first Total Load Balancing projects will focus on making geo data broadly available and reusable across the platform. DNS will consume it for Global Server Load Balancing (GSLB). Envoy will use it for ACL enforcement and endpoint load balancing decisions. Compute workloads will leverage it for localization, sovereignty awareness, and regional application behavior. Internally, we think of this as the "Roy Kent Project," inspired by Roy Kent:
 
 > "He's here, he's there, he's every f@#%ing where."
 
@@ -31,7 +31,7 @@ Integration is delivered in six stages. The sequence is deliberate — each stag
 | 3 | **Application Load Balancing** | More complex routing logic. Builds on a distribution pipeline and DB already proven in production. |
 | 4 | **Metrics and Logs Enrichment** | Geo-enriched telemetry. Once the DB is proven across the first three stages, enriching logs and metrics is low risk and high value for observability. |
 | 5 | **Galactic VPC** | Distance-based PoP ranking for latency modeling. Depends on accurate lat/lon data validated in earlier stages. |
-| 6 | **UFO Compute** | Most complex integration — Agent Router, AI Router, Tetrate Proxy, WAF. Benefits from all prior learnings. |
+| 6 | **Compute** | Most complex integration — Agent Router, AI Router, Tetrate Proxy, WAF. Benefits from all prior learnings. |
 
 Rollout goes directly to production — no separate internal-only phase. Platform is early enough that the risk is manageable and speed of learning is more valuable than caution.
 
@@ -209,9 +209,9 @@ Every flow log and metric event gets geo attributes attached at ingest time so t
 - Output: enriched log record with country, city, ASN, IP type fields appended
 - Key consideration: enrichment must happen close to ingest to avoid hot joins; a stale DB here produces incorrect historical attribution
 
-#### 5. UFO (Unikraft Compute) — Application Geo Data
+#### 5. Compute (Unikraft) — Application Geo Data
 
-Applications deployed on UFO unikernel compute may need geo context at runtime — to localize content, enforce per-user rules, or make their own routing decisions. The GeoDB (or a lightweight API in front of it) must be reachable from the UFO execution environment.
+Applications deployed on Compute may need geo context at runtime — to localize content, enforce per-user rules, or make their own routing decisions. The GeoDB (or a lightweight API in front of it) must be reachable from the UFO execution environment.
 
 - Input: IP passed by the application at runtime
 - Output: geo record returned via API or shared memory
@@ -227,7 +227,7 @@ Galactic VPC uses geographic coordinates (lat/lon of the client and candidate Po
 
 #### 7. Agent Router, AI Router, Tetrate Proxy, WAF
 
-These components are hosted in UFO Compute. They each need geo context to enforce tenant policy, make model locality decisions, and apply WAF rules that vary by jurisdiction.
+These components are hosted in Compute. They each need geo context to enforce tenant policy, make model locality decisions, and apply WAF rules that vary by jurisdiction.
 
 - Agent Router / AI Router: use country + ASN to select the appropriate inference endpoint (sovereignty-compliant, low-latency)
 - Tetrate Proxy: injects geo headers into the service mesh so downstream microservices receive client context
@@ -257,9 +257,9 @@ All eight consumers above need geo data, but they have different access patterns
 | Edge Proxy (geo block) | sub-ms | hours | PoP-local |
 | ALB | sub-ms | hours | PoP-local |
 | Metrics enrichment | low (async) | daily | ingest pipeline |
-| UFO apps | low-ms | hours | UFO runtime |
+| Compute workloads | low-ms | hours | Compute |
 | Galactic VPC | low-ms | daily | control plane |
-| Agent / AI Router, Tetrate, WAF | low-ms | hours | UFO Compute |
+| Agent / AI Router, Tetrate, WAF | low-ms | hours | Compute |
 
 This suggests a **pub/sub distribution model** using [Higgins Bus](signal-distribution-higgins-bus.md) (MOQT) as the underlying transport. One canonical store holds the authoritative GeoDB and named lists. When either changes, an event is published to a MoQ track. PoP-local subscribers receive the event immediately — no polling, no scheduled push cycle. Consumers that can't embed the DB directly subscribe to a lightweight query API that sits in front of the local replica.
 
