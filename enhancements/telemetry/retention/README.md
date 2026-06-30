@@ -143,9 +143,9 @@ tables populated by materialized views:
 ```
 metrics_ingest  (NATS engine — receives all metric types)
     │
-    ├──▶ MV (MetricType='gauge') → otel_metrics_gauge       (raw, 90-day TTL)
-    ├──▶ MV (MetricType='gauge') → otel_metrics_gauge_hourly (AggregatingMergeTree, 1-year TTL)
-    ├──▶ MV (MetricType='gauge') → otel_metrics_gauge_daily  (AggregatingMergeTree, no TTL)
+    ├──▶ MV (MetricType='gauge') → otel_metrics_gauge       (raw, 90-day DELETE TTL)
+    ├──▶ MV (MetricType='gauge') → otel_metrics_gauge_hourly (AggregatingMergeTree, 1-year DELETE TTL)
+    ├──▶ MV (MetricType='gauge') → otel_metrics_gauge_daily  (AggregatingMergeTree, cold-move at day 7, no delete)
     └──▶ ... (same pattern for sum, histogram)
 ```
 
@@ -164,14 +164,21 @@ Example for the gauge type:
 Some attributes are consistent across all signals — the OTel resource attributes
 emitted by the `k8sattributes` processor for every workload. These are promoted
 to typed columns in the ORDER BY so AggregatingMergeTree uses them as merge
-dimensions. Freeform metric-specific attributes (e.g. `http.status_code`,
-`cpu.state`) vary per metric and cannot be enumerated upfront; they are stored
-as `Attributes JSON` alongside the rollup row but are not part of the merge key.
-Rows with the same known dimensions but different freeform attributes collapse
-into one rollup row — correct for a daily aggregate. For per-label breakdowns
-on freeform attributes, query the raw `otel_metrics_*` tables directly.
+dimensions. Because `metrics_ingest` stores `ResourceAttributes` as a `String`
+(the NATS engine cannot hold `JSON`), the MV extracts each promoted attribute
+with `JSONExtractString`.
+
+Freeform metric-specific attributes (e.g. `http.status_code`, `cpu.state`) vary
+per metric and cannot be enumerated upfront. They are **not carried into the
+rollup**: rows sharing the promoted dimensions collapse into one rollup row,
+which is correct for a daily aggregate. (A freeform attribute cannot be both
+absent from the GROUP BY and preserved per-row — and `JSON` is not a groupable
+type, so it cannot be a merge dimension either.) For per-label breakdowns on
+freeform attributes, query the raw `otel_metrics_*` tables directly, within
+their 90-day window.
 
 ```sql
+-- Daily rollup
 CREATE TABLE otel_metrics_gauge_daily (
     ProjectId       LowCardinality(String),
     Date            Date,
@@ -181,39 +188,78 @@ CREATE TABLE otel_metrics_gauge_daily (
     ClusterName     LowCardinality(String),   -- k8s.cluster.name
     NodeName        LowCardinality(String),   -- k8s.node.name
     PodName         LowCardinality(String),   -- k8s.pod.name
-    -- Freeform metric attributes; stored but not a merge dimension
-    Attributes      JSON,
     ValueAvg        AggregateFunction(avg, Float64),
     ValueMin        AggregateFunction(min, Float64),
     ValueMax        AggregateFunction(max, Float64),
-    SampleCount     AggregateFunction(count, UInt64)
+    SampleCount     AggregateFunction(count)
 ) ENGINE = AggregatingMergeTree
 PARTITION BY toYear(Date)
 ORDER BY (ProjectId, MetricName, Date, ServiceName, ClusterName, NodeName, PodName)
+TTL Date + INTERVAL 7 DAY TO VOLUME 'cold'   -- move to cold at day 7; retained indefinitely
 SETTINGS storage_policy = 'hot_cold';
 
 CREATE MATERIALIZED VIEW otel_metrics_gauge_daily_mv
 TO otel_metrics_gauge_daily AS
 SELECT
     ProjectId,
-    toDate(TimeUnix)                           AS Date,
+    toDate(TimeUnix)                                          AS Date,
     MetricName,
-    ResourceAttributes['service.name']         AS ServiceName,
-    ResourceAttributes['k8s.cluster.name']     AS ClusterName,
-    ResourceAttributes['k8s.node.name']        AS NodeName,
-    ResourceAttributes['k8s.pod.name']         AS PodName,
-    Attributes,
+    JSONExtractString(ResourceAttributes, 'service.name')     AS ServiceName,
+    JSONExtractString(ResourceAttributes, 'k8s.cluster.name') AS ClusterName,
+    JSONExtractString(ResourceAttributes, 'k8s.node.name')    AS NodeName,
+    JSONExtractString(ResourceAttributes, 'k8s.pod.name')     AS PodName,
     avgState(Value)                            AS ValueAvg,
     minState(Value)                            AS ValueMin,
     maxState(Value)                            AS ValueMax,
     countState()                               AS SampleCount
 FROM metrics_ingest
 WHERE MetricType = 'gauge'
-GROUP BY
-    ProjectId, Date, MetricName,
-    ServiceName, ClusterName, NodeName, PodName,
-    Attributes;
+GROUP BY ProjectId, Date, MetricName,
+    ServiceName, ClusterName, NodeName, PodName;
+
+-- Hourly rollup — same shape, hour bucket, 1-year DELETE TTL (no cold move)
+CREATE TABLE otel_metrics_gauge_hourly (
+    ProjectId       LowCardinality(String),
+    Hour            DateTime,
+    MetricName      LowCardinality(String),
+    ServiceName     LowCardinality(String),
+    ClusterName     LowCardinality(String),
+    NodeName        LowCardinality(String),
+    PodName         LowCardinality(String),
+    ValueAvg        AggregateFunction(avg, Float64),
+    ValueMin        AggregateFunction(min, Float64),
+    ValueMax        AggregateFunction(max, Float64),
+    SampleCount     AggregateFunction(count)
+) ENGINE = AggregatingMergeTree
+PARTITION BY toYYYYMM(Hour)
+ORDER BY (ProjectId, MetricName, Hour, ServiceName, ClusterName, NodeName, PodName)
+TTL Hour + INTERVAL 365 DAY DELETE;
+
+CREATE MATERIALIZED VIEW otel_metrics_gauge_hourly_mv
+TO otel_metrics_gauge_hourly AS
+SELECT
+    ProjectId,
+    toStartOfHour(TimeUnix)                                   AS Hour,
+    MetricName,
+    JSONExtractString(ResourceAttributes, 'service.name')     AS ServiceName,
+    JSONExtractString(ResourceAttributes, 'k8s.cluster.name') AS ClusterName,
+    JSONExtractString(ResourceAttributes, 'k8s.node.name')    AS NodeName,
+    JSONExtractString(ResourceAttributes, 'k8s.pod.name')     AS PodName,
+    avgState(Value)                            AS ValueAvg,
+    minState(Value)                            AS ValueMin,
+    maxState(Value)                            AS ValueMax,
+    countState()                               AS SampleCount
+FROM metrics_ingest
+WHERE MetricType = 'gauge'
+GROUP BY ProjectId, Hour, MetricName,
+    ServiceName, ClusterName, NodeName, PodName;
 ```
+
+Both rollup MVs read `metrics_ingest` directly with `WHERE MetricType = 'gauge'`
+— the hourly MV does **not** read the daily table, nor vice versa, since
+ClickHouse would not fire a MV off another MV's inserts. `SampleCount` is
+`AggregateFunction(count)` (zero-argument `countState()`), not
+`AggregateFunction(count, UInt64)`, which would be a type mismatch.
 
 The exact set of promoted columns is provisional — the final list depends on
 which resource attributes the `k8sattributes` processor guarantees on every
@@ -238,7 +284,12 @@ GROUP BY MetricName
 #### Aggregation semantics by metric type
 
 Different OTel metric types require different rollup aggregations. Using the
-wrong function produces incorrect results (e.g. averaging a counter sum).
+wrong function produces incorrect results (e.g. averaging a counter sum). The
+sum and summary rollups follow the same table+MV structure as the gauge example
+above (read `metrics_ingest` directly, filter `MetricType`, promote the same
+resource attributes), differing only in the aggregate state columns per the
+table below. Histogram and exponential-histogram rollup schemas are the hard
+cases and are deferred to implementation (see below).
 
 | Metric type | Correct rollup aggregation |
 |---|---|
@@ -246,7 +297,7 @@ wrong function produces incorrect results (e.g. averaging a counter sum).
 | Sum (monotonic / counter) | max of the cumulative value per bucket; or sum of delta values if reset-aware |
 | Sum (non-monotonic) | avg, min, max |
 | Histogram | sum of counts per bucket boundary; bucket boundaries must be identical across rolled-up records |
-| Exponential histogram | merge sketches using ClickHouse `quantilesTDigest` as an approximation; exact merge is not natively supported |
+| Exponential histogram | no native ClickHouse merge for the OTel sketch; exact re-aggregation is not supported (see below) |
 | Summary | sum of count and sum fields; quantile fields cannot be re-aggregated and are dropped |
 
 Histograms and exponential histograms at rollup granularity are the hardest
@@ -259,9 +310,11 @@ cases and require careful schema design before implementation:
   bucket*, which is a valid approximation — but this requires the bucket
   boundaries and per-bucket counts, not just a total count and sum.
 - **Exponential histograms** use a logarithmic scale that supports exact
-  merge in theory; ClickHouse does not have a native exponential histogram
-  aggregate, so the practical option is `quantilesTDigest`, which is an
-  approximation and loses the exponential histogram structure.
+  merge in theory, but ClickHouse has no native aggregate that merges the OTel
+  exponential-histogram sketch. Any approximation (e.g. feeding raw values
+  through a t-digest aggregate) operates on raw values rather than the sketch
+  and loses the exponential-histogram structure. The approach is deferred to
+  implementation — no concrete mechanism is committed here.
 
 The rollup schema for these types (ClickHouse column layout, MV definition) is
 not yet designed and is deferred to implementation. If histogram rollup proves
@@ -271,25 +324,21 @@ data covers the operational window where percentile queries are most needed.
 
 #### Metrics TTL configuration
 
+The hourly and daily rollup TTLs are defined on their table DDLs above (hourly:
+`Hour + INTERVAL 365 DAY DELETE`; daily: `Date + INTERVAL 7 DAY TO VOLUME 'cold'`
+with `storage_policy = 'hot_cold'`). The raw per-type tables use a single
+delete-only TTL:
+
 ```sql
--- Raw table: 90 days regardless of project
-TTL toDateTime(TimeUnix) + INTERVAL 90 DAY
-
--- Tiered storage: move to cold after 1 day, delete at 90
-TTL toDateTime(TimeUnix) + INTERVAL 1 DAY TO VOLUME 'cold',
-    toDateTime(TimeUnix) + INTERVAL 90 DAY DELETE
-
--- Hourly rollup: 1 year (Hour = toStartOfHour(TimeUnix), type DateTime64)
-TTL toDateTime(Hour) + INTERVAL 365 DAY DELETE
-
--- Daily rollup: no deletion TTL; move to cold after 7 days and retain indefinitely on GCS
--- Requires: SETTINGS storage_policy = 'hot_cold' on the daily rollup table
-TTL toDateTime(Date) + INTERVAL 7 DAY TO VOLUME 'cold'
+-- Raw tables (otel_metrics_<type>): delete at 90 days, all projects, no cold move
+TTL toDateTime(TimeUnix) + INTERVAL 90 DAY DELETE
 ```
 
 The raw table TTL is 90 days for all projects — unlike logs, there is no reason
-to keep raw operational metrics longer since the rollup tables preserve the
-long-term signal.
+to keep raw operational metrics longer, since the rollup tables preserve the
+long-term signal. Raw metrics stay on hot storage for the full 90 days; cold-
+tiering raw data within that window is a possible cost optimization but is not
+adopted here (it would require `storage_policy = 'hot_cold'` on the raw tables).
 
 #### Storage cost profile
 
