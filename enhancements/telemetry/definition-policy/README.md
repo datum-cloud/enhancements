@@ -19,7 +19,7 @@ latest-milestone: "v0.x"
     - [Redaction](#redaction)
     - [Query layer extensions](#query-layer-extensions)
   - [Metric signals](#metric-signals)
-    - [Architecture](#architecture)
+    - [Metric architecture](#metric-architecture)
     - [MetricDefinition](#metricdefinition)
     - [MetricPolicy](#metricpolicy)
     - [Translation controller](#translation-controller)
@@ -113,7 +113,7 @@ spec:
   logs:
     - name: access
       description: HTTP access logs for traffic passing through the proxy.
-      category: allLogs
+      category: access
       attributes:
         - key: http.method
           description: HTTP request method
@@ -123,7 +123,7 @@ spec:
           description: HTTP response status code
     - name: waf-events
       description: WAF block and allow events.
-      category: allLogs
+      category: security
       attributes:
         - key: waf.rule_id
           description: WAF rule that triggered the event
@@ -132,8 +132,10 @@ spec:
 ```
 
 Log names follow the resource kind and log type: `access`, `waf-events`,
-`audit`. Category `allLogs` enables platform collection for all declared types
-when a `LogCollectionPolicy` references it.
+`audit`. Each log declares a `category` from a defined vocabulary (e.g.
+`access`, `security`, `audit`); the full taxonomy is an open question. A
+`LogCollectionPolicy` selects categories to collect, or uses the wildcard `"*"`
+for all declared categories.
 
 #### LogCollectionPolicy
 
@@ -161,17 +163,21 @@ spec:
   resourceSelectors:
     - group: networking.datumapis.com
       kind: HTTPProxy
-  # Which log categories to collect. allLogs enables all declared log types
-  # for matched resources.
+  # Which log categories to collect. "*" selects all declared categories;
+  # otherwise list specific ones, e.g. [access, security].
   categories:
-    - allLogs
+    - "*"
 ```
 
 #### LogRedactionPolicy
 
 `LogRedactionPolicy` declares attribute-level redaction rules. Rules are applied
 at the OTel Collector processing tier before the bridge, so redacted values
-never enter NATS or ClickHouse.
+never enter NATS or ClickHouse. Within the Collector pipeline, redaction
+processors run **before** the collection-routing processors configured by the
+`LogCollectionPolicy` reconciler — so any record routed into NATS is already
+redacted. (A record the collection policy does not select is never routed, so it
+needs no redaction.)
 
 ```yaml
 apiVersion: telemetry.miloapis.com/v1alpha1
@@ -226,7 +232,7 @@ introduced.
 
 ### Metric signals
 
-#### Architecture
+#### Metric architecture
 
 The metric definition and policy layer introduces a stable contract for metric
 identity and production so service providers can declare *what* metrics a
@@ -246,11 +252,17 @@ Key concepts:
   and produces backend-specific configs for the active stack (OTel Collector
   pipelines, ClickHouse routing, etc.).
 
-Runtime surfaces the platform supports without changing API objects:
+Input formats the controller can ingest without changing API objects:
 
-- An **OTLP** path for modern backends
-- A **Prometheus-compatible** path (name/label transforms only) for existing
-  dashboards and alerts
+- An **OTLP** path for modern producers
+- A **Prometheus-format input** path (name/label transforms only) for producers
+  that still emit Prometheus-style samples
+
+Both feed the NATS + ClickHouse backend. This is about accepted *input* formats,
+not a query surface: by Phase 5 VictoriaMetrics is decommissioned (Phase 4), so
+there is no PromQL/MetricsQL query backend — dashboards and alerts read from
+ClickHouse (via Grafana / the query layer). The controller's output format to
+the backend is TBD.
 
 Definitions are stable; changes that would break consumers (name/unit/label
 changes) are treated as new definitions. Status conditions communicate readiness
@@ -379,6 +391,39 @@ spec:
           resource_namespace: "resource.metadata.namespace"
           resource_uid: "string(resource.metadata.uid)"
 ```
+
+> [!NOTE]
+>
+> **The CRD schema and expressions above are illustrative pending CRD design.**
+> Specifics to settle at implementation:
+>
+> - **Resource reference shape.** `MetricDefinition.spec.resource` uses
+>   `{group, kind}`; `MetricPolicy.spec.subject` uses `{group, version, kind}`.
+>   The names differ by role (the definition declares the resource a metric
+>   *describes*; the policy's `subject` is the instance set it *binds* to), but
+>   the shape should be reconciled — whether a `version` qualifier is needed (for
+>   stable field-path access in CEL) applies to both or neither, and is TBD.
+> - **Instrument temporality.** `instrument.aggregationTemporality` (on the
+>   definition) is the metric's declared output temporality;
+>   `dataPlane.selector.otel.temporality` matches the *input* sample temporality.
+>   Whether the controller must convert between them, and the exact field name,
+>   are TBD. Temporality is omitted for gauges (it has no meaning there).
+> - **CEL evaluation context.** The expressions assume bound variables `value`
+>   (the incoming sample value), `resource` (the control-plane object),
+>   `attributes` (sample attributes), and — inside `seriesFrom` — `item` (each
+>   element of the `path` collection, e.g. each entry of
+>   `resource.status.conditions`). The exact bound set and CEL function library
+>   are TBD.
+> - **Selector vs. transform.** `attributeSelectors[].valueFrom` *matches*
+>   incoming samples (attribute equals the control-plane value, to attribute a
+>   sample to a resource instance); `transform.labels` *produces* the output
+>   series labels. The two referencing the same field is intentional, not
+>   redundant.
+> - **Metric and attribute names** (`envoy.cluster.*`, `envoy.cluster_name`,
+>   etc.) are illustrative and must be verified against the actual emitters.
+> - **Key casing is intentional, per signal.** Log and resource attributes use
+>   dotted OTel keys (`http.method`); metric label-schema keys use snake_case
+>   (`resource_name`). Don't normalize one to the other.
 
 #### Translation controller
 
@@ -528,6 +573,27 @@ spec:
           upstream_cluster: "attributes['envoy.cluster_name']"
           response_code_family: "attributes['http.response.status_code_class']"
 ```
+
+## Open Questions
+
+- **API group boundary — must resolve before any CRD is registered.** The
+  definition/policy CRDs use `telemetry.miloapis.com` (platform layer) while
+  `ExportPolicy` uses `telemetry.datumapis.com` (product layer); every example
+  here hardcodes the unconfirmed `telemetry.miloapis.com/v1alpha1`. See the
+  [warning in Design Details](#design-details) for the rationale. This spans
+  ExportPolicy and these CRDs; the resolved boundary belongs in the top-level
+  conventions once decided.
+- **CRD schema specifics are illustrative** pending detailed design — the
+  resource-reference shape (`resource` vs `subject`, whether `version` is
+  needed), `instrument.aggregationTemporality` and its relationship to selector
+  temporality, and the CEL evaluation context (bound variables, `item`
+  iteration, function library). See the schema-and-expression note under
+  [MetricPolicy](#metricpolicy).
+- **Control-plane MetricPolicy output format** to the NATS + ClickHouse backend
+  (scheduled ClickHouse queries vs. OTel Collector transform pipelines) is TBD.
+- **Log category taxonomy.** The allowed `category` values and the wildcard for
+  "all categories" need a defined vocabulary (see
+  [LogCollectionPolicy](#logcollectionpolicy)).
 
 ## Alternatives
 
