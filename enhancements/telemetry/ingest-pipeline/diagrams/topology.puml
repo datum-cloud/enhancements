@@ -1,0 +1,40 @@
+@startuml topology
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include https://raw.githubusercontent.com/datum-cloud/enhancements/main/enhancements/datum-theme.puml
+
+title NATS Ingest Pipeline — Production Topology
+
+System_Boundary(edge1, "Edge cluster — us-east-1 (no persistent storage)") {
+    Container(envoy1, "Envoy / Compute", "workloads", "Emit logs (OTLP)")
+    Container(col1, "OTel Collector", "in-cluster", "Batches OTLP")
+    Container(bridge1, "OTLP-NATS bridge", "in-cluster", "Extracts datum.project.id; publishes per-project subject")
+    ContainerQueue(leaf1, "NATS leaf node", "core NATS, no JetStream", "Forwards to hub; bounded in-memory buffer only")
+}
+
+System_Boundary(edge2, "Edge cluster — eu-west-1 (no persistent storage)") {
+    Container(col2, "OTel Collector + bridge", "in-cluster", "Same edge stack")
+    ContainerQueue(leaf2, "NATS leaf node", "core NATS, no JetStream", "Bounded in-memory buffer only")
+}
+
+System_Boundary(gcp, "GCP (persistent storage)") {
+    ContainerQueue(hub, "NATS hub", "JetStream", "Aggregates all leaves; 48h durable buffer")
+    Container(chcons, "ClickHouse consumer", "durable", "Dials hub; batches INSERTs")
+    ContainerDb(ch, "ClickHouse", "telemetry DB", "System of record")
+    Container(export, "Customer export consumer", "per tenant, scoped", "Dials hub")
+    Container(alert, "Alerting consumer", "future", "Real-time alerts")
+}
+
+Rel(envoy1, col1, "OTLP/HTTP")
+Rel(col1, bridge1, "OTLP/HTTP", "in-cluster")
+Rel(bridge1, leaf1, "publish", "telemetry.<signal>.<project_id>")
+Rel(leaf1, hub, "forward", "mTLS / WAN (7422)")
+Rel(col2, leaf2, "publish")
+Rel(leaf2, hub, "forward", "mTLS / WAN (7422)")
+Rel(chcons, hub, "dials; consumes", "mTLS")
+Rel(chcons, ch, "INSERT")
+Rel(export, hub, "dials; consumes scoped subject", "mTLS")
+Rel_R(alert, hub, "dials; consumes", "mTLS")
+
+SHOW_LEGEND()
+@enduml

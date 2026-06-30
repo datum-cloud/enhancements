@@ -1,0 +1,25 @@
+@startuml poc-topology
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include https://raw.githubusercontent.com/datum-cloud/enhancements/main/enhancements/datum-theme.puml
+
+title NATS Ingest Pipeline — POC Topology (single kind cluster)
+
+System_Boundary(kind, "kind: telemetry-dev") {
+    Container(sources, "Envoy + telemetrygen", "compute", "Generate logs (OTLP)")
+    Container(col, "OTel Collector", "batch 10s", "Batches OTLP")
+    Container(bridge, "OTLP-NATS bridge", "Go", "Publishes one JSON row per LogRecord to telemetry.logs.<project_id>")
+    ContainerQueue(nats, "NATS JetStream", "TELEMETRY stream", "Single-node JetStream hub mode (POC only; production edge has no storage)")
+    Container(ingest, "logs_ingest", "NATS engine, JSONEachRow", "Subscribes telemetry.logs.>")
+}
+
+ContainerDb(ch, "ClickHouse", "docker-compose on host", "telemetry.logs (MergeTree)\nreached at host.docker.internal:9000")
+
+Rel(sources, col, "OTLP/HTTP (gzip)")
+Rel(col, bridge, "OTLP/HTTP (gzip)")
+Rel(bridge, nats, "publish", "telemetry.logs.<project_id>")
+Rel(nats, ingest, "consume")
+Rel(ingest, ch, "Materialized View", "INSERT")
+
+SHOW_LEGEND()
+@enduml

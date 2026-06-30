@@ -25,6 +25,27 @@ Tracking issue: [datum-cloud/enhancements#765](https://github.com/datum-cloud/en
 - Data residency first class support
 - Avoid propagating hierarchical information outside of the core control plane
   to prevent information from getting out of sync or inaccurately attributing telemetry
+- Prioritize billing-relevant telemetry over operational telemetry when capacity
+  is constrained — when something has to be dropped or sampled (e.g. an edge
+  buffer overflow during a WAN outage), operational logs and metrics are shed
+  before billing-relevant data
+
+## Conventions
+
+These conventions are canonical for the whole system; component docs reference
+them rather than restating them.
+
+- **Subject structure.** Telemetry is published to NATS under
+  `telemetry.<signal>.<scope_id>`, where `<signal>` is `logs`, `metrics`, or
+  `network`. The scope is `<project_id>` for tenant signals (logs, metrics) and
+  `<device_id>` for network telemetry. Internal platform telemetry uses the
+  reserved project `datum-internal`.
+- **Per-project ACLs.** Customer export consumers are authorized only to the
+  project-scoped subject for each signal type —
+  `telemetry.<signal>.<their_project_id>` — never the wildcard.
+- **Metrics export timing.** ExportPolicy exports metrics via MetricsQL pull
+  until the Phase 4 migration moves it to a NATS consumer push. Until then, the
+  ingest pipeline does not require a per-tenant metrics export consumer.
 
 ## Status at a Glance (as of June 2026)
 
