@@ -51,6 +51,10 @@ them rather than restating them.
   layer issues `SET project_id = '<resolved_project>'` per query. `project_id`
   must be declared as a ClickHouse custom setting (a `custom_settings_prefixes`
   entry) or the `SET` errors.
+- **NATS ports.** Local clients (bridge, collectors, gNMIc) connect to the leaf
+  on the client port **4222**; the leaf↔hub (leafnode) connection uses port
+  **7422**. Service DNS names are environment-specific. Component docs reference
+  these rather than restating them.
 
 ## Status at a Glance (as of June 2026)
 

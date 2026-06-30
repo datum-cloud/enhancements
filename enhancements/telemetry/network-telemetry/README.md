@@ -15,7 +15,7 @@ latest-milestone: "v0.x"
   - [SNMP collection](#snmp-collection)
   - [Flow data — Akvorado](#flow-data--akvorado)
   - [Integration with the NATS ingest pipeline](#integration-with-the-nats-ingest-pipeline)
-  - [ClickHouse schema for flows](#clickhouse-schema-for-flows)
+  - [ClickHouse schema — gNMIc network telemetry](#clickhouse-schema--gnmic-network-telemetry)
 - [Deployment topology](#deployment-topology)
 - [Alternatives](#alternatives)
 
@@ -81,11 +81,10 @@ interval. gNMIc receives these and publishes to one or more outputs.
 **Outputs:**
 
 - **NATS**: gNMIc has a native NATS output. Events are published to
-  `telemetry.network.<device_id>` subjects on the local NATS leaf node, which
-  replicates to the hub. This gives network telemetry the same at-least-once
-  durability as OTel logs.
-- **Prometheus (fallback)**: For simpler metric types (counters, gauges), gNMIc
-  can expose a `/metrics` endpoint scraped by VMAgent.
+  `telemetry.network.<device_id>` subjects on the local core-NATS leaf node,
+  which forwards to the hub. Like OTel logs, durability begins at the hub; the
+  edge leaf has no persistent storage (see
+  [Integration with the NATS ingest pipeline](#integration-with-the-nats-ingest-pipeline)).
 
 **Subscription paths (initial):**
 
@@ -97,6 +96,12 @@ interval. gNMIc receives these and publishes to one or more outputs.
 | `/system/cpus/cpu/state/usage` | CPU utilization |
 | `/system/memory/state` | Memory utilization |
 | `/components/component/state` | Hardware component health |
+
+These OpenConfig paths are illustrative and must be verified against each
+device's actual YANG models at implementation — vendors vary in which paths they
+support and where (for example, BGP state may live under
+`/network-instances/network-instance/protocols/protocol/bgp/...` rather than a
+top-level path). Do not treat the paths above as canonical.
 
 **Configuration:**
 
@@ -137,7 +142,7 @@ Network telemetry events arriving at the hub are consumed by a ClickHouse NATS
 engine table subscribing to `telemetry.network.>`. The schema follows the same
 pattern as logs: a NATS ingest table, a materialized view, and a MergeTree
 table. Column names and partitioning are deferred to implementation — see
-[ClickHouse schema for flows](#clickhouse-schema-for-flows).
+[ClickHouse schema — gNMIc network telemetry](#clickhouse-schema--gnmic-network-telemetry).
 
 ### SNMP collection
 
@@ -154,7 +159,10 @@ The OTel Collector (already deployed for OTel log/metric ingest) adds a
 injects `datum.device.id` and `datum.project.id = 'datum-internal'`; the
 bridge routes to `telemetry.metrics.datum-internal` on NATS. SNMP metrics land
 in the `otel_metrics_*` ClickHouse tables and are queryable from Grafana by
-filtering on `ResourceAttributes['datum.device.id']`.
+filtering on `ResourceAttributes['datum.device.id']`. Device data lives under the
+reserved `datum-internal` project and is read by operators via the
+no-row-policy operator path (e.g. `grafana_ops`), not the tenant `api_reader`
+path — network telemetry is internal-operations only in this phase.
 
 SNMP metrics are structurally OTLP metric data points and cannot share the
 `telemetry.network` ingest table with gNMIc — gNMIc publishes OpenConfig
@@ -168,7 +176,11 @@ two paths land in separate ClickHouse tables by design.
 | IF-MIB interfaces | Per-interface byte/packet/error counters |
 | ENTITY-MIB components | Hardware component state |
 | APC UPS MIB | Battery status and load |
-| Cisco WLC MIB | Wireless controller metrics (if applicable) |
+
+The initial set is scoped to the device classes in the Phase 3 deployment.
+Vendor-specific MIBs (e.g. a Cisco WLC MIB for wireless controllers) are
+candidates for later phases if that hardware is in scope — not part of the
+initial collection set.
 
 **OTel Collector config (additions):**
 
@@ -265,9 +277,9 @@ is defined by Akvorado and updated automatically on deployment. Key tables:
 - `flows_5m0s` — 5-minute aggregates (for long-range analysis)
 
 The `flows` ClickHouse instance is a **fifth** instance: by Phase 3, sentry,
-activity, edge-logs (not yet decommissioned), and the new telemetry instance
-(Phase 1) are already running. Edge-logs is decommissioned at the end of Phase
-4, leaving four instances in the final state. All share the
+activity, `edge-logs-system` (not yet decommissioned), and the new telemetry
+instance (Phase 1) are already running. `edge-logs-system` is decommissioned at
+the end of Phase 4, leaving four instances in the final state. All share the
 `clickhouse-operator`.
 
 > [!NOTE]
@@ -310,19 +322,23 @@ to `telemetry.network.<device_id>` subjects on the local NATS leaf node:
 gNMIc
     │ publish to telemetry.network.<device_id>
     ▼
-NATS leaf node (local durability during management network disruption)
+NATS leaf node (core NATS, no JetStream — bounded in-memory buffer only)
     │ mTLS / WAN
     ▼
-NATS hub (aggregates from all sites)
+NATS hub (JetStream — aggregates from all sites; durability begins here)
     │
     ├──► ClickHouse network_ingest (NATS engine) → MV(s) → network (MergeTree, schema TBD)
     └──► Future: alerting consumer for interface flap, BGP session down
 ```
 
-This gives network telemetry the same store-and-forward durability as OTel
-logs. If the management network between a site and GCP is disrupted, gNMIc
-continues publishing to the local leaf JetStream, and events are forwarded to
-the hub when connectivity is restored.
+Durability begins at the hub, the same as OTel logs — edge clusters have no
+persistent storage, so the leaf is core NATS with a bounded in-memory buffer.
+If the management network between a site and GCP is disrupted, gNMIc keeps
+publishing to the local leaf, which forwards on reconnect; but a prolonged
+outage is bounded by the leaf's in-memory buffer, and beyond it events are
+dropped. Network telemetry is operational (not billing-relevant), so under the
+[buffer-priority principle](../#guiding-principles) it is shed before
+billing-relevant data when capacity is constrained.
 
 Akvorado does **not** use the NATS pipeline — it has its own internal Kafka
 buffer between inlet and ClickHouse. SNMP data enters the pipeline as OTLP
@@ -330,10 +346,10 @@ metrics via the OTel Collector `snmpreceiver`, published to
 `telemetry.metrics.datum-internal` and landing in the `otel_metrics_*`
 ClickHouse tables — not in `network_ingest`. See [SNMP collection](#snmp-collection).
 
-### ClickHouse schema for flows
+### ClickHouse schema — gNMIc network telemetry
 
-See the Akvorado section above — Akvorado manages its own schema. For gNMIc
-network telemetry, the schema follows the same pattern as logs:
+Akvorado manages its own flow schema (see the Akvorado section above); this
+section covers only the gNMIc `network_ingest` path.
 
 The column schema for `network_ingest` is deferred to implementation. gNMIc's
 `event` format emits `name`, `timestamp`, `tags`, and `values` fields — these
@@ -354,13 +370,16 @@ also deferred to implementation.
 ```
 [Physical site — e.g. data center 1]
 
-  Router / switch ──gNMI──► gNMIc ──publish──► NATS leaf ──mTLS──► NATS hub (GCP)
-  Legacy device ───SNMP──► SNMP collector (TBD) ──► NATS leaf
+  Router / switch ──gNMI──► gNMIc ───────────────publish──► NATS leaf ──mTLS──► NATS hub (GCP)
+  Legacy device ───SNMP──► OTel Collector (snmpreceiver) ──► NATS leaf      (telemetry.metrics.datum-internal)
   Router / switch ──NetFlow──► Akvorado inlet ──► Akvorado ClickHouse
+
+  NATS leaf: core NATS, no JetStream (bounded in-memory buffer)
 
 [GCP]
 
-  NATS hub ──► network_ingest (NATS engine) ──► network (MergeTree) ──► Grafana
+  NATS hub ──► network_ingest (NATS engine) ──► MV(s) ──► network (MergeTree) ──► Grafana   (gNMIc)
+  NATS hub ──► otel_metrics_* (metrics pipeline) ──► Grafana                       (SNMP)
   Akvorado ──► Grafana (Akvorado datasource plugin)
 ```
 
