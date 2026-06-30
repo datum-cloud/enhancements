@@ -186,7 +186,7 @@ Each edge cluster has a local JetStream stream:
 | Property | Value |
 |---|---|
 | Name | `TELEMETRY-EDGE` |
-| Subjects | `telemetry.logs.>` |
+| Subjects | `telemetry.>` |
 | Storage | File (persists across restarts) |
 | Retention | Limits: 24h max age, 10 GiB max size |
 | Purpose | Local durability during WAN outage |
@@ -198,24 +198,45 @@ The hub stream sources from all edge leaf streams:
 | Property | Value |
 |---|---|
 | Name | `TELEMETRY` |
-| Subjects | `telemetry.logs.>` |
+| Subjects | `telemetry.>` |
 | Storage | File |
 | Retention | Limits: 48h max age, 100 GiB max size |
 | Sources | One per edge cluster `TELEMETRY-EDGE` stream |
 | Purpose | Durable buffer and fan-out point for consumers |
 
+Both streams use `telemetry.>` to capture all signal types under the
+`telemetry.*` hierarchy. Phase 1 publishes only `telemetry.logs.*`; Phase 2
+adds `telemetry.metrics.*`; Phase 3 adds `telemetry.network.*`. The stream
+config does not need to change as new signal types are introduced.
+
 48 hours of retention at the hub gives time to recover from a ClickHouse outage
 without data loss. It is not the system of record; ClickHouse is.
 
-**Consumers**
+**Consumers (Phase 1 — logs)**
 
 All consumers on the hub stream are durable, with explicit ack policy. A
 consumer that fails to ack causes redelivery, not a pipeline stall for others.
 
 | Consumer | Subject filter | Ack | Notes |
 |---|---|---|---|
-| `clickhouse-writer` | `telemetry.logs.>` | After successful INSERT | Batches records for throughput |
+| `clickhouse-logs-writer` | `telemetry.logs.>` | After successful INSERT | Batches records for throughput |
 | `export-<project_id>` | `telemetry.logs.<project_id>` | After confirmed delivery to sink | One per customer export destination |
+
+**Consumers (Phase 2 — metrics)**
+
+| Consumer | Subject filter | Ack | Notes |
+|---|---|---|---|
+| `clickhouse-metrics-writer` | `telemetry.metrics.>` | After successful INSERT | Batches data points for throughput |
+| metrics export consumer | `telemetry.metrics.<project_id>` | TBD | Design TBD — ExportPolicy currently exports metrics via MetricsQL pull, not NATS push; Phase 2 may not need a per-tenant metrics export consumer |
+
+**Consumers (Phase 3 — network)**
+
+| Consumer | Subject filter | Ack | Notes |
+|---|---|---|---|
+| `clickhouse-network-writer` | `telemetry.network.>` | After successful INSERT | gNMIc event format; one consumer for all devices |
+
+Each signal type gets its own ClickHouse writer consumer with its own cursor,
+allowing independent replay and backpressure.
 
 ### The OTLP-NATS bridge
 
@@ -224,14 +245,21 @@ alongside the OTel Collector and NATS leaf node.
 
 **What it does:**
 
-1. Listens on OTLP/HTTP (`/v1/logs`)
+1. Listens on OTLP/HTTP (`/v1/logs` and `/v1/metrics`)
 2. Parses the OTLP protobuf payload
-3. For each `ResourceLogs` entry, extracts `datum.project.id` from resource attributes
-4. Publishes one JSON message per `LogRecord` (as `JSONEachRow`) to
+3. For each `ResourceLogs` entry, extracts `datum.project.id` from resource
+   attributes
+4. If `datum.project.id` is missing: increments
+   `bridge_log_records_dropped_total{reason="missing_project_id"}` (logs) or
+   `bridge_metric_datapoints_dropped_total{reason="missing_project_id"}` (metrics),
+   excludes those records from the NATS publish, and reports them in the OTLP
+   partial success response. The Collector receives HTTP 200 and does not retry
+   — dropped records are gone.
+5. Publishes one JSON message per `LogRecord` (as `JSONEachRow`) to
    `telemetry.logs.<project_id>` on the local NATS leaf, with `ProjectId` as a
    top-level field for ClickHouse NATS engine ingestion
-5. Returns HTTP 200 to the Collector on success; non-2xx triggers the
-   Collector's built-in retry
+6. Returns HTTP 200 with a partial success body if any records were dropped;
+   HTTP 200 with an empty success body if all records were routed
 
 The OTel Collector's `otlphttp` exporter points at the bridge endpoint. No
 custom Collector build or feature gate is required.
@@ -262,12 +290,24 @@ The three attribute columns (`ResourceAttributes`, `ScopeAttributes`,
 does not support the `JSON` column type — and cast to `JSON` in the MV.
 
 **JetStream durability caveat.** Binding the NATS engine to a JetStream durable
-consumer requires the `nats_stream` and `nats_consumer_name` settings, available
-from ClickHouse ≥ 25.6. Without them the engine uses a core NATS subscription —
-messages published while ClickHouse is down are not replayed. The POC runs
-ClickHouse 26.5.1, which supports these settings; they are not yet enabled in
-the POC config. Enabling them in staging and production restores the durability
-guarantee without any change to the bridge or schema.
+consumer requires the `nats_stream` and `nats_consumer_name` settings. Without
+them the engine uses a core NATS subscription — messages published while
+ClickHouse is down are not replayed. The POC runs ClickHouse 26.5.1 but these
+settings were never enabled or tested.
+
+> [!WARNING]
+>
+> **Must verify before staging.** The `nats_stream` and `nats_consumer_name`
+> setting names and the minimum ClickHouse version that supports them must be
+> confirmed against the ClickHouse NATS engine documentation before the staging
+> deployment. See the [ClickHouse NATS engine reference](https://clickhouse.com/docs/en/engines/table-engines/integrations/nats).
+>
+> If these settings do not exist as described, the fallback is a separate
+> consumer service (a small Go binary) that reads from the JetStream durable
+> consumer and bulk-inserts into ClickHouse via the HTTP interface. This adds
+> one component but restores the durability guarantee without changing the
+> bridge, NATS topology, or ClickHouse schema. It should be treated as the
+> backup plan, not a surprise.
 
 ### Customer export consumer
 
@@ -286,7 +326,7 @@ requiring it at launch.
 ### mTLS
 
 All inter-cluster NATS connections use mTLS. In-cluster connections (Collector
-→ bridge, bridge → leaf, hub → consumers) use mTLS as defense-in-depth.
+→ bridge, bridge → leaf, consumers → hub) use mTLS as defense-in-depth.
 Certificates are managed by cert-manager.
 
 | Hop | Auth | Notes |
@@ -294,8 +334,8 @@ Certificates are managed by cert-manager.
 | OTel Collector → bridge | None (in-cluster network policy) | Bridge is not externally reachable |
 | Bridge → NATS leaf | mTLS | cert-manager issues leaf client cert |
 | NATS leaf → NATS hub | **mTLS required** | Leaf `tls` block: `cert_file`, `key_file`, `ca_file`. Hub verifies leaf identity. |
-| Hub → ClickHouse consumer | mTLS | Consumer presents client cert |
-| Hub → export consumer | mTLS | Per-consumer cert scoped to tenant subject |
+| ClickHouse consumer → Hub | mTLS | Consumer dials hub; presents client cert |
+| Export consumer → Hub | mTLS | Consumer dials hub; per-consumer cert scoped to tenant subject |
 
 Leaf-to-hub mTLS is configured in the NATS leaf server config:
 
@@ -353,16 +393,17 @@ telemetrygen (compute) ↗       (batch 10s)                        │
 - No separate consumer service — ClickHouse reads from NATS directly
 
 **Known limitations in the POC (ClickHouse 26.5.1):**
-- `nats_stream` and `nats_consumer_name` are supported by 26.5.1 but not yet
-  enabled; the engine uses a core NATS subscription (no JetStream durable
-  consumer). Messages published while ClickHouse is unavailable are not replayed.
+- JetStream durable consumer binding (`nats_stream` / `nats_consumer_name`) was
+  not enabled or tested. The engine uses a core NATS subscription; messages
+  published while ClickHouse is unavailable are not replayed. These settings
+  must be verified against the ClickHouse NATS engine docs before staging —
+  see the warning in the [ClickHouse consumer](#clickhouse-consumer) section.
 - `JSON` column type is not supported in NATS engine tables. Attribute columns
   are stored as `String` and cast to `JSON` in the MV.
 
 **Not yet validated:** mTLS, leaf-to-hub WAN replication, file-backed JetStream
-storage, customer export consumer, JetStream durable consumer (settings supported
-by 26.5.1 but not yet enabled). These are deferred to an integration environment
-with a real leaf→hub topology.
+storage, customer export consumer, JetStream durable consumer binding. These are
+deferred to an integration environment with a real leaf→hub topology.
 
 ## Production Readiness
 
@@ -371,7 +412,7 @@ the pipeline can carry production traffic.
 
 ### What remains
 
-**Hub and edge staging/production overlays (sub-issue 5)**
+**Hub and edge staging/production overlays (#2 — NATS ingest pipeline staging and production deployment)**
 
 The POC uses dev overlays with plaintext passwords and `NodePort` services.
 Production overlays must:
@@ -379,7 +420,7 @@ Production overlays must:
 - Patch services to `LoadBalancer` type with stable external IPs
 - Use the production GCS cold-storage bucket name in the CHI storage policy
 
-**mTLS for leaf-to-hub connections (sub-issue 13)**
+**mTLS for leaf-to-hub connections (#3 — NATS mTLS cert-manager integration)**
 
 All leaf-to-hub NATS connections must use mTLS. The leaf node config needs
 cert-manager `Certificate` resources that issue:
@@ -402,31 +443,89 @@ leafnodes {
 
 **JetStream durable consumers for ClickHouse**
 
-The POC runs ClickHouse 26.5.1, which supports `nats_stream` and
-`nats_consumer_name`. These settings were not enabled in the POC. Enable them in
-the staging and production NATS engine table definition to bind to a JetStream
-durable consumer and ensure messages published during a ClickHouse outage are
-replayed on restart.
+The POC runs ClickHouse 26.5.1 but `nats_stream` and `nats_consumer_name` were
+never enabled or tested. Verify these settings work against the ClickHouse NATS
+engine docs before staging — see the WARNING in the
+[ClickHouse consumer](#clickhouse-consumer) section. If they are confirmed,
+enable them in the staging and production NATS engine table definition to bind
+to a JetStream durable consumer and ensure messages published during a
+ClickHouse outage are replayed on restart.
 
-**Edge staging/production overlays (sub-issue 14)**
+**Edge staging/production overlays (#2 — NATS ingest pipeline staging and production deployment)**
 
 Edge overlays need the real hub NATS endpoint (not `host.docker.internal`) and
 the production bridge image from the container registry.
 
-**OTel Collector resource processor (sub-issue 8)**
+**OTel Collector config changes (#6 — OTLP-NATS bridge implementation and deployment)**
 
-The OTel Collector gateway must validate the presence of required resource
-attributes (`datum.project.id`, `service.name`, etc.) and reject or enrich
-records that are missing them. Without this, the bridge cannot route records
-and `ProjectId` columns in ClickHouse will be empty.
+The OTel Collector gateway config is part of the `milo-os/telemetry` codebase
+— the edge-logs-system Collector in `datum-cloud/infra` is deprecated in favour
+of what we're building. Required changes for the new Collector config:
 
-**Query layer API user (sub-issue 6)**
+- **Switch exporter**: replace the existing ClickHouse exporter with
+  `otlphttp` pointing at the bridge (`http://otlp-nats-bridge.telemetry.svc:4318`)
+- **Add resource processor**: configure the `k8sattributes` processor to
+  derive `datum.project.id` from the namespace label
+  `meta.datumapis.com/upstream-cluster-name` (strip `cluster-` prefix), and
+  inject `datum.project.id = 'datum-internal'` for platform namespaces
+
+Without these changes the bridge receives records with no `datum.project.id`
+and drops everything.
+
+**Query layer API user (#4 — query layer service initial implementation)**
 
 Create the `api_reader` ClickHouse user with the tenant row policy. The current
 schema has the user and policy defined as a placeholder in `schema.sql`; it
 must be wired to the query layer service's connection credentials.
 
 ---
+
+## Open Questions
+
+### JetStream consumer fan-out at high project cardinality
+
+The `TELEMETRY` hub stream captures `telemetry.logs.>` across all projects.
+The ClickHouse writer is one consumer on `telemetry.logs.>`. ExportPolicy
+export destinations are durable consumers filtered to
+`telemetry.logs.<project_id>` — one per customer export destination.
+
+JetStream filtered consumers are routed server-side by subject index: the
+server does not scan the full stream for each consumer on every message. A
+filtered consumer on `telemetry.logs.acme-prod` receives only messages
+published to that subject; the routing is O(1) at the server. This is
+materially different from a naive sequential scan and means per-message
+overhead does not grow with consumer count.
+
+The real cost is per-consumer state: each durable consumer holds a cursor,
+an ack-pending set, and associated goroutines on the NATS server. At low
+ExportPolicy counts (tens to hundreds) this is negligible. At thousands of
+active ExportPolicy consumers on a single stream, the aggregate memory and
+CPU overhead is unknown and must be benchmarked before assuming the current
+design scales to that point.
+
+Note that consumer count is bounded by ExportPolicy usage, not project count.
+A project with no ExportPolicy configured creates no consumer. Early
+deployments (Compute private alpha) are unlikely to stress this limit; it
+becomes relevant as ExportPolicy adoption grows.
+
+**Mitigations to evaluate if benchmarking shows a limit:**
+
+- **Per-project streams**: create a dedicated JetStream stream per project
+  (`TELEMETRY-<project_id>`) sourced from the hub. ExportPolicy consumers
+  attach to the project stream directly with no filtering overhead. Trades
+  consumer-count overhead for stream-count overhead; NATS supports large
+  numbers of streams but adds management complexity.
+- **Stream sharding**: shard the hub stream into N streams by
+  `project_id` hash (e.g., 16 shards). Each shard has a proportionally
+  smaller consumer set, capping per-shard consumer count without per-project
+  streams.
+
+**What needs to be validated before ExportPolicy scales:**
+
+- Maximum durable consumer count on the hub stream at production message
+  rates without degrading ClickHouse writer throughput or delivery latency
+- Memory and CPU overhead per consumer at idle vs. active delivery
+- Whether the NATS server's per-account consumer limit needs tuning
 
 ## Alternatives
 

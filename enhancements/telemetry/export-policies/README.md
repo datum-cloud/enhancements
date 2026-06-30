@@ -33,7 +33,7 @@ Networks, etc) are exported to third-party telemetry platforms allowing users to
 continue using their existing telemetry stack.
 
 Export policies can be used to send to any telemetry platform that supports
-receiving data through through one of our supported sink protocols. The
+receiving data through one of our supported sink protocols. The
 telemetry system will provide at-least once delivery guarantees over all
 telemetry data that is received from Datum Cloud resources.
 
@@ -91,12 +91,12 @@ are exported to third-party telemetry systems.
 
 [agg-sinks]: https://docs.cloud.google.com/logging/docs/export/aggregated_sinks_overview
 
-ExportPolicies will support configuring a single sink to control how telemetry
-data is exported. Users will be able to choose from
+ExportPolicies will support configuring one or more sinks to control how
+telemetry data is exported. Users will be able to choose from
 [multiple sink protocols](#supported-sink-protocols) to choose the one that
 works best for their platform or use-case.
 
-An export policy will allow users to exporting data to any [OpenTelemetry
+An export policy will allow users to export data to any [OpenTelemetry
 protocol (OTLP)][OTLP] compatible endpoint.
 
 > [!NOTE]
@@ -147,7 +147,7 @@ accepting telemetry data.
 > [!IMPORTANT]
 >
 > We will have limits in place to control how long we will store telemetry data
-> that’s failing to export to configured sink endpoints. After those limits are
+> that's failing to export to configured sink endpoints. After those limits are
 > reached, we will no longer be able to guarantee at-least once delivery.
 
 ## Design Details
@@ -238,7 +238,7 @@ spec:
         # familiar with using metricsql queries to select metric data from
         # Victoria Metrics.
         metricsql: |
-          {service_name=“networking.datumapis.com”, resource_kind="Gateway", __name__=~”network_bytes_.*”}
+          {service_name="networking.datumapis.com", resource_kind="Gateway", __name__=~"network_bytes_.*"}
 
         # This gives the user a way of selecting resources using namespace
         # selectors, group/kind info, and label selectors. This is a more k8s
@@ -260,7 +260,7 @@ spec:
                 app: "my-gateway"
             kinds:
               - apiGroups: ["gateway.networking.k8s.io"]
-                resources: ["gateways"]
+                kind: ["gateways"]
               - apiGroups: ["compute.datumapis.com"]
                 kind: ["workloads"]
               - apiGroups: ["networking.datumapis.com"]
@@ -274,7 +274,7 @@ spec:
 > Log sources require the log collection CRDs (LogDefinition, LogCollectionPolicy)
 > described in [definition-policy](../definition-policy/) and the ingest pipeline
 > described in [logs](../logs/). Log source support in ExportPolicy is planned for
-> Phase 1 sub-issue 4.
+> Phase 5 (#18 — LogSource support in ExportPolicy).
 
 Customers can export log data by declaring a `logs` source. Log sources select
 by resource kind and log category, using the same `resourceSelectors` model as

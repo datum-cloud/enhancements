@@ -84,20 +84,39 @@ storage.
 
 #### Log tiered storage
 
-Hot data lives on PD-SSD for low-latency `datumctl logs` queries. Cold storage
-moves to GCS after 1 day — the vast majority of log queries are for recent data,
-so moving older records to cold storage has minimal impact on query latency.
+Tenant logs live on PD-SSD for their full 7-day retention window. Since tenant
+data is deleted at day 7, there is no cost benefit to an intermediate cold tier
+— the storage is reclaimed at the same point it would have been moved, so the
+only effect of early cold migration would be degraded `datumctl logs` query
+latency for lookbacks beyond 1 day.
+
+`datum-internal` logs move to GCS cold storage at day 7 (the end of the hot
+window) and are deleted at day 90. Days 1–7 are always on PD-SSD; the long
+audit tail lives cheaply on GCS.
 
 ```sql
 TTL
-    toDateTime(ObservedTimestamp) + INTERVAL 1 DAY TO VOLUME 'cold',
-    toDateTime(ObservedTimestamp) + INTERVAL if(ProjectId = 'datum-internal', 90, 7) DAY DELETE
+    -- datum-internal: cold at day 7; tenant: never moved to cold (~100 years)
+    toDateTime(ObservedTimestamp) + toIntervalDay(if(ProjectId = 'datum-internal', 7, 36500)) TO VOLUME 'cold',
+    -- datum-internal: deleted at day 90; tenant: deleted at day 7
+    toDateTime(ObservedTimestamp) + toIntervalDay(if(ProjectId = 'datum-internal', 90, 7)) DELETE
 ```
+
+For tenant data, the `TO VOLUME` deadline is set to ~100 years — effectively
+never — so only the `DELETE` at day 7 fires. For `datum-internal`, the cold
+move fires at day 7 and the `DELETE` fires at day 90. The two deadlines never
+coincide for either class of data, so there is no ambiguity about TTL rule
+ordering.
 
 The row policy on `api_reader` (`ProjectId = getSetting('project_id')`) means
 the TTL expression branching on `ProjectId` only needs to distinguish internal
 from tenant data — individual project retention is not configurable at the TTL
 layer.
+
+`datum-internal` is injected by the OTel Collector resource processor for
+platform components running in platform Kubernetes namespaces. See
+[logs — resource attribute contract](../logs/#resource-attribute-contract)
+for how internal logs acquire this value.
 
 ---
 
@@ -111,8 +130,10 @@ layer.
 | Hourly rollup | 1 row per metric per label set per hour | 1 year | Trend analysis, capacity planning |
 | Daily rollup | 1 row per metric per label set per day | None | Business metrics, long-term analysis |
 
-All three tiers are partitioned by `(ProjectId, Date)` so project isolation and
-partition pruning work identically to the logs schema.
+All three tiers currently use `(ProjectId, Date)` as the partition key,
+matching the logs schema. This is provisional — see
+[Partition key design at high tenant count](#partition-key-design-at-high-tenant-count)
+for why this needs to change before production.
 
 #### Rollup tables
 
@@ -120,11 +141,18 @@ Each raw metrics table (one per OTel metric type) has two corresponding rollup
 tables populated by materialized views:
 
 ```
-otel_metrics_<type>          (raw, MergeTree, 90-day TTL)
+metrics_ingest  (NATS engine — receives all metric types)
     │
-    ├──▶ otel_metrics_<type>_hourly   (AggregatingMergeTree, 1-year TTL)
-    └──▶ otel_metrics_<type>_daily    (AggregatingMergeTree, no TTL)
+    ├──▶ MV (MetricType='gauge') → otel_metrics_gauge       (raw, 90-day TTL)
+    ├──▶ MV (MetricType='gauge') → otel_metrics_gauge_hourly (AggregatingMergeTree, 1-year TTL)
+    ├──▶ MV (MetricType='gauge') → otel_metrics_gauge_daily  (AggregatingMergeTree, no TTL)
+    └──▶ ... (same pattern for sum, histogram)
 ```
+
+All MVs read directly from `metrics_ingest`. ClickHouse only fires MVs on
+direct INSERTs — rows inserted by one MV do not trigger downstream MVs. Rollup
+MVs cannot read from `otel_metrics_gauge` because that table receives rows via
+a MV, not a direct INSERT; the rollup MVs would never fire.
 
 Materialized views truncate the timestamp to the rollup bucket boundary
 (`toStartOfHour`, `toStartOfDay`) and use `AggregateFunction` state columns so
@@ -133,34 +161,65 @@ written across multiple insert batches.
 
 Example for the gauge type:
 
+Some attributes are consistent across all signals — the OTel resource attributes
+emitted by the `k8sattributes` processor for every workload. These are promoted
+to typed columns in the ORDER BY so AggregatingMergeTree uses them as merge
+dimensions. Freeform metric-specific attributes (e.g. `http.status_code`,
+`cpu.state`) vary per metric and cannot be enumerated upfront; they are stored
+as `Attributes JSON` alongside the rollup row but are not part of the merge key.
+Rows with the same known dimensions but different freeform attributes collapse
+into one rollup row — correct for a daily aggregate. For per-label breakdowns
+on freeform attributes, query the raw `otel_metrics_*` tables directly.
+
 ```sql
 CREATE TABLE otel_metrics_gauge_daily (
     ProjectId       LowCardinality(String),
     Date            Date,
     MetricName      LowCardinality(String),
+    -- Promoted from resource attributes; consistent across all signals
+    ServiceName     LowCardinality(String),   -- service.name
+    ClusterName     LowCardinality(String),   -- k8s.cluster.name
+    NodeName        LowCardinality(String),   -- k8s.node.name
+    PodName         LowCardinality(String),   -- k8s.pod.name
+    -- Freeform metric attributes; stored but not a merge dimension
     Attributes      JSON,
     ValueAvg        AggregateFunction(avg, Float64),
     ValueMin        AggregateFunction(min, Float64),
     ValueMax        AggregateFunction(max, Float64),
     SampleCount     AggregateFunction(count, UInt64)
 ) ENGINE = AggregatingMergeTree
-PARTITION BY (ProjectId, Date)
-ORDER BY (ProjectId, MetricName, Date, Attributes);
+PARTITION BY toYear(Date)
+ORDER BY (ProjectId, MetricName, Date, ServiceName, ClusterName, NodeName, PodName)
+SETTINGS storage_policy = 'hot_cold';
 
 CREATE MATERIALIZED VIEW otel_metrics_gauge_daily_mv
 TO otel_metrics_gauge_daily AS
 SELECT
     ProjectId,
-    toDate(TimeUnix)         AS Date,
+    toDate(TimeUnix)                           AS Date,
     MetricName,
+    ResourceAttributes['service.name']         AS ServiceName,
+    ResourceAttributes['k8s.cluster.name']     AS ClusterName,
+    ResourceAttributes['k8s.node.name']        AS NodeName,
+    ResourceAttributes['k8s.pod.name']         AS PodName,
     Attributes,
-    avgState(Value)          AS ValueAvg,
-    minState(Value)          AS ValueMin,
-    maxState(Value)          AS ValueMax,
-    countState()             AS SampleCount
-FROM otel_metrics_gauge
-GROUP BY ProjectId, Date, MetricName, Attributes;
+    avgState(Value)                            AS ValueAvg,
+    minState(Value)                            AS ValueMin,
+    maxState(Value)                            AS ValueMax,
+    countState()                               AS SampleCount
+FROM metrics_ingest
+WHERE MetricType = 'gauge'
+GROUP BY
+    ProjectId, Date, MetricName,
+    ServiceName, ClusterName, NodeName, PodName,
+    Attributes;
 ```
+
+The exact set of promoted columns is provisional — the final list depends on
+which resource attributes the `k8sattributes` processor guarantees on every
+record. Metrics that require per-label rollup granularity on a freeform
+attribute (e.g. a dedicated HTTP status code rollup) should promote that
+attribute to a typed column in a separate rollup table.
 
 Query rollup tables using the `Merge` combinator:
 
@@ -172,7 +231,7 @@ SELECT
     maxMerge(ValueMax) AS max_value
 FROM otel_metrics_gauge_daily
 WHERE ProjectId = 'datum-internal'
-  AND Date >= '2024-01-01'
+  AND Date >= '2026-01-01'
 GROUP BY MetricName
 ```
 
@@ -186,14 +245,29 @@ wrong function produces incorrect results (e.g. averaging a counter sum).
 | Gauge | avg, min, max, count of samples |
 | Sum (monotonic / counter) | max of the cumulative value per bucket; or sum of delta values if reset-aware |
 | Sum (non-monotonic) | avg, min, max |
-| Histogram | sum of counts per bucket; preserve bucket boundaries |
-| Exponential histogram | merge HDR sketches if possible; otherwise sum counts |
-| Summary | sum of count and sum fields; quantiles cannot be re-aggregated and are dropped |
+| Histogram | sum of counts per bucket boundary; bucket boundaries must be identical across rolled-up records |
+| Exponential histogram | merge sketches using ClickHouse `quantilesTDigest` as an approximation; exact merge is not natively supported |
+| Summary | sum of count and sum fields; quantile fields cannot be re-aggregated and are dropped |
 
-Histograms and exponential histograms are the most complex. If exact quantile
-re-aggregation is not required at rollup granularity, store only count and sum —
-sufficient for p50/p95 approximation via linear interpolation and for SLA
-reporting.
+Histograms and exponential histograms at rollup granularity are the hardest
+cases and require careful schema design before implementation:
+
+- **Standard histograms** can be rolled up by summing per-bucket counts, but
+  only when bucket boundaries are identical across all records being merged. OTel
+  recommends fixed boundaries per metric, which makes this feasible. Percentile
+  estimation from rolled-up histograms uses linear interpolation *within a
+  bucket*, which is a valid approximation — but this requires the bucket
+  boundaries and per-bucket counts, not just a total count and sum.
+- **Exponential histograms** use a logarithmic scale that supports exact
+  merge in theory; ClickHouse does not have a native exponential histogram
+  aggregate, so the practical option is `quantilesTDigest`, which is an
+  approximation and loses the exponential histogram structure.
+
+The rollup schema for these types (ClickHouse column layout, MV definition) is
+not yet designed and is deferred to implementation. If histogram rollup proves
+impractical at scale, retaining raw histograms for the full 90-day window and
+omitting them from the hourly/daily rollup tables is a valid fallback — raw
+data covers the operational window where percentile queries are most needed.
 
 #### Metrics TTL configuration
 
@@ -226,6 +300,141 @@ that is 1M rows per day — roughly 50–100 MB uncompressed, an order of magnit
 less with ClickHouse's ZSTD compression. At GCS cold storage pricing (~$0.02/GB),
 a decade of daily rollups costs tens of dollars per year. "Forever" is
 economically trivial at this granularity.
+
+## Open Questions
+
+### Cross-tenant query performance and projections
+
+The current sort key (`ProjectId, ...`) is optimal for per-tenant queries —
+`datumctl logs`, the query layer's row policy enforcement, and per-project
+dashboards all benefit from partition and index pruning. However, operator and
+platform queries that scan across tenants — platform-wide error rate dashboards,
+billing aggregations, incident response across an organization — will hit full
+table scans because they cannot prune on `ProjectId`.
+
+ClickHouse [projections](https://clickhouse.com/docs/en/sql-reference/statements/alter/projection)
+address this by storing a copy of the data sorted by an alternate key (e.g.
+`(MetricName, Date, ProjectId)`) within the same table. Queries that match the
+projection's key are automatically rewritten to use it; per-tenant queries
+continue to use the primary sort key. The tradeoff is storage: each projection
+roughly doubles the on-disk footprint of the table it covers.
+
+This is validated in the audit log pipeline and is the likely solution here, but
+the right projection keys and the actual storage multiplier need to be benchmarked
+against realistic query patterns and data volumes before the schema is finalized
+for production.
+
+**What needs to happen before schema is finalized:**
+- Identify the cross-tenant query patterns that matter (platform dashboards,
+  org-level aggregations, billing)
+- Benchmark without projections against a realistic data volume to quantify the
+  performance gap
+- Design projections for the query patterns that require them
+- Measure the storage overhead and validate it is acceptable under the tiered
+  storage cost model above
+
+### Partition key design at high tenant count
+
+The current partition key for all tables is `(ProjectId, Date)`. At low project
+counts this is fine, but at high tenant cardinality it creates a partition
+explosion: N projects × D days = N×D partitions per table. With 1,000 projects
+and 90 days of raw log retention that is 90,000 partitions on the logs table
+alone. ClickHouse merge performance degrades well before that point — the common
+failure mode is `DB::Exception: Too many parts`.
+
+The sort key `(ProjectId, ...)` already provides per-project scan efficiency
+without any help from the partition key. The partition key's job is data
+lifecycle management: TTL expression evaluation, cold storage moves, and
+controlling part merge granularity. A date-only partition key handles all of
+these without the cardinality explosion.
+
+**Recommended direction:**
+
+| Table | Current | Recommended |
+|---|---|---|
+| Raw logs / metrics (90-day TTL) | `(ProjectId, toDate(...))` | `toYYYYMM(...)` — monthly; max ~3 partitions in the hot window |
+| Hourly rollup (1-year TTL) | `(ProjectId, Date)` | `toYYYYMM(...)` — monthly; max ~12 partitions |
+| Daily rollup (no TTL, indefinite) | `(ProjectId, Date)` | `toYear(...)` — annual; accumulates slowly |
+
+Monthly partitioning on raw tables gives at most 3 active partitions within the
+90-day window, which is well within ClickHouse's comfortable range. The sort key
+handles per-project pruning; partitions handle TTL and tiered storage moves.
+
+The existing `(ProjectId, Date)` partition key in the schema examples and POC is
+provisional. It must be revisited during staging benchmarking before any
+production schema is committed — altering the partition key on a table with data
+requires a full table rebuild.
+
+**What needs to happen before schema is finalized:**
+- Validate that monthly partitioning correctly scopes TTL operations (the TTL
+  expression operates on rows, not partitions — date-only partitioning is safe)
+- Confirm cold storage `TO VOLUME` moves still work as expected with monthly
+  partitions
+- Benchmark merge performance at target data volume with both partition schemes
+
+### ClickHouse vertical and horizontal scaling
+
+The current design assumes a single ClickHouse instance per region. What
+constitutes an appropriately-sized instance — and how to grow beyond it — has
+not been investigated. Before the telemetry pipeline carries production load,
+there are two open scaling questions:
+
+**Vertical scaling (single-node capacity ceiling).** How large can a single
+ClickHouse node get before query latency or merge throughput degrades? What are
+the early warning signs? The operations runbook currently handles disk pressure
+but does not address CPU or memory saturation, or the point at which a
+single-node deployment should move to a sharded cluster.
+
+**Horizontal scaling (sharding).** The ClickHouse operator supports sharded
+deployments, but the schema (NATS engine ingest tables, materialized views,
+MergeTree tables) has not been designed for sharding. Specifically:
+- The NATS engine table has no native sharding — a sharded ingest path would
+  require distributing NATS subjects across shards or switching to a Go consumer
+  service that can route by project.
+- The row policy and `getSetting('project_id')` session variable work on the
+  querying node; with a `Distributed` table engine the policy must be enforced
+  on every shard, which adds schema complexity.
+- Cross-shard query merging in the query layer is additive (see
+  [query-layer — result merging](../query-layer/#result-merging)); this extends
+  naturally to shards within a region.
+
+**What needs to happen before production:**
+- Establish target data volume and ingest rate (messages/sec, GB/day) from
+  staging
+- Define the vertical ceiling (disk, CPU, memory) and document the
+  expansion procedure (PVC resize, node resize, replica count)
+- Decide whether the initial production deployment is single-node or a
+  small replica set, and document the migration path to sharding if needed
+
+### Single-region deployment
+
+The current design deploys one regional ClickHouse instance per region where
+workloads run, with no replication across regions. This is acceptable for the
+initial deployment but is not a long-term architecture:
+
+- **No regional redundancy.** A single regional ClickHouse going down takes
+  the entire log and metric pipeline for that region offline. The NATS hub
+  buffers up to 48 hours, but beyond that window data is lost.
+- **No cross-region failover.** If a region is unavailable, tenant queries
+  for projects in that region return nothing — there is no replica to fall
+  back to.
+- **Data residency limits options.** Replicating across regions is not
+  straightforward: the data residency requirement (data does not leave its
+  region of origin) means cross-region replication must be opt-in and
+  carefully scoped, if it is permitted at all.
+
+For the Compute private alpha, a single regional ClickHouse is acceptable.
+Longer term, the deployment needs at least a replica set within each region
+for availability, and a clear policy on what cross-region durability means
+given data residency constraints.
+
+**What needs to happen before GA:**
+- Define the within-region availability target and the ClickHouse replica
+  count needed to meet it
+- Understand what GCP storage options (regional PD, balanced PD vs. SSD) are
+  acceptable under data residency requirements
+- Decide whether cross-region failover is in scope and, if so, how it interacts
+  with the data residency model
 
 ## Dependencies
 

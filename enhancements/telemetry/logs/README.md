@@ -65,23 +65,49 @@ and is a baseline expectation for any infrastructure platform.
 
 ### Resource attribute contract
 
-All Datum Cloud workloads must emit OTel logs with the following resource
-attributes. The OTel Collector resource processor on each edge cluster injects
-and validates these. Workloads that do not provide `datum.project.id` have
-their logs rejected by the OTLP-NATS bridge (HTTP 400); the Collector enriches
-the other required attributes where possible.
+The OTel Collector resource processor on each cluster is responsible for
+ensuring `datum.project.id` is present on every log record before it reaches
+the bridge. There are two cases:
+
+**Tenant workloads** do not need to set `datum.project.id` themselves. The
+Collector derives it from the namespace label
+`meta.datumapis.com/upstream-cluster-name` via the `k8sattributes` processor.
+The label value has the form `cluster-<project-id>` (e.g.
+`cluster-personal-project-2650fdb4`); the Collector strips the `cluster-`
+prefix and sets `datum.project.id = 'personal-project-2650fdb4'`. Records
+where this label is absent and `datum.project.id` is not otherwise set are
+silently dropped by the bridge with a partial success response.
 
 | Attribute | Description | Example |
 |---|---|---|
 | `service.name` | Service name from the OTel semantic conventions | `compute-workload` |
 | `service.namespace` | Kubernetes namespace | `tenant-acme-corp` |
 | `k8s.cluster.name` | Cluster where the workload runs | `us-east-1-edge-01` |
-| `datum.project.id` | Datum project identifier | `acme-prod` |
+| `datum.project.id` | Derived from namespace label `meta.datumapis.com/upstream-cluster-name` by stripping `cluster-` prefix | `personal-project-2650fdb4` |
+
+**Internal platform components** (Envoy, control plane services, NATS,
+ClickHouse operator, etc.) do not set `datum.project.id` themselves. The
+Collector resource processor detects these by Kubernetes namespace — any
+source in a platform namespace has `datum.project.id = 'datum-internal'`
+injected automatically. This routes their logs to
+`telemetry.logs.datum-internal` on NATS and applies the 90-day retention tier
+(vs. 7 days for tenant data). See [retention](../retention/#log-ttl-tiers).
+
+The complete namespace list is an implementation detail maintained in the OTel
+Collector resource processor config. Known platform namespaces include
+`kube-system`, `telemetry`, `milo-system`, and `gateway-system`; the full list
+must be audited against the actual cluster namespaces before the Collector
+config is finalized.
 
 The bridge service extracts `datum.project.id` from the OTLP resource attributes
 of each `ResourceLogs` entry and routes to the corresponding NATS subject
 (`telemetry.logs.<project_id>`). This attribute is the root tenancy signal for
 the entire pipeline.
+
+In Phases 1–4, the bridge collects all records with a valid `datum.project.id`
+unconditionally. The `LogCollectionPolicy` opt-in gate is a Phase 5 feature;
+no policy is required for Phase 1 log collection to work. See
+[definition-policy](../definition-policy/) for the Phase 5 design.
 
 ### Ingest path
 
@@ -113,10 +139,12 @@ messages. It routes; it does not enrich.
 For each `ResourceLogs` entry:
 
 1. Extract `datum.project.id` from resource attributes
-2. If missing: reject (HTTP 400 back to the OTel Collector, which retries)
-3. Publish the entry as a JSON message to `telemetry.logs.<project_id>` on the
-   local NATS leaf, with `ProjectId` as a top-level field for ClickHouse
-   NATS engine ingestion
+2. If missing: increment `bridge_log_records_dropped_total{reason="missing_project_id"}`,
+   exclude from the NATS publish, and include in the OTLP partial success
+   response. The Collector receives HTTP 200 and does not retry.
+3. Publish one JSON message per `LogRecord` (as `JSONEachRow`) to
+   `telemetry.logs.<project_id>` on the local NATS leaf, with `ProjectId` as a
+   top-level field for ClickHouse NATS engine ingestion
 
 Org ID is not stamped here. This is a deliberate design choice: org and folder
 hierarchy is mutable. Baking it into stored records means historical data
@@ -162,7 +190,9 @@ Key columns:
 | `ScopeAttributes` | `JSON` | Instrumentation scope attributes |
 | `LogAttributes` | `JSON` | Per-record attributes |
 
-Partition key: `(ProjectId, toDate(ObservedTimestamp))`
+Partition key: `(ProjectId, toDate(ObservedTimestamp))` — provisional; see
+[retention open questions](../retention/#partition-key-design-at-high-tenant-count)
+for the partition explosion concern at high tenant count.
 Order key: `(ProjectId, ServiceName, toDateTime(ObservedTimestamp), ObservedTimestamp)`
 
 Row policy: `ProjectId = getSetting('project_id')` on the `api_reader` user.
@@ -193,12 +223,27 @@ datumctl logs [flags]
 
 Flags:
   --tail         Stream logs in real time (live tail)
-  --since        Show logs since a relative time (e.g. 1h, 30m) or absolute timestamp; filters on ObservedTimestamp
+  --since        Show logs since a relative time (e.g. 1h, 30m) or absolute timestamp; filters on ObservedTimestamp (ingest time)
   --service      Filter by service.name
   --severity     Filter by severity (INFO, WARN, ERROR)
   --project      Target project (defaults to current context)
   --limit        Maximum number of log lines to return (default 100, max 1000)
 ```
+
+> [!NOTE]
+>
+> **`--since` filters on ingest time, not event time.** `ObservedTimestamp` is
+> set by the OTel Collector when it receives the record, not when the event
+> occurred. This is intentional — `Timestamp` (event time) may be 0 or
+> unreliable for sources that don't set it. Under normal conditions ingest and
+> event time are within seconds of each other and the distinction is invisible.
+>
+> The gap becomes noticeable during a NATS replay after a WAN outage. If a
+> site is offline for 2 hours and the NATS leaf replays buffered records to
+> the hub on reconnect, `--since 1h` will surface those records — ClickHouse
+> received them in the last hour even though the events happened 2+ hours ago.
+> Users investigating what happened *during* the outage should use an absolute
+> `--since` timestamp rather than a relative window.
 
 **Output format:**
 
@@ -208,16 +253,37 @@ Flags:
 2026-07-01T12:00:01.789Z  ERROR envoy-gateway     upstream timeout: cluster backend-svc
 ```
 
-Streaming (`--tail`) uses chunked HTTP. The query layer issues a ClickHouse
-query with `LIVE VIEW` semantics or a polling loop with cursor-based pagination,
-returning rows as they arrive.
+Streaming (`--tail`) uses chunked HTTP with cursor-based polling. The query
+layer holds the connection open and issues a new ClickHouse query on a short
+interval (e.g. 500ms), filtering for rows with
+`ObservedTimestamp >= <last_seen_cursor>`. New rows are flushed to the client
+as they arrive. The cursor advances to the maximum `ObservedTimestamp` in each
+batch.
+
+The delivery guarantee is **at-least-once**. `ObservedTimestamp` is set by the
+OTel Collector on receipt and is not unique — multiple records in the same
+ingest batch can share an identical nanosecond timestamp. A strict `>` cursor
+would silently drop those records (gap); `>=` re-delivers the records at the
+cursor boundary on the next poll or reconnect (duplicate). At-least-once with
+occasional duplicates at boundaries is the correct tradeoff for a log tail —
+the same contract `kubectl logs` provides.
+
+If exact-once delivery is required in a future iteration, the bridge can
+generate a UUID per log record (`LogId`) stored as a top-level ClickHouse
+column, and the cursor becomes `(ObservedTimestamp, LogId)` — a unique,
+monotonically-advanceable position.
+
+ClickHouse `LIVE VIEW` is not used — it is experimental and deprecated, and
+does not compose with the row policy session variable the query layer sets per
+request.
 
 ## Alternatives
 
 **Direct OTel Collector → ClickHouse (no NATS)** — the current deployed state
-for edge logs. Simple but provides no replay on ClickHouse outage and no fan-out
-to customer export without dual-write. Retained for the current edge-logs-system
-instance; new compute logs flow through NATS.
+for edge logs (`edge-logs-system`). Simple but provides no replay on ClickHouse
+outage and no fan-out to customer export without dual-write. The edge-logs-system
+pipeline is deprecated; it will be decommissioned as part of Phase 4 once the
+NATS pipeline has fully replaced it.
 
 **Loki as the log store** — Loki is already deployed. Rejected for
 customer-facing logs: Loki's multi-tenancy model uses `X-Scope-OrgID` which

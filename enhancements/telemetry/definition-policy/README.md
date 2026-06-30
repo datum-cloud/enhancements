@@ -142,6 +142,14 @@ more resource kinds and categories. Without a policy, no logs are collected —
 this prevents unbounded storage growth and gives operators control over what
 enters the pipeline.
 
+> [!NOTE]
+>
+> **Phases 1–4 collect unconditionally.** The `LogCollectionPolicy` controller
+> does not exist until Phase 5. Before it ships, the pipeline collects all log
+> records that arrive at the bridge with a valid `datum.project.id` — there is
+> no opt-in gate. "Without a policy, no logs are collected" becomes the enforced
+> behavior only once the Phase 5 controller is deployed.
+
 ```yaml
 apiVersion: telemetry.miloapis.com/v1alpha1
 kind: LogCollectionPolicy
@@ -183,7 +191,7 @@ spec:
 ```
 
 Supported actions: `drop` removes the attribute entirely; `hash` replaces the
-value with a one-way SHA-256 prefix.
+value with a one-way SHA-256 hash.
 
 #### Collection policy reconciler
 
@@ -200,7 +208,7 @@ Redaction is applied at the OTel Collector processing tier, before logs reach
 the NATS bridge:
 
 - `drop` — the attribute is removed from the log record
-- `hash` — the attribute value is replaced with a one-way hash (SHA-256 prefix)
+- `hash` — the attribute value is replaced with a one-way hash (SHA-256 hash)
 
 Body redaction is deferred. If compliance requirements mandate it, a future
 enhancement will add a `body.mask` action with CEL-based expression matching.
@@ -236,7 +244,7 @@ Key concepts:
   data-plane telemetry (`DataPlane`).
 - **Translation controller** — Watches definitions and policies, validates them,
   and produces backend-specific configs for the active stack (OTel Collector
-  pipelines, VictoriaMetrics recording rules, etc.).
+  pipelines, ClickHouse routing, etc.).
 
 Runtime surfaces the platform supports without changing API objects:
 
@@ -261,6 +269,7 @@ apiVersion: telemetry.miloapis.com/v1alpha1
 kind: MetricDefinition
 metadata:
   name: gateway-httproute-delivery-upstream-request-latency
+  # k8s object labels — not the metric label schema (see spec.labels below)
   labels:
     service.miloapis.com: gateway.networking.k8s.io
 spec:
@@ -378,14 +387,13 @@ them, and produces backend-specific configs:
 
 - **OTel Collector pipelines** — filter, transform, routing, and batch
   processors for data-plane metric policies
-- **VictoriaMetrics recording rules** — for control-plane metric policies that
-  emit directly from the controller
 - **Status conditions** — both definition and policy objects are updated to
   indicate acceptance or validation errors
 
-The controller is decoupled from the metrics storage backend. Swapping
-collectors or storage (e.g. from VictoriaMetrics to ClickHouse) is an
-implementation detail behind the translator.
+By Phase 5, VictoriaMetrics has been decommissioned (Phase 4). The controller
+targets the NATS + ClickHouse backend. The exact output format for
+control-plane metric policies (e.g. scheduled ClickHouse queries, OTel
+Collector transform pipelines) is TBD at implementation.
 
 #### Scenarios
 
@@ -520,14 +528,6 @@ spec:
           upstream_cluster: "attributes['envoy.cluster_name']"
           response_code_family: "attributes['http.response.status_code_class']"
 ```
-
-## Open Questions
-
-**API group boundary:** `ExportPolicy` is in `telemetry.datumapis.com`
-(product layer). The examples above use `telemetry.miloapis.com` for definition
-and policy CRDs on the basis that these are platform-layer primitives — service
-providers register signal types; collection opt-in is an operator and customer
-concern. This must be confirmed before any CRD is registered.
 
 ## Alternatives
 

@@ -68,7 +68,7 @@ WITH errors AS (
         toStartOfMinute(ObservedTimestamp) AS minute,
         ResourceAttributes['service.name'] AS service,
         count() AS error_count
-    FROM platform_logs
+    FROM telemetry.logs
     WHERE ProjectId = 'project-abc'
       AND SeverityText IN ('ERROR', 'FATAL')
       AND ObservedTimestamp >= now() - INTERVAL 1 HOUR
@@ -77,9 +77,9 @@ WITH errors AS (
 cpu AS (
     SELECT
         toStartOfMinute(TimeUnix) AS minute,
-        Labels['service'] AS service,
+        ResourceAttributes['service.name'] AS service,
         avg(Value) AS avg_cpu
-    FROM metrics
+    FROM telemetry.otel_metrics_gauge
     WHERE ProjectId = 'project-abc'
       AND MetricName = 'process.cpu.utilization'
       AND TimeUnix >= now() - INTERVAL 1 HOUR

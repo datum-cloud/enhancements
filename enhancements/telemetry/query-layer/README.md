@@ -159,16 +159,30 @@ ClickHouse row policy enforces this as a defense-in-depth layer:
 ProjectId = getSetting('project_id')
 ```
 
-A session without `project_id` set throws — no silent data leak.
-
 The query layer reads `project_id` from the user extras injected into the
 request by `ProjectRouterWithRequestInfo` in milo-api. No additional Milo API
 call is needed in the query layer — the project identity is already resolved
 before the request reaches the APIService.
 
+> [!WARNING]
+>
+> **The throw-on-unset behavior is a configuration requirement, not an inherent
+> property.** `getSetting('project_id')` only throws if the `project_id` custom
+> setting has no configured default. If a default exists, ClickHouse silently
+> returns it — the row policy then matches nothing or matches everything
+> depending on the default value, with no error. To guarantee a session without
+> `project_id` set throws:
+>
+> - Define `project_id` as a custom setting with **no default value** in the
+>   ClickHouse server config
+> - Test this explicitly in staging: connect as `api_reader` without calling
+>   `SET project_id`, issue a query, and confirm it throws rather than returning
+>   rows
+
 For operator queries (Grafana), the query layer connects as `grafana_ops`, which
-has no row policy. The query layer enforces that only authenticated platform
-operators can reach this path.
+has no row policy — operators get unrestricted access across all projects. The
+throw-on-unset safety net applies only to `api_reader`; `grafana_ops` relies on
+network-level access control to prevent unauthorized use.
 
 ### Multi-region fanout
 
@@ -193,6 +207,10 @@ The merge strategy depends on query type:
 **Log queries (ordered rows)** — merge by `ObservedTimestamp` descending,
 matching the ClickHouse order key. Each region returns an ordered slice; the
 query layer performs a k-way merge.
+
+**Metric queries (ordered rows)** — merge by `TimeUnix` descending, matching
+the metrics table order key. Same k-way merge as logs; the timestamp column
+differs per signal type.
 
 **Simple aggregations** — `SUM` and `COUNT` are additive across regions.
 `AVG` requires each region to return `sum` and `count` separately; the query
@@ -224,9 +242,10 @@ apply backpressure.
 
 > [!IMPORTANT]
 >
-> The query layer's `APIService` registration must set `TimeoutSeconds: 0` (no
-> timeout). A non-zero value causes the kube-aggregator proxy to terminate
-> long-lived tail connections before ClickHouse has finished streaming.
+> Long-lived `--tail` connections must survive the kube-aggregator proxy without
+> being terminated mid-stream. The mechanism for configuring aggregator proxy
+> timeout behavior (if any) must be verified at implementation — `TimeoutSeconds`
+> is not a valid field on the `APIService` spec.
 
 ### Region registry
 
@@ -244,9 +263,10 @@ For Datum, `datumctl logs --project <scope>` designates the scoping project; the
 query layer resolves the set of accessible projects from Milo and fans out to the
 relevant regional ClickHouse instances.
 
-**Project resolution from Milo.** Milo's `Project` resource carries
-`spec.ownerRef.name` (the parent org), so the query layer can list all projects
-for an org using the existing Milo API — no new scoping concept is needed.
+**Project resolution from Milo.** Milo's `Project` resource carries a parent
+org reference (exact field TBD — verify against the Milo API before
+implementation), so the query layer can list all projects for an org using the
+existing Milo API — no new scoping concept is needed.
 For MVP single-project queries the project comes directly from the user's current
 context and no Milo lookup is required. The open question is caching strategy:
 whether the query layer calls Milo per-request (with short-TTL cache) or receives
@@ -254,7 +274,9 @@ project membership in OIDC token claims.
 
 **Region resolution** follows from project resolution: once the scope is known,
 the query layer asks Milo where those projects' workloads are deployed. The
-region where workloads run is the region with their logs.
+region where workloads run is assumed to be the region with their logs — a 1:1
+assumption that holds for single-region projects but may not for projects with
+workloads in multiple regions. Region resolution strategy is TBD.
 
 The interface inside the query layer should be a `ScopeResolver` abstraction so
 the backing implementation (config file to start, Milo API long-term) can be

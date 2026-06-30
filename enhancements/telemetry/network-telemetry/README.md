@@ -30,8 +30,8 @@ This enhancement covers three collection paths for network telemetry:
 - **Akvorado**: NetFlow/IPFIX/sFlow flow data for traffic analysis and capacity planning
 
 All three paths integrate with the existing observability infrastructure:
-gNMIc data enters the NATS ingest pipeline alongside OTel data; SNMP data goes
-to VictoriaMetrics; flow data lands in ClickHouse.
+gNMIc and SNMP data enter the NATS ingest pipeline and land in ClickHouse;
+flow data lands in a separate Akvorado-managed ClickHouse instance.
 
 ## Motivation
 
@@ -123,62 +123,98 @@ subscriptions:
 outputs:
   nats:
     type: nats
-    address: nats-leaf.telemetry.svc:4222
+    address: nats-leaf.telemetry.svc:4222  # leaf client port; leaf↔hub uses 7422
     subject-prefix: telemetry.network
+    # format: event emits name/timestamp/tags/values — field names do not map
+    # directly to ClickHouse columns via JSONEachRow. An output template or
+    # alternative format is required; exact approach is TBD at implementation.
     format: event
 ```
 
 **ClickHouse consumer (hub):**
 
 Network telemetry events arriving at the hub are consumed by a ClickHouse NATS
-engine table subscribing to `telemetry.network.>`. Schema mirrors the logs
-pattern: a NATS ingest table, a materialized view, and a MergeTree table
-partitioned by `(DeviceId, toDate(Timestamp))`.
+engine table subscribing to `telemetry.network.>`. The schema follows the same
+pattern as logs: a NATS ingest table, a materialized view, and a MergeTree
+table. Column names and partitioning are deferred to implementation — see
+[ClickHouse schema for flows](#clickhouse-schema-for-flows).
 
 ### SNMP collection
 
 For network devices that do not support gNMI (older switches, out-of-band
-management hardware, UPS units), SNMP polling via
-[SNMP Exporter](https://github.com/prometheus/snmp_exporter) provides metric
-collection compatible with the VictoriaMetrics stack.
+management hardware, UPS units), the OTel Collector
+[`snmpreceiver`](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/receiver/snmpreceiver)
+(contrib component) polls SNMP devices directly and emits native OTLP metrics.
+No separate SNMP Exporter deployment is required.
 
 **Deployment:**
 
-SNMP Exporter runs as a Deployment in the management cluster. VMAgent
-configures a scrape job against the SNMP Exporter, which walks OIDs on each
-target device at the scrape interval.
+The OTel Collector (already deployed for OTel log/metric ingest) adds a
+`snmpreceiver` configuration targeting each device. The resource processor
+injects `datum.device.id` and `datum.project.id = 'datum-internal'`; the
+bridge routes to `telemetry.metrics.datum-internal` on NATS. SNMP metrics land
+in the `otel_metrics_*` ClickHouse tables and are queryable from Grafana by
+filtering on `ResourceAttributes['datum.device.id']`.
 
-**Module selection:**
+SNMP metrics are structurally OTLP metric data points and cannot share the
+`telemetry.network` ingest table with gNMIc — gNMIc publishes OpenConfig
+`Path`/`Value` events, a format incompatible with the OTLP metric schema. The
+two paths land in separate ClickHouse tables by design.
 
-SNMP Exporter uses modules to define which OIDs to walk. Initial modules:
+**OID collections (initial):**
 
-| Module | Purpose |
+| Collection | Purpose |
 |---|---|
-| `if_mib` | Interface counters (ifInOctets, ifOutOctets, ifErrors) |
-| `cisco_wlc` | Wireless controller metrics (if applicable) |
-| `apc_ups` | APC UPS battery status and load |
-| `entity_mib` | Hardware component state |
+| IF-MIB interfaces | Per-interface byte/packet/error counters |
+| ENTITY-MIB components | Hardware component state |
+| APC UPS MIB | Battery status and load |
+| Cisco WLC MIB | Wireless controller metrics (if applicable) |
 
-**VMAgent scrape config:**
+**OTel Collector config (additions):**
 
 ```yaml
-- job_name: snmp
-  static_configs:
-    - targets:
-        - 192.168.1.1  # switch-01
-        - 192.168.1.2  # switch-02
-  metrics_path: /snmp
-  params:
-    module: [if_mib]
-  relabel_configs:
-    - source_labels: [__address__]
-      target_label: __param_target
-    - target_label: __address__
-      replacement: snmp-exporter.telemetry.svc:9116
+receivers:
+  snmp:  # component type name is "snmpreceiver"; the config key is "snmp"
+    collection_interval: 60s
+    agents:
+      - endpoint: udp://device-ip:161
+        version: v2c
+        community: ${SNMP_COMMUNITY}
+    attributes:
+      device.id:
+        value: device-ip
+        type: resource-attribute
+    metrics:
+      # IF-MIB
+      if.in.octets:
+        unit: By
+        description: ifInOctets
+        type: gauge
+        scalar_oids:
+          - oid: "1.3.6.1.2.1.2.2.1.10"
+            attributes:
+              - name: if.name
+                oid: "1.3.6.1.2.1.2.2.1.2"
+
+processors:
+  resource/snmp:
+    attributes:
+      - key: datum.device.id
+        from_attribute: device.id
+        action: insert
+      - key: datum.project.id
+        value: datum-internal
+        action: insert
+
+exporters:
+  otlphttp/bridge:
+    endpoint: http://otlp-nats-bridge.telemetry.svc:4318
 ```
 
-SNMP metrics land in VictoriaMetrics alongside existing infrastructure metrics.
-No separate ClickHouse table is needed for SNMP data in Phase 2.
+The exact OID-to-metric mapping is deferred to implementation; the config above
+is illustrative. The `snmpreceiver` supports column OIDs (for per-interface
+metrics) and scalar OIDs (for device-level metrics); the full configuration
+reference is in the contrib documentation.
 
 ### Flow data — Akvorado
 
@@ -228,8 +264,36 @@ is defined by Akvorado and updated automatically on deployment. Key tables:
 - `flows_1m0s` — 1-minute aggregates (for dashboards)
 - `flows_5m0s` — 5-minute aggregates (for long-range analysis)
 
-The `flows` ClickHouse instance is a **fourth** instance alongside sentry,
-activity, and edge-logs. All share the `clickhouse-operator`.
+The `flows` ClickHouse instance is a **fifth** instance: by Phase 3, sentry,
+activity, edge-logs (not yet decommissioned), and the new telemetry instance
+(Phase 1) are already running. Edge-logs is decommissioned at the end of Phase
+4, leaving four instances in the final state. All share the
+`clickhouse-operator`.
+
+> [!NOTE]
+>
+> **Deliberate exception to "Minimize database engines."** Akvorado introduces
+> two things that conflict with the guiding principles: an additional ClickHouse
+> instance, and an internal Kafka broker alongside NATS. Kafka is also notable
+> because the [ingest-pipeline](../ingest-pipeline/) design explicitly rejected
+> it as a general-purpose message bus.
+>
+> Both exceptions are accepted because Akvorado is a self-contained appliance,
+> not a component we compose:
+>
+> - **Kafka** — internal to Akvorado's deployment and managed by it. Replacing
+>   it requires forking Akvorado or running a Kafka-to-NATS bridge with no
+>   operational benefit. The ingest-pipeline Kafka rejection applies to the
+>   telemetry write path; Akvorado's Kafka is not on that path.
+> - **Separate ClickHouse** — Akvorado manages its own schema and runs
+>   migrations automatically on deployment. Sharing the telemetry ClickHouse
+>   would couple Akvorado schema upgrades to the telemetry table lifecycle.
+>   The ClickHouse operator handles multiple independent instances cheaply.
+>
+> Flow data is architecturally distinct — it arrives from network hardware over
+> NetFlow/IPFIX/sFlow, not through OTel Collector pipelines. Treating Akvorado
+> as a separate appliance is the correct model. See
+> [Alternatives](#alternatives) for the explicitly rejected options.
 
 **Grafana integration:**
 
@@ -251,7 +315,7 @@ NATS leaf node (local durability during management network disruption)
     ▼
 NATS hub (aggregates from all sites)
     │
-    ├──► ClickHouse network_ingest (NATS engine) → network_mv → network (MergeTree)
+    ├──► ClickHouse network_ingest (NATS engine) → MV(s) → network (MergeTree, schema TBD)
     └──► Future: alerting consumer for interface flap, BGP session down
 ```
 
@@ -260,34 +324,28 @@ logs. If the management network between a site and GCP is disrupted, gNMIc
 continues publishing to the local leaf JetStream, and events are forwarded to
 the hub when connectivity is restored.
 
-SNMP and Akvorado do **not** use the NATS pipeline: SNMP goes directly to
-VictoriaMetrics (pull-based, loss-tolerant) and Akvorado has its own internal
-Kafka buffer.
+Akvorado does **not** use the NATS pipeline — it has its own internal Kafka
+buffer between inlet and ClickHouse. SNMP data enters the pipeline as OTLP
+metrics via the OTel Collector `snmpreceiver`, published to
+`telemetry.metrics.datum-internal` and landing in the `otel_metrics_*`
+ClickHouse tables — not in `network_ingest`. See [SNMP collection](#snmp-collection).
 
 ### ClickHouse schema for flows
 
 See the Akvorado section above — Akvorado manages its own schema. For gNMIc
 network telemetry, the schema follows the same pattern as logs:
 
-```sql
--- NATS engine ingest table
-CREATE TABLE telemetry.network_ingest (
-    DeviceId   LowCardinality(String),
-    Timestamp  DateTime64(9),
-    Path       String,
-    Value      String   -- JSON event payload from gNMIc
-) ENGINE = NATS
-SETTINGS
-    nats_url = 'nats://nats-hub.telemetry.svc:4222',
-    nats_subjects = 'telemetry.network.>',
-    nats_format = 'JSONEachRow';
+The column schema for `network_ingest` is deferred to implementation. gNMIc's
+`event` format emits `name`, `timestamp`, `tags`, and `values` fields — these
+do not match the column names `DeviceId/Timestamp/Path/Value` shown in earlier
+drafts, so `JSONEachRow` ingestion would require either a gNMIc output template
+that renames the fields or a different gNMIc format. The intent is to capture
+device identity, timestamp, path, and value payload; the exact column names must
+be verified against gNMIc's output at implementation.
 
--- Materialized view + MergeTree (to be defined per OpenConfig path type)
-```
-
-The exact MergeTree schema for network metrics will be defined per subscription
-path type (interface counters, BGP state, etc.) since each has a different set
-of fields. This is deferred to implementation.
+The MergeTree schema will be defined per subscription path type (interface
+counters, BGP state, etc.) since each has a different set of fields. This is
+also deferred to implementation.
 
 ---
 
@@ -297,13 +355,12 @@ of fields. This is deferred to implementation.
 [Physical site — e.g. data center 1]
 
   Router / switch ──gNMI──► gNMIc ──publish──► NATS leaf ──mTLS──► NATS hub (GCP)
-  Legacy device ───SNMP──► SNMP Exporter ◄──scrape── VMAgent ──remote-write──► VMCluster
+  Legacy device ───SNMP──► SNMP collector (TBD) ──► NATS leaf
   Router / switch ──NetFlow──► Akvorado inlet ──► Akvorado ClickHouse
 
 [GCP]
 
   NATS hub ──► network_ingest (NATS engine) ──► network (MergeTree) ──► Grafana
-  VMCluster ──► Grafana
   Akvorado ──► Grafana (Akvorado datasource plugin)
 ```
 
@@ -315,14 +372,12 @@ over the management network using mTLS where the device supports it.
 
 ## Alternatives
 
-**OpenTelemetry network device receiver** — the OTel Collector community has
-experimental receivers for network device telemetry (gNMI, SNMP). Using the
-OTel Collector instead of gNMIc and SNMP Exporter would reduce the number of
-components. Rejected for Phase 2: gNMIc is purpose-built for streaming
-telemetry and has a more complete implementation of gNMI subscriptions and
-output formats than the experimental OTel receivers. SNMP Exporter is the
-standard tool in the VictoriaMetrics ecosystem and is well-tested. Revisit
-when OTel network receivers mature.
+**SNMP Exporter + prometheus receiver** — run a separate Prometheus SNMP
+Exporter and scrape it with the OTel Collector's `prometheusreceiver`. The OTel
+Collector contrib `snmpreceiver` is preferred: it polls SNMP devices natively
+in a single component, emits OTLP directly without a Prometheus translation
+step, and preserves structured OID metadata (interface names, OID hierarchies)
+that the Prometheus text format flattens.
 
 **NATS for Akvorado** — replace Akvorado's internal Kafka with the NATS hub.
 Akvorado uses Kafka as an internal buffer between inlet and ClickHouse; this is

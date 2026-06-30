@@ -16,7 +16,9 @@ latest-milestone: "v0.x"
     - [ExportPolicy coupling](#exportpolicy-coupling)
     - [Open question: MetricPolicy output path](#open-question-metricpolicy-output-path)
   - [Future pipeline: NATS + ClickHouse](#future-pipeline-nats--clickhouse)
+    - [Resource attribute contract](#resource-attribute-contract)
     - [Subject structure](#subject-structure)
+    - [Bridge processing for metrics](#bridge-processing-for-metrics)
     - [ClickHouse schema](#clickhouse-schema)
     - [Ingest path](#ingest-path)
 - [Alternatives](#alternatives)
@@ -116,6 +118,16 @@ ExportPolicy or not at all until the ClickHouse pipeline is available.
 
 ### Future pipeline: NATS + ClickHouse
 
+#### Resource attribute contract
+
+The same `datum.project.id` derivation applies as for logs: the OTel Collector
+`k8sattributes` processor reads the namespace label
+`meta.datumapis.com/upstream-cluster-name`, strips the `cluster-` prefix, and
+sets `datum.project.id`. Internal platform components in platform namespaces
+receive `datum.project.id = 'datum-internal'`. See
+[logs — resource attribute contract](../logs/#resource-attribute-contract) for
+the full derivation rules; they apply identically to metrics.
+
 #### Subject structure
 
 Metrics follow the same NATS subject convention as logs:
@@ -124,12 +136,67 @@ Metrics follow the same NATS subject convention as logs:
 telemetry.metrics.<project_id>
 ```
 
-The OTel Collector gateway validates and enriches resource attributes (requiring
-`datum.project.id`). The OTLP-NATS bridge extracts `datum.project.id` and
-publishes per-project NATS messages, with `ProjectId` as a top-level field for
-ClickHouse NATS engine ingestion. Org ID is not stamped — the same rationale
-applies as for logs: hierarchy is mutable and is resolved at read time from
+Org ID is not stamped — hierarchy is mutable and is resolved at read time from
 Milo. See [logs](../logs/#bridge-processing) for the detailed rationale.
+
+#### Bridge processing for metrics
+
+The bridge exposes `/v1/metrics` alongside `/v1/logs`. Processing mirrors the
+log path:
+
+1. Parse the OTLP protobuf payload (`ExportMetricsServiceRequest`)
+2. For each `ResourceMetrics` entry, extract `datum.project.id` from resource
+   attributes
+3. If missing: increment
+   `bridge_metric_datapoints_dropped_total{reason="missing_project_id"}`,
+   exclude from the NATS publish, include in the OTLP partial success response
+4. For each `ScopeMetrics` → `Metric` → data point, publish **one JSON message
+   per data point** to `telemetry.metrics.<project_id>` on the local NATS leaf
+
+Each message includes `ProjectId` as a top-level field (for ClickHouse NATS
+engine ingestion) alongside common fields and type-specific value fields:
+
+```json
+{
+  "ProjectId":          "personal-project-2650fdb4",
+  "MetricName":         "process.cpu.utilization",
+  "MetricType":         "gauge",
+  "TimeUnix":           "2026-07-01T12:00:00.000000000Z",
+  "StartTimeUnix":      "2026-07-01T00:00:00.000000000Z",
+  "Attributes":         {"cpu.state": "user"},
+  "ResourceAttributes": {"service.name": "compute-workload"},
+  "Value":              0.42,
+  "IsMonotonic":        null,
+  "Count":              null,
+  "Sum":                null,
+  "BucketCounts":       null,
+  "ExplicitBounds":     null
+}
+```
+
+Type-specific fields are `null` when not applicable. The `metrics_ingest` NATS
+engine table stores all fields (with nullable types for the type-specific ones);
+per-type materialized views cast and route rows into `otel_metrics_gauge`,
+`otel_metrics_sum`, `otel_metrics_histogram`, etc.:
+
+```
+metrics_ingest  (NATS engine — fat schema, nullable type-specific fields)
+    │
+    ├──▶ MV (MetricType='gauge')     → otel_metrics_gauge
+    ├──▶ MV (MetricType='sum')       → otel_metrics_sum
+    ├──▶ MV (MetricType='histogram') → otel_metrics_histogram
+    ├──▶ MV (MetricType='gauge')     → otel_metrics_gauge_hourly
+    ├──▶ MV (MetricType='gauge')     → otel_metrics_gauge_daily
+    └──▶ ... (one hourly + one daily MV per type)
+```
+
+Each MV filters on `MetricType` so only the relevant rows land in each table.
+The bridge does not need per-type routing logic; the MVs handle it.
+
+All MVs — both the type-routing MVs and the rollup MVs — read directly from
+`metrics_ingest`. ClickHouse only fires MVs on direct INSERTs; rows written by
+one MV do not trigger downstream MVs. Attaching rollup MVs to
+`otel_metrics_gauge` would mean they never fire.
 
 #### ClickHouse schema
 
@@ -144,7 +211,9 @@ ClickHouse plugin schema. Key columns common to all metric tables:
 | `Attributes` | `JSON` | OTel metric attributes (labels) |
 | `ResourceAttributes` | `JSON` | Resource-level attributes |
 
-Partition key: `(ProjectId, toDate(TimeUnix))`
+Partition key: `(ProjectId, toDate(TimeUnix))` — provisional; see
+[retention open questions](../retention/#partition-key-design-at-high-tenant-count)
+for the partition explosion concern at high tenant count.
 Order key: `(ProjectId, MetricName, toDate(TimeUnix), TimeUnix)`
 
 Row policy: `ProjectId = getSetting('project_id')` on `api_reader`, matching
@@ -165,7 +234,7 @@ OTLP-NATS bridge (extracts datum.project.id → telemetry.metrics.<project_id>)
     │
     ▼ NATS JetStream (hub — 48h buffer)
     │
-    ├──► metrics_ingest (NATS engine, ClickHouse) → metrics_mv → otel_metrics_*
+    ├──► metrics_ingest (NATS engine, ClickHouse) → per-type MVs → otel_metrics_*
     └──► ExportPolicy consumer (future)
 ```
 

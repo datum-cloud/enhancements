@@ -21,6 +21,8 @@ Tracking issue: [datum-cloud/enhancements#765](https://github.com/datum-cloud/en
 - Avoid running in public clouds; avoid managed services when in public clouds
 - Multi-tenancy first class support
 - Data residency first class support
+- Avoid propagating hierarchical information outside of the core control plane
+  to prevent information from getting out of sync or inaccurately attributing telemetry
 
 ## Status at a Glance (as of June 2026)
 
@@ -36,6 +38,7 @@ Tracking issue: [datum-cloud/enhancements#765](https://github.com/datum-cloud/en
 | Network telemetry (gNMIc / SNMP / flows) | [network-telemetry](./network-telemetry/) | Not started | 3 |
 | Observability backend migration | [observability-migration](./observability-migration/) | Not started | 4 |
 | Log and metric definition/policy CRDs | [definition-policy](./definition-policy/) | Designed | 5 |
+| Platform alerts and runbooks | [operations](./operations/) | Ongoing | — |
 
 ## Roadmap
 
@@ -43,21 +46,23 @@ Tracking issue: [datum-cloud/enhancements#765](https://github.com/datum-cloud/en
 
 Logging required for the Compute private alpha deliverable (#682) and supporting
 existing Envoy logs. Builds on the validated POC in
-`datum-cloud/infra/feat/telemetry-system`. The NATS → ClickHouse write path and
-per-tenant subject routing are validated; what remains is promoting the POC to
-production and building the read path for customers and operators. Expose
+`datum-cloud/infra/feat/telemetry-system`. Production code lives in
+`milo-os/telemetry`; `datum-cloud/infra` holds image references for deployment.
+The NATS → ClickHouse write path and per-tenant subject routing are validated;
+what remains is building and deploying the full pipeline and read path. Expose
 structured, tenant-scoped log access to customers via `datumctl logs`.
 
 **Deliverables and sub-issues:**
 
-1. **Platform logs ClickHouse — deployment and schema**
-   Deploy the `platform_logs` ClickHouse database and schema. We may repurpose
-   the existing `edge-logs-system` ClickHouse storage resources rather than
-   provisioning a new instance. Schema sorted by
-   `(project_id, resource_type, resource_name, log_id, timestamp)`. NATS engine
-   ingest via the existing hub pipeline. Includes log TTL configuration (7-day
-   hot retention for tenant data, 90-day for `datum-internal`; move to GCS cold
-   after 1 day). See [logs](./logs/) and [retention](./retention/#log-retention).
+1. **`telemetry` ClickHouse database — deployment and schema**
+   Deploy the `telemetry` ClickHouse database and log schema (`logs_ingest`,
+   `logs_mv`, `logs`). This is a new ClickHouse instance in `milo-os/telemetry`;
+   the `edge-logs-system` ClickHouse is deprecated and decommissioned in Phase 4. Schema
+   ordered by `(ProjectId, ServiceName, ObservedTimestamp)`. NATS engine ingest
+   via the existing hub pipeline. Includes log TTL configuration (7-day
+   retention for tenant data, deleted at day 7 with no cold move; 90-day for
+   `datum-internal` with cold move to GCS at day 7). See [logs](./logs/) and
+   [retention](./retention/#log-retention).
 
 2. **NATS ingest pipeline — staging and production deployment**
    Promote the hub and edge Kustomize overlays from `dev` to `staging` and
@@ -82,8 +87,9 @@ structured, tenant-scoped log access to customers via `datumctl logs`.
 
 6. **OTLP-NATS bridge — implementation and deployment**
    Implement and deploy the bridge service that receives OTLP/HTTP from the OTel
-   Collector, extracts `datum.project.id` from resource attributes (rejecting
-   records where it is absent), and publishes one JSON message per log record to
+   Collector, extracts `datum.project.id` from resource attributes (returning a partial
+   success response and dropping records where it is absent), and publishes one
+   JSON message per log record to
    `telemetry.logs.<project_id>` on the NATS leaf. See
    [ingest-pipeline](./ingest-pipeline/#the-otlp-nats-bridge).
 
@@ -141,9 +147,12 @@ for durability.
     pipeline under `telemetry.network.<device_id>` subjects. See
     [network-telemetry](./network-telemetry/).
 
-13. **SNMP collection — deployment and VictoriaMetrics integration**
-    For devices without gNMI support, deploy an SNMP Exporter scraped by
-    VMAgent into the existing VictoriaMetrics cluster. See
+13. **SNMP collection — deployment and NATS integration**
+    For devices without gNMI support, use the OTel Collector `snmpreceiver`
+    (contrib) to poll SNMP devices directly. Metrics are published to
+    `telemetry.metrics.datum-internal` on the NATS leaf (SNMP produces OTLP
+    metric data points, not gNMIc event format) and land in `otel_metrics_*`
+    tables, queryable by `datum.device.id` resource attribute. See
     [network-telemetry](./network-telemetry/).
 
 14. **Akvorado flow data — deployment and ClickHouse schema**
@@ -199,10 +208,11 @@ alerting and metering.
     schema). `MetricPolicy` binds to a definition and declares production rules
     from control-plane resource fields or data-plane telemetry.
 
-20. **Policy translation controller — VM recording rules + OTel pipelines**
+20. **Policy translation controller — NATS + ClickHouse backend configs**
     A controller that watches MetricDefinition/MetricPolicy resources and
-    produces backend-specific configs: VictoriaMetrics recording rules and OTel
-    Collector processor configurations. See [definition-policy](./definition-policy/).
+    produces backend-specific configs targeting the NATS + ClickHouse pipeline.
+    VictoriaMetrics is decommissioned in Phase 4; by Phase 5 it is no longer a
+    target. Exact output format is TBD. See [definition-policy](./definition-policy/).
 
 ---
 
@@ -237,6 +247,7 @@ Advanced features and data residency as a first-class property.
 | [ingest-pipeline](./ingest-pipeline/) | NATS JetStream ingest with per-edge store-and-forward durability |
 | [network-telemetry](./network-telemetry/) | gNMIc, SNMP, and flow data for network hardware |
 | [observability-migration](./observability-migration/) | Migration from Loki and VictoriaMetrics to ClickHouse |
+| [operations](./operations/) | Platform alerts and runbooks for the telemetry pipeline |
 
 ## System Context
 
