@@ -26,11 +26,12 @@ latest-milestone: "v0.x"
 ## Summary
 
 The metrics pipeline collects, stores, and exposes metrics from Datum Cloud
-platform resources. The current pipeline is VictoriaMetrics-based: VMAgent
-scrapes Prometheus-compatible endpoints and metrics are queryable via MetricsQL.
-The future pipeline extends the NATS ingest infrastructure to handle
-`telemetry.metrics.<project_id>` subjects alongside logs, with ClickHouse as
-the unified store.
+platform resources. The customer-facing pipeline this document designs extends
+the NATS ingest infrastructure to handle `telemetry.metrics.<project_id>`
+subjects alongside logs, with ClickHouse as the unified store. VictoriaMetrics
+remains the current operational metrics store — VMAgent scrapes
+Prometheus-compatible endpoints, queryable via MetricsQL — and is decommissioned
+in the Phase 4 migration; it is not the basis of this enhancement.
 
 This document covers the pipeline mechanics. For the declarative API that
 defines what metrics resources publish and how they are produced, see
@@ -161,8 +162,8 @@ engine ingestion) alongside common fields and type-specific value fields:
   "ProjectId":          "personal-project-2650fdb4",
   "MetricName":         "process.cpu.utilization",
   "MetricType":         "gauge",
-  "TimeUnix":           "2026-07-01T12:00:00.000000000Z",
-  "StartTimeUnix":      "2026-07-01T00:00:00.000000000Z",
+  "TimeUnix":           1782043200000000000,
+  "StartTimeUnix":      1782000000000000000,
   "Attributes":         {"cpu.state": "user"},
   "ResourceAttributes": {"service.name": "compute-workload"},
   "Value":              0.42,
@@ -174,24 +175,51 @@ engine ingestion) alongside common fields and type-specific value fields:
 }
 ```
 
-Type-specific fields are `null` when not applicable. The `metrics_ingest` NATS
-engine table stores all fields (with nullable types for the type-specific ones);
-per-type materialized views cast and route rows into `otel_metrics_gauge`,
-`otel_metrics_sum`, `otel_metrics_histogram`, etc.:
+`TimeUnix`/`StartTimeUnix` are emitted as OTLP-native epoch-nanosecond integers,
+which ClickHouse ingests directly into `DateTime64(9)`. `Attributes` and
+`ResourceAttributes` are nested JSON objects on the wire.
+
+**Ingest table column types.** The NATS engine cannot store `JSON` columns, so
+`metrics_ingest` types the attribute columns as `String` (the nested JSON object
+is serialized into the string, per the input-format setting noted in
+[ingest-pipeline](../ingest-pipeline/#clickhouse-consumer)). Type-specific fields
+are stored with concrete nullable types and are `null` when not applicable:
+
+| `metrics_ingest` column | Type | Notes |
+|---|---|---|
+| `Attributes`, `ResourceAttributes` | `String` | Serialized JSON; cast to `JSON` in the MV |
+| `Value` | `Nullable(Float64)` | gauge / sum value |
+| `IsMonotonic` | `Nullable(UInt8)` | sum only |
+| `Count` | `Nullable(UInt64)` | histogram only |
+| `Sum` | `Nullable(Float64)` | histogram only |
+| `BucketCounts` | `Array(UInt64)` | histogram only; empty array when not applicable |
+| `ExplicitBounds` | `Array(Float64)` | histogram only; empty array when not applicable |
+
+Per-type materialized views read `metrics_ingest`, `CAST` the `String` attribute
+columns to `JSON`, and route rows into the destination tables
+(`otel_metrics_gauge`, `otel_metrics_sum`, `otel_metrics_histogram`, etc.), where
+the attribute columns are `JSON`:
 
 ```
 metrics_ingest  (NATS engine — fat schema, nullable type-specific fields)
     │
+    │  gauge:                                  sum:                              histogram:
     ├──▶ MV (MetricType='gauge')     → otel_metrics_gauge
-    ├──▶ MV (MetricType='sum')       → otel_metrics_sum
-    ├──▶ MV (MetricType='histogram') → otel_metrics_histogram
     ├──▶ MV (MetricType='gauge')     → otel_metrics_gauge_hourly
     ├──▶ MV (MetricType='gauge')     → otel_metrics_gauge_daily
-    └──▶ ... (one hourly + one daily MV per type)
+    ├──▶ MV (MetricType='sum')       → otel_metrics_sum
+    ├──▶ MV (MetricType='sum')       → otel_metrics_sum_hourly
+    ├──▶ MV (MetricType='sum')       → otel_metrics_sum_daily
+    ├──▶ MV (MetricType='histogram') → otel_metrics_histogram
+    ├──▶ MV (MetricType='histogram') → otel_metrics_histogram_hourly
+    └──▶ MV (MetricType='histogram') → otel_metrics_histogram_daily
 ```
 
-Each MV filters on `MetricType` so only the relevant rows land in each table.
-The bridge does not need per-type routing logic; the MVs handle it.
+Every metric type gets the same triple — a raw table plus hourly and daily
+rollups — and each rollup is its own MV reading `metrics_ingest` directly with
+the matching `MetricType` filter. The bridge does not need per-type routing
+logic; the MVs handle it. (Histogram rollup aggregation specifics are deferred
+to [retention](../retention/).)
 
 All MVs — both the type-routing MVs and the rollup MVs — read directly from
 `metrics_ingest`. ClickHouse only fires MVs on direct INSERTs; rows written by
@@ -200,24 +228,29 @@ one MV do not trigger downstream MVs. Attaching rollup MVs to
 
 #### ClickHouse schema
 
-Metrics land in per-type tables via the NATS engine, mirroring the OpenTelemetry
-ClickHouse plugin schema. Key columns common to all metric tables:
+The destination `otel_metrics_*` (MergeTree) tables mirror the OpenTelemetry
+ClickHouse plugin schema. Key columns common to all of them:
 
 | Column | Type | Notes |
 |---|---|---|
 | `ProjectId` | `LowCardinality(String)` | Extracted from `datum.project.id` by bridge |
 | `TimeUnix` | `DateTime64(9)` | OTel `time_unix_nano` |
 | `MetricName` | `LowCardinality(String)` | OTel metric name |
-| `Attributes` | `JSON` | OTel metric attributes (labels) |
-| `ResourceAttributes` | `JSON` | Resource-level attributes |
+| `Attributes` | `JSON` | OTel metric attributes (labels); `String` in `metrics_ingest`, cast in the MV |
+| `ResourceAttributes` | `JSON` | Resource-level attributes; `String` in `metrics_ingest`, cast in the MV |
 
-Partition key: `(ProjectId, toDate(TimeUnix))` — provisional; see
-[retention open questions](../retention/#partition-key-design-at-high-tenant-count)
-for the partition explosion concern at high tenant count.
-Order key: `(ProjectId, MetricName, toDate(TimeUnix), TimeUnix)`
+Order key: `(ProjectId, MetricName, TimeUnix)` — matches the merge-by-`TimeUnix`
+contract the query layer relies on.
+
+Partition key and TTL belong to [retention](../retention/) — the partition
+design (and the partition-explosion concern at high tenant count) is settled
+there, not here.
 
 Row policy: `ProjectId = getSetting('project_id')` on `api_reader`, matching
-the logs schema. See [retention](../retention/) for TTL and rollup tables.
+the logs schema. `project_id` must be declared as a ClickHouse custom setting
+(`custom_settings_prefixes`) or the `SET` errors; see the
+[top-level conventions](../#conventions). See [retention](../retention/) for TTL
+and rollup tables.
 
 #### Ingest path
 
@@ -230,9 +263,9 @@ OTel Collector gateway (validates & enriches resource attributes)
     ▼ OTLP/HTTP (gzip)
 OTLP-NATS bridge (extracts datum.project.id → telemetry.metrics.<project_id>)
     │
-    ▼ NATS JetStream (edge leaf)
+    ▼ NATS core (edge leaf — in-memory buffer, no JetStream)
     │
-    ▼ NATS JetStream (hub — 48h buffer)
+    ▼ NATS JetStream (hub — 48h durable buffer)
     │
     ├──► metrics_ingest (NATS engine, ClickHouse) → per-type MVs → otel_metrics_*
     └──► ExportPolicy consumer (future)
