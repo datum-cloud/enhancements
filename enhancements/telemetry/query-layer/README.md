@@ -48,9 +48,11 @@ makes this non-negotiable.
 
 ### Goals
 
-- Single HTTP endpoint for both `datumctl` and Grafana
+- A single service serving both `datumctl` and Grafana (via distinct ingress
+  paths — a per-project APIService for tenants, a cluster-scoped endpoint for
+  operators)
 - Tenant isolation enforced server-side, not client-side
-- Multi-region query fanout with correct result merging
+- Multi-region query fanout with correct result merging (Phase 6)
 - Streaming support for live log tail queries
 - No cross-region data replication or residency violations
 
@@ -82,18 +84,21 @@ datumctl logs [--tail]   (bearer token)
     │
     ▼
 milo-api
-    │  ProjectRouterWithRequestInfo: rewrites URL, injects project_id into
-    │  user extras (iam.miloapis.com/parent-name)
+    │  milo-api resolves the request to a single project and injects the
+    │  resolved project_id into the request context (exact mechanism TBD)
     ▼
 project control plane (kube-aggregator)
     │  APIService proxy → query layer pod
     ▼
 Query Layer
-  1. Extract project_id from user extras (injected by milo-api)
-  2. Resolve region set: ScopeResolver maps project to regional ClickHouse instances
-  3. Fan out: issue query to each resolved regional endpoint
-  4. Merge: combine partial results into a single response
+  1. Extract the resolved project_id from the request context (injected by milo-api)
+  2. [Phase 6] Resolve region set: ScopeResolver maps project to regional ClickHouse instances
+  3. [Phase 6] Fan out: issue query to each resolved regional endpoint
+  4. [Phase 6] Merge: combine partial results into a single response
   5. Stream or return: chunked HTTP for --tail, complete response otherwise
+
+  (Phase 1 is single-region: steps 2–4 collapse to one configured ClickHouse
+   instance — no region resolution, no fan-out, no cross-region merge.)
     │
     ├──▶ ClickHouse (us-central1)   SET project_id = '...'
     ├──▶ ClickHouse (eu-west1)      SELECT ...
@@ -105,35 +110,41 @@ Grafana   (service account, operator identity)
     ▼
 Query Layer   (cluster-scoped endpoint, no per-project routing)
   1. Verify platform operator identity
-  2. Fan out to all configured regional instances
+  2. [Phase 6] Fan out to all configured regional instances
   3. Merge results (no row policy; connects as grafana_ops)
     │
     ├──▶ ClickHouse (us-central1)
-    └──▶ ClickHouse (eu-west1)
+    └──▶ ClickHouse (eu-west1)    [Phase 6 — Phase 1 is a single instance]
 ```
 
 ### API registration
 
 The query layer registers as a Kubernetes `APIService` on each project's control
-plane under the `telemetry.datumapis.com` API group. This places it inside the
-kube-aggregator proxy chain that milo-api uses for all per-project API calls —
-`datumctl` does not need to know the query layer's address directly.
+plane under a telemetry API group (group name TBD — verify against the group
+registered in `milo-os/telemetry`; `telemetry.datumapis.com` is a placeholder).
+This places it inside the kube-aggregator proxy chain that milo-api uses for all
+per-project API calls — `datumctl` does not need to know the query layer's
+address directly.
 
 The `datumctl` call chain:
 
 ```
 datumctl
-  → milo-api /projects/<id>/control-plane/apis/telemetry.datumapis.com/v1/logs
-    → ProjectRouterWithRequestInfo   (URL rewrite + user extras injection)
+  → milo-api /projects/<id>/control-plane/apis/<telemetry-group>/v1/logs
+    → milo-api request routing       (resolves to a single project,
+                                       injects the resolved project_id)
       → project control plane        (per-project kube-aggregator)
         → APIService proxy           (routes to query layer pod)
           → query layer
 ```
 
-`ProjectRouterWithRequestInfo` injects `iam.miloapis.com/parent-type: Project`
-and `parent-name: <project_id>` into the request's user extras. The query layer
-reads `project_id` from these extras rather than re-calling Milo or parsing the
-URL path.
+milo-api resolves each request to a single project and makes the resolved
+`project_id` available to the query layer (via request user extras or
+equivalent). The query layer reads `project_id` from the request context rather
+than re-calling Milo or parsing the URL path. **The exact mechanism — the
+router component and the user-extras key names — is TBD and must be verified
+against the milo-api implementation; the only certainty is that `project_id` is
+the resolved tenancy key.**
 
 **Proxy behavior:**
 
@@ -146,8 +157,9 @@ URL path.
   query layer can enforce per-project application-layer limits if APF granularity
   is insufficient.
 
-- **Streaming** — kube-aggregator passes chunked HTTP through without buffering.
-  See [Streaming](#streaming) for requirements.
+- **Streaming** — kube-aggregator is expected to pass chunked HTTP through
+  without buffering, but this must be verified (see [Streaming](#streaming) and
+  the aggregator-timeout caveat there).
 
 ### Tenant enforcement
 
@@ -159,10 +171,10 @@ ClickHouse row policy enforces this as a defense-in-depth layer:
 ProjectId = getSetting('project_id')
 ```
 
-The query layer reads `project_id` from the user extras injected into the
-request by `ProjectRouterWithRequestInfo` in milo-api. No additional Milo API
-call is needed in the query layer — the project identity is already resolved
-before the request reaches the APIService.
+The query layer reads `project_id` from the request context populated by
+milo-api (mechanism TBD; see [API registration](#api-registration)). No
+additional Milo API call is needed in the query layer for tenant queries — the
+project identity is already resolved before the request reaches the APIService.
 
 > [!WARNING]
 >
@@ -247,7 +259,15 @@ apply backpressure.
 > timeout behavior (if any) must be verified at implementation — `TimeoutSeconds`
 > is not a valid field on the `APIService` spec.
 
-### Region registry
+### Region registry (Phase 6)
+
+> [!NOTE]
+>
+> Multi-project scope resolution and region fan-out are **Phase 6**. In Phase 1
+> the query layer runs single-region against one configured ClickHouse instance:
+> the `project_id` arrives resolved in the request context, the `ScopeResolver`
+> returns that single configured region from a config file, and there is no Milo
+> lookup, no fan-out, and no cross-region merge.
 
 The query layer needs to know which projects a requesting user can access, and
 which regions hold data for those projects, before it fans out.
@@ -263,14 +283,16 @@ For Datum, `datumctl logs --project <scope>` designates the scoping project; the
 query layer resolves the set of accessible projects from Milo and fans out to the
 relevant regional ClickHouse instances.
 
-**Project resolution from Milo.** Milo's `Project` resource carries a parent
-org reference (exact field TBD — verify against the Milo API before
-implementation), so the query layer can list all projects for an org using the
-existing Milo API — no new scoping concept is needed.
-For MVP single-project queries the project comes directly from the user's current
-context and no Milo lookup is required. The open question is caching strategy:
-whether the query layer calls Milo per-request (with short-TTL cache) or receives
-project membership in OIDC token claims.
+**Project resolution from Milo.** Milo's `Project` resource is expected to carry
+a parent org reference, which would let the query layer list the projects in an
+org for scope fan-out — but the field, and whether an existing Milo API can list
+projects for an org, are TBD and must be verified against the Milo API. For
+Phase 1 single-project queries the project comes directly from the request
+context and no Milo lookup is required. The open question for Phase 6 is the
+lookup and caching strategy: the leading candidate is a per-request Milo call
+with a short-TTL cache. (Carrying project membership in OIDC token claims is
+**not** pursued — it would propagate hierarchical information out of the control
+plane, which the guiding principles explicitly avoid, and it goes stale.)
 
 **Region resolution** follows from project resolution: once the scope is known,
 the query layer asks Milo where those projects' workloads are deployed. The
