@@ -7,8 +7,10 @@ latest-milestone: "v0.x"
 # Telemetry System
 
 The telemetry system collects, processes, stores, and exposes telemetry data
-(metrics, logs, traces, and flows) from all services and infrastructure on the
-Datum Cloud platform. It serves both internal operational visibility and
+(metrics, logs, traces, and flows) across the Datum Cloud platform. Its target
+end-state is to cover all services and infrastructure on the platform; the
+roadmap below brings sources in incrementally, with operational logs and metrics
+consolidated in Phase 4. It serves both internal operational visibility and
 tenant-scoped visibility for customers running workloads on Datum infrastructure.
 
 Tracking issue: [datum-cloud/enhancements#765](https://github.com/datum-cloud/enhancements/issues/765)
@@ -29,28 +31,34 @@ Tracking issue: [datum-cloud/enhancements#765](https://github.com/datum-cloud/en
 | Component | Enhancement | Status | Phase |
 |---|---|---|---|
 | Telemetry export (ExportPolicy) | [export-policies](./export-policies/) | **Shipped — v0.3.0** | — |
-| NATS ingest pipeline | [ingest-pipeline](./ingest-pipeline/) | **POC complete** | 1, 2 |
+| NATS ingest pipeline (write path) | [ingest-pipeline](./ingest-pipeline/) | **POC complete** — NATS → ClickHouse write path and subject routing validated | 1, 2 |
+| OTLP-NATS bridge | [ingest-pipeline](./ingest-pipeline/) | Not started — unbuilt sub-component of the ingest pipeline | 1 |
 | Log pipeline | [logs](./logs/) | Designing | 1 |
 | Query layer | [query-layer](./query-layer/) | Designed | 1 |
-| OTLP-NATS bridge | [ingest-pipeline](./ingest-pipeline/) | Not started | 1 |
 | Metrics pipeline | [metrics](./metrics/) | Designing | 2 |
 | Retention and rollup | [retention](./retention/) | Designed | 2 |
-| Network telemetry (gNMIc / SNMP / flows) | [network-telemetry](./network-telemetry/) | Not started | 3 |
+| Network telemetry — gNMIc, SNMP, and Akvorado flows (three deliverables) | [network-telemetry](./network-telemetry/) | Not started | 3 |
 | Observability backend migration | [observability-migration](./observability-migration/) | Not started | 4 |
 | Log and metric definition/policy CRDs | [definition-policy](./definition-policy/) | Designed | 5 |
 | Platform alerts and runbooks | [operations](./operations/) | Ongoing | — |
+
+A `—` in the Phase column marks work that is not tied to a single roadmap phase
+(already shipped, or ongoing across phases).
 
 ## Roadmap
 
 ### Phase 1: Compute and Envoy Logs (target: July 15, 2026)
 
-Logging required for the Compute private alpha deliverable (#682) and supporting
-existing Envoy logs. Builds on the validated POC in
+Logging required for the Compute private alpha deliverable
+([datum-cloud/enhancements#682](https://github.com/datum-cloud/enhancements/issues/682))
+and supporting existing Envoy logs. Builds on the validated POC in
 `datum-cloud/infra/feat/telemetry-system`. Production code lives in
 `milo-os/telemetry`; `datum-cloud/infra` holds image references for deployment.
-The NATS → ClickHouse write path and per-tenant subject routing are validated;
-what remains is building and deploying the full pipeline and read path. Expose
-structured, tenant-scoped log access to customers via `datumctl logs`.
+The NATS → ClickHouse write path and per-tenant subject routing are validated
+in the POC. What the POC does not yet cover — and what remains for Phase 1 — is
+the OTLP-NATS bridge, staging and production deployment, mTLS on leaf-to-hub
+connections, and the query/read path. Expose structured, tenant-scoped log
+access to customers via `datumctl logs`.
 
 **Deliverables and sub-issues:**
 
@@ -88,7 +96,7 @@ structured, tenant-scoped log access to customers via `datumctl logs`.
 6. **OTLP-NATS bridge — implementation and deployment**
    Implement and deploy the bridge service that receives OTLP/HTTP from the OTel
    Collector, extracts `datum.project.id` from resource attributes (returning a partial
-   success response and dropping records where it is absent), and publishes one
+   success response and dropping records where `datum.project.id` is absent), and publishes one
    JSON message per log record to
    `telemetry.logs.<project_id>` on the NATS leaf. See
    [ingest-pipeline](./ingest-pipeline/#the-otlp-nats-bridge).
@@ -102,7 +110,9 @@ structured, tenant-scoped log access to customers via `datumctl logs`.
 
 ### Phase 2: Compute Metrics (target: July 31, 2026)
 
-Metrics required for the Compute private alpha deliverable (#682). Extends the
+Metrics required for the Compute private alpha deliverable
+([datum-cloud/enhancements#682](https://github.com/datum-cloud/enhancements/issues/682)).
+Extends the
 NATS ingest pipeline to metrics and exposes tenant-scoped metric access via
 `datumctl metrics` with ASCII chart visualizations, bridging the gap until a
 dedicated UI is available.
@@ -138,6 +148,14 @@ Required for the physical infrastructure deliverable. Datum will operate
 physical network hardware that needs telemetry beyond what OTel and Kubernetes
 collectors provide. All network telemetry feeds into the NATS ingest pipeline
 for durability.
+
+Network telemetry splits across two subject namespaces by data format. gNMIc
+emits OpenConfig `Path`/`Value` events, which land under `telemetry.network.*`.
+SNMP, collected via the OTel Collector `snmpreceiver`, emits OTLP metric data
+points, which join the metrics path under `telemetry.metrics.datum-internal`.
+The device identifier is the same in both cases: it appears as the
+`<device_id>` subject segment for gNMIc and as the `datum.device.id` resource
+attribute for SNMP.
 
 **Deliverables and sub-issues:**
 
@@ -211,8 +229,8 @@ alerting and metering.
 20. **Policy translation controller — NATS + ClickHouse backend configs**
     A controller that watches MetricDefinition/MetricPolicy resources and
     produces backend-specific configs targeting the NATS + ClickHouse pipeline.
-    VictoriaMetrics is decommissioned in Phase 4; by Phase 5 it is no longer a
-    target. Exact output format is TBD. See [definition-policy](./definition-policy/).
+    VictoriaMetrics, decommissioned in Phase 4, is not a target. Exact output
+    format is TBD. See [definition-policy](./definition-policy/).
 
 ---
 
@@ -229,7 +247,7 @@ Advanced features and data residency as a first-class property.
 
 22. **Customer-facing traces — tenancy model and query API**
     IAM-gated trace access via Tempo (already deployed). The OTel tail-sampling
-    pipeline and Tempo backend are live; what's missing is a tenancy model,
+    pipeline and Tempo backend are live; what is missing is a tenancy model,
     query API, and customer-facing surface.
 
 ---
@@ -239,10 +257,10 @@ Advanced features and data residency as a first-class property.
 | Enhancement | Description |
 |---|---|
 | [logs](./logs/) | Log pipeline — ingest, ClickHouse storage, and `datumctl logs` |
-| [metrics](./metrics/) | Metrics pipeline — VictoriaMetrics (current) and NATS + ClickHouse (future) |
+| [metrics](./metrics/) | Customer-facing metrics pipeline on NATS + ClickHouse (VictoriaMetrics remains the operational store until the Phase 4 migration) |
 | [query-layer](./query-layer/) | Tenant-enforcing HTTP query service over ClickHouse for logs and metrics |
 | [definition-policy](./definition-policy/) | LogDefinition, LogCollectionPolicy, MetricDefinition, MetricPolicy CRDs |
-| [export-policies](./export-policies/) | ExportPolicy — customer-configured OTLP/Prometheus export |
+| [export-policies](./export-policies/) | ExportPolicy — customer-configured telemetry export to third-party platforms |
 | [retention](./retention/) | Log TTL and metrics three-tier rollup — raw → hourly → daily |
 | [ingest-pipeline](./ingest-pipeline/) | NATS JetStream ingest with per-edge store-and-forward durability |
 | [network-telemetry](./network-telemetry/) | gNMIc, SNMP, and flow data for network hardware |
