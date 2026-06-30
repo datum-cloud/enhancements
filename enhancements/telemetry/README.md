@@ -46,6 +46,11 @@ them rather than restating them.
 - **Metrics export timing.** ExportPolicy exports metrics via MetricsQL pull
   until the Phase 4 migration moves it to a NATS consumer push. Until then, the
   ingest pipeline does not require a per-tenant metrics export consumer.
+- **Tenant isolation in ClickHouse.** Tenant queries run as the `api_reader`
+  user with a row policy of `ProjectId = getSetting('project_id')`; the query
+  layer issues `SET project_id = '<resolved_project>'` per query. `project_id`
+  must be declared as a ClickHouse custom setting (a `custom_settings_prefixes`
+  entry) or the `SET` errors.
 
 ## Status at a Glance (as of June 2026)
 

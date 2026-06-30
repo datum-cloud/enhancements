@@ -74,9 +74,11 @@ Collector derives it from the namespace label
 `meta.datumapis.com/upstream-cluster-name` via the `k8sattributes` processor.
 The label value has the form `cluster-<project-id>` (e.g.
 `cluster-personal-project-2650fdb4`); the Collector strips the `cluster-`
-prefix and sets `datum.project.id = 'personal-project-2650fdb4'`. Records
-where this label is absent and `datum.project.id` is not otherwise set are
-silently dropped by the bridge with a partial success response.
+prefix and sets `datum.project.id = 'personal-project-2650fdb4'`.
+`datum.project.id` is a resource-scoped attribute: when it is absent on a
+`ResourceLogs` (and not otherwise set), every `LogRecord` under that resource is
+dropped by the bridge and reported in the OTLP partial success response — not
+silently.
 
 | Attribute | Description | Example |
 |---|---|---|
@@ -104,7 +106,7 @@ of each `ResourceLogs` entry and routes to the corresponding NATS subject
 (`telemetry.logs.<project_id>`). This attribute is the root tenancy signal for
 the entire pipeline.
 
-In Phases 1–4, the bridge collects all records with a valid `datum.project.id`
+Before Phase 5, the bridge collects all records with a valid `datum.project.id`
 unconditionally. The `LogCollectionPolicy` opt-in gate is a Phase 5 feature;
 no policy is required for Phase 1 log collection to work. See
 [definition-policy](../definition-policy/) for the Phase 5 design.
@@ -120,9 +122,9 @@ OTel Collector gateway (validates & enriches resource attributes)
     ▼ OTLP/HTTP (gzip)
 OTLP-NATS bridge (extracts datum.project.id → publishes to telemetry.logs.<project_id>)
     │
-    ▼ NATS JetStream (edge leaf — local durability during WAN outage)
+    ▼ NATS leaf (core NATS, no JetStream — bounded in-memory buffer only)
     │
-    ▼ NATS JetStream (hub — 48h buffer, fan-out to consumers)
+    ▼ NATS JetStream (hub — 48h durable buffer, fan-out to consumers)
     │
     ├──► logs_ingest (NATS engine, ClickHouse) → logs_mv → logs (MergeTree)
     └──► customer export consumer (export-policies)
@@ -136,13 +138,16 @@ component-level design.
 The OTLP-NATS bridge splits incoming OTLP payloads into per-project NATS
 messages. It routes; it does not enrich.
 
-For each `ResourceLogs` entry:
+For each `ResourceLogs` entry (project id is resource-scoped and applies to
+every child `LogRecord`):
 
-1. Extract `datum.project.id` from resource attributes
-2. If missing: increment `bridge_log_records_dropped_total{reason="missing_project_id"}`,
-   exclude from the NATS publish, and include in the OTLP partial success
-   response. The Collector receives HTTP 200 and does not retry.
-3. Publish one JSON message per `LogRecord` (as `JSONEachRow`) to
+1. Extract `datum.project.id` from the resource attributes
+2. If missing: drop all child `LogRecord`s of that resource, increment
+   `bridge_log_records_dropped_total{reason="missing_project_id"}` by the number
+   of dropped records, exclude them from the NATS publish, and include them in
+   the OTLP partial success response. The Collector receives HTTP 200 and does
+   not retry.
+3. Otherwise publish one JSON message per `LogRecord` (as `JSONEachRow`) to
    `telemetry.logs.<project_id>` on the local NATS leaf, with `ProjectId` as a
    top-level field for ClickHouse NATS engine ingestion
 
@@ -168,7 +173,7 @@ time ([observability scopes][obs-scopes]).
 > descendant projects to a single sink. The exported records themselves are not
 > annotated with org metadata. See [export-policies](../export-policies/).
 
-[obs-scopes]: https://docs.cloud.google.com/stackdriver/docs/observability/scopes
+[obs-scopes]: https://cloud.google.com/stackdriver/docs/observability/scopes
 
 ### ClickHouse schema
 
@@ -185,19 +190,34 @@ Key columns:
 | `ObservedTimestamp` | `DateTime64(9)` | OTLP `observed_time_unix_nano`; set by the OTel Collector on receipt; always non-zero |
 | `ServiceName` | `LowCardinality(String)` | `service.name` |
 | `SeverityText` | `LowCardinality(String)` | `INFO`, `WARN`, `ERROR`, etc. |
+| `SeverityNumber` | `UInt8` | OTLP severity number (1–24); ordering basis for the `--severity` threshold |
 | `Body` | `String` | Log message body |
-| `ResourceAttributes` | `JSON` | Full resource attributes |
-| `ScopeAttributes` | `JSON` | Instrumentation scope attributes |
-| `LogAttributes` | `JSON` | Per-record attributes |
+| `ResourceAttributes` | `JSON` | Full resource attributes (see note below) |
+| `ScopeAttributes` | `JSON` | Instrumentation scope attributes (see note below) |
+| `LogAttributes` | `JSON` | Per-record attributes (see note below) |
+
+The columns above describe the destination `logs` (MergeTree) table. Ingest is a
+three-object set, following the NATS engine pattern from
+[ingest-pipeline](../ingest-pipeline/#clickhouse-consumer):
+
+- `logs_ingest` — NATS engine table subscribing to `telemetry.logs.>`. The
+  NATS engine **cannot store `JSON` columns**, so `ResourceAttributes`,
+  `ScopeAttributes`, and `LogAttributes` are declared as `String` here.
+- `logs_mv` — materialized view that reads `logs_ingest` and casts those three
+  `String` columns to `JSON`.
+- `logs` — destination MergeTree table with the `JSON` columns above.
 
 Partition key: `(ProjectId, toDate(ObservedTimestamp))` — provisional; see
 [retention open questions](../retention/#partition-key-design-at-high-tenant-count)
 for the partition explosion concern at high tenant count.
-Order key: `(ProjectId, ServiceName, toDateTime(ObservedTimestamp), ObservedTimestamp)`
+Order key: `(ProjectId, ServiceName, ObservedTimestamp)`
 
 Row policy: `ProjectId = getSetting('project_id')` on the `api_reader` user.
-The query layer sets this before every tenant query. For TTL configuration and
-cold storage tiers, see [retention](../retention/#log-retention).
+The query layer sets this before every tenant query. `project_id` must be
+declared as a ClickHouse custom setting (via a `custom_settings_prefixes` entry)
+or `SET project_id = ...` errors — this is a system-wide convention; see the
+[top-level conventions](../#conventions). For TTL configuration and cold storage
+tiers, see [retention](../retention/#log-retention).
 
 ### Query access
 
@@ -225,25 +245,26 @@ Flags:
   --tail         Stream logs in real time (live tail)
   --since        Show logs since a relative time (e.g. 1h, 30m) or absolute timestamp; filters on ObservedTimestamp (ingest time)
   --service      Filter by service.name
-  --severity     Filter by severity (INFO, WARN, ERROR)
+  --severity     Minimum severity to show (e.g. WARN shows WARN and above); threshold on the OTLP SeverityNumber, not SeverityText string equality
   --project      Target project (defaults to current context)
   --limit        Maximum number of log lines to return (default 100, max 1000)
 ```
 
 > [!NOTE]
 >
-> **`--since` filters on ingest time, not event time.** `ObservedTimestamp` is
-> set by the OTel Collector when it receives the record, not when the event
+> **`--since` filters on observed time, not event time.** `ObservedTimestamp`
+> is set by the OTel Collector when it receives the record, not when the event
 > occurred. This is intentional — `Timestamp` (event time) may be 0 or
-> unreliable for sources that don't set it. Under normal conditions ingest and
+> unreliable for sources that don't set it. Under normal conditions observed and
 > event time are within seconds of each other and the distinction is invisible.
 >
-> The gap becomes noticeable during a NATS replay after a WAN outage. If a
-> site is offline for 2 hours and the NATS leaf replays buffered records to
-> the hub on reconnect, `--since 1h` will surface those records — ClickHouse
-> received them in the last hour even though the events happened 2+ hours ago.
-> Users investigating what happened *during* the outage should use an absolute
-> `--since` timestamp rather than a relative window.
+> `ObservedTimestamp` is frozen at Collector receipt and carried unchanged
+> through the edge leaf's in-memory buffer and the hub JetStream. Downstream
+> buffering — or a backlog drain when a leaf reconnects after a WAN outage —
+> does **not** shift it: a record observed two hours ago keeps its two-hour-old
+> `ObservedTimestamp` even if ClickHouse ingests it later, so `--since` stays
+> consistent across outages. The gap between observed and event time only widens
+> when the *source itself* delays delivery to the Collector.
 
 **Output format:**
 
@@ -252,6 +273,9 @@ Flags:
 2026-07-01T12:00:00.456Z  WARN  compute-workload  connection retry 1/3
 2026-07-01T12:00:01.789Z  ERROR envoy-gateway     upstream timeout: cluster backend-svc
 ```
+
+The leading timestamp is `ObservedTimestamp` — the same column `--since` filters
+on — so the displayed time is consistent with the time window the user requested.
 
 Streaming (`--tail`) uses chunked HTTP with cursor-based polling. The query
 layer holds the connection open and issues a new ClickHouse query on a short
