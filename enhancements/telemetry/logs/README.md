@@ -221,9 +221,10 @@ tiers, see [retention](../retention/#log-retention).
 
 ### Query access
 
-The query layer service exposes a single HTTP endpoint that resolves tenant
-identity from the OIDC bearer token, sets the ClickHouse session variable, and
-executes the query. See [query-layer](../query-layer/) for the full design.
+The query layer service exposes a single HTTP endpoint that reads the resolved
+`project_id` from the request context (injected by milo-api), sets the
+ClickHouse session variable, and executes the query. See
+[query-layer](../query-layer/) for the full design.
 
 **Operator access (Grafana):** The query layer connects as `grafana_ops` with no
 row policy. Only platform operators can reach this path.

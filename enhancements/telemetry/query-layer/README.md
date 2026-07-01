@@ -69,7 +69,7 @@ makes this non-negotiable.
 
 | Consumer | Auth | Scoping | Access pattern |
 |---|---|---|---|
-| `datumctl` | Bearer token (OIDC) | Single tenant | Streaming log tail, recent history |
+| `datumctl` | Bearer token | Single tenant | Streaming log tail, recent history |
 | Grafana | Service account | Cross-tenant (operator only) | Aggregated metrics and dashboards |
 
 Grafana is pointed at the query layer, not directly at ClickHouse. This

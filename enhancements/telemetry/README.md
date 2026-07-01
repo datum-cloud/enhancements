@@ -115,8 +115,9 @@ access to customers via `datumctl logs`.
 
 4. **Query layer service — initial implementation (single region, logs)**
    Deploy the query layer as a Go HTTP service against the production ClickHouse.
-   MVP scope: single-region, tenant-scoped log queries resolved via OIDC bearer
-   token, streaming chunked responses for `--tail` mode. See
+   MVP scope: single-region, tenant-scoped log queries with `project_id`
+   resolved by milo-api and forwarded via request context, streaming chunked
+   responses for `--tail` mode. See
    [query-layer](./query-layer/).
 
 5. **`datumctl logs` — initial implementation**
