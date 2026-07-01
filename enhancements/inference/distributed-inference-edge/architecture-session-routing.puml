@@ -1,0 +1,34 @@
+@startuml architecture-session-routing
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Dynamic.puml
+!include ../../datum-theme.puml
+
+title Distributed Inference Edge — Cross-PoP Session Roaming (Phase 2+)\nClient roams from PoP A to PoP B with KV cache preserved
+
+Person(client, "Roaming Client", "Reconnects from new network;\nresends X-Datum-Session-ID header")
+
+Container(anycast, "BGP Anycast", "Routes new TCP to nearest PoP")
+Container(pop_b_envoy, "PoP B: Envoy", "New PoP (client lands here on reconnect)")
+Container(pop_b_router, "PoP B: pop-router", "Detects cross-PoP session;\nextracts X-Datum-Session-ID")
+ContainerDb(pop_b_redis, "PoP B: Redis Sentinel", "Local session registry — miss")
+Container(global_cp, "Global Control Plane", "Authoritative session → PoP map")
+ContainerDb(session_reg, "Session Registry", "CockroachDB")
+System_Ext(galactic, "Galactic VPC SRv6", "Installs inference.steer policy")
+Container(pop_a_envoy, "PoP A: Envoy", "Owns KV cache for this session")
+Container(pop_a_node, "PoP A: Inference Node", "KV cache warm for this session")
+
+RelIndex(1, client, anycast, "Reconnect from new network location", "HTTPS + X-Datum-Session-ID header")
+RelIndex(2, anycast, pop_b_envoy, "Route to nearest PoP (PoP B)")
+RelIndex(3, pop_b_envoy, pop_b_router, "Forward session ID for lookup", "X-Datum-Session-ID via xDS metadata")
+RelIndex(4, pop_b_router, pop_b_redis, "Local registry lookup — cache miss")
+RelIndex(5, pop_b_router, global_cp, "Query: who owns session X?", "HTTPS / mTLS (async; adds ~1 RTT)")
+RelIndex(6, global_cp, session_reg, "Lookup session_id → PoP A", "gRPC")
+RelIndex(7, global_cp, pop_b_router, "Response: session owned by PoP A")
+RelIndex(8, pop_b_router, galactic, "Request inference.steer SRv6 policy\nfor client source IP → PoP A segment", "gRPC / mTLS")
+RelIndex(9, galactic, pop_b_envoy, "Install SRv6 steering header:\nclient packets → PoP A segment")
+RelIndex(10, pop_b_envoy, pop_a_envoy, "Client traffic transparently steered\n(SRv6 End.DT6 encapsulation)", "SRv6 / IPv6")
+RelIndex(11, pop_a_envoy, pop_a_node, "Request hits owning inference node;\nKV cache warm — no context retransmit")
+RelIndex(12, pop_a_node, client, "Streaming response via reverse SRv6 path", "SSE / HTTPS")
+
+SHOW_LEGEND()
+@enduml
