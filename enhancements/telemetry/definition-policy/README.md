@@ -148,7 +148,7 @@ enters the pipeline.
 >
 > **Phases 1–4 collect unconditionally.** The `LogCollectionPolicy` controller
 > does not exist until Phase 5. Before it ships, the pipeline collects all log
-> records that arrive at the bridge with a valid `datum.project.id` — there is
+> records that arrive at the bridge with a valid `milo.project.id` — there is
 > no opt-in gate. "Without a policy, no logs are collected" becomes the enforced
 > behavior only once the Phase 5 controller is deployed.
 

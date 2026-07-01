@@ -7,11 +7,12 @@ latest-milestone: "v0.x"
 # Telemetry System
 
 The telemetry system collects, processes, stores, and exposes telemetry data
-(metrics, logs, traces, and flows) across the Datum Cloud platform. Its target
+(metrics, logs, traces, and flows) across a service provider platform. Its target
 end-state is to cover all services and infrastructure on the platform; the
 roadmap below brings sources in incrementally, with operational logs and metrics
 consolidated in Phase 4. It serves both internal operational visibility and
-tenant-scoped visibility for customers running workloads on Datum infrastructure.
+tenant-scoped visibility for customers running workloads on service provider
+infrastructure.
 
 Tracking issue: [datum-cloud/enhancements#765](https://github.com/datum-cloud/enhancements/issues/765)
 
@@ -39,7 +40,7 @@ them rather than restating them.
   `telemetry.<signal>.<scope_id>`, where `<signal>` is `logs`, `metrics`, or
   `network`. The scope is `<project_id>` for tenant signals (logs, metrics) and
   `<device_id>` for network telemetry. Internal platform telemetry uses the
-  reserved project `datum-internal`.
+  reserved project `internal`.
 - **Per-project ACLs.** Customer export consumers are authorized only to the
   project-scoped subject for each signal type —
   `telemetry.<signal>.<their_project_id>` — never the wildcard.
@@ -99,7 +100,7 @@ access to customers via `datumctl logs`.
    ordered by `(ProjectId, ServiceName, ObservedTimestamp)`. NATS engine ingest
    via the existing hub pipeline. Includes log TTL configuration (7-day
    retention for tenant data, deleted at day 7 with no cold move; 90-day for
-   `datum-internal` with cold move to GCS at day 7). See [logs](./logs/) and
+   `internal` with cold move to GCS at day 7). See [logs](./logs/) and
    [retention](./retention/#log-retention).
 
 2. **NATS ingest pipeline — staging and production deployment**
@@ -125,8 +126,8 @@ access to customers via `datumctl logs`.
 
 6. **OTLP-NATS bridge — implementation and deployment**
    Implement and deploy the bridge service that receives OTLP/HTTP from the OTel
-   Collector, extracts `datum.project.id` from resource attributes (returning a partial
-   success response and dropping records where `datum.project.id` is absent), and publishes one
+   Collector, extracts `milo.project.id` from resource attributes (returning a partial
+   success response and dropping records where `milo.project.id` is absent), and publishes one
    JSON message per log record to
    `telemetry.logs.<project_id>` on the NATS leaf. See
    [ingest-pipeline](./ingest-pipeline/#the-otlp-nats-bridge).
@@ -142,8 +143,7 @@ access to customers via `datumctl logs`.
 
 Metrics required for the Compute private alpha deliverable
 ([datum-cloud/enhancements#682](https://github.com/datum-cloud/enhancements/issues/682)).
-Extends the
-NATS ingest pipeline to metrics and exposes tenant-scoped metric access via
+Extends the NATS ingest pipeline to metrics and exposes tenant-scoped metric access via
 `datumctl metrics` with ASCII chart visualizations, bridging the gap until a
 dedicated UI is available.
 
@@ -182,9 +182,9 @@ for durability.
 Network telemetry splits across two subject namespaces by data format. gNMIc
 emits OpenConfig `Path`/`Value` events, which land under `telemetry.network.*`.
 SNMP, collected via the OTel Collector `snmpreceiver`, emits OTLP metric data
-points, which join the metrics path under `telemetry.metrics.datum-internal`.
+points, which join the metrics path under `telemetry.metrics.internal`.
 The device identifier is the same in both cases: it appears as the
-`<device_id>` subject segment for gNMIc and as the `datum.device.id` resource
+`<device_id>` subject segment for gNMIc and as the `milo.device.id` resource
 attribute for SNMP.
 
 **Deliverables and sub-issues:**
@@ -198,9 +198,9 @@ attribute for SNMP.
 13. **SNMP collection — deployment and NATS integration**
     For devices without gNMI support, use the OTel Collector `snmpreceiver`
     (contrib) to poll SNMP devices directly. Metrics are published to
-    `telemetry.metrics.datum-internal` on the NATS leaf (SNMP produces OTLP
+    `telemetry.metrics.internal` on the NATS leaf (SNMP produces OTLP
     metric data points, not gNMIc event format) and land in `otel_metrics_*`
-    tables, queryable by `datum.device.id` resource attribute. See
+    tables, queryable by `milo.device.id` resource attribute. See
     [network-telemetry](./network-telemetry/).
 
 14. **Akvorado flow data — deployment and ClickHouse schema**
@@ -292,7 +292,7 @@ Advanced features and data residency as a first-class property.
 | [definition-policy](./definition-policy/) | LogDefinition, LogCollectionPolicy, MetricDefinition, MetricPolicy CRDs |
 | [export-policies](./export-policies/) | ExportPolicy — customer-configured telemetry export to third-party platforms |
 | [retention](./retention/) | Log TTL and metrics three-tier rollup — raw → hourly → daily |
-| [ingest-pipeline](./ingest-pipeline/) | NATS JetStream ingest with per-edge store-and-forward durability |
+| [ingest-pipeline](./ingest-pipeline/) | NATS ingest pipeline — core NATS leaf at edge (bounded in-memory), JetStream hub; OTLP-NATS bridge for log and metric ingestion |
 | [network-telemetry](./network-telemetry/) | gNMIc, SNMP, and flow data for network hardware |
 | [observability-migration](./observability-migration/) | Migration from Loki and VictoriaMetrics to ClickHouse |
 | [operations](./operations/) | Platform alerts and runbooks for the telemetry pipeline |

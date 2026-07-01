@@ -121,11 +121,11 @@ ExportPolicy or not at all until the ClickHouse pipeline is available.
 
 #### Resource attribute contract
 
-The same `datum.project.id` derivation applies as for logs: the OTel Collector
+The same `milo.project.id` derivation applies as for logs: the OTel Collector
 `k8sattributes` processor reads the namespace label
 `meta.datumapis.com/upstream-cluster-name`, strips the `cluster-` prefix, and
-sets `datum.project.id`. Internal platform components in platform namespaces
-receive `datum.project.id = 'datum-internal'`. See
+sets `milo.project.id`. Internal platform components in platform namespaces
+receive `milo.project.id = 'internal'`. See
 [logs — resource attribute contract](../logs/#resource-attribute-contract) for
 the full derivation rules; they apply identically to metrics.
 
@@ -146,7 +146,7 @@ The bridge exposes `/v1/metrics` alongside `/v1/logs`. Processing mirrors the
 log path:
 
 1. Parse the OTLP protobuf payload (`ExportMetricsServiceRequest`)
-2. For each `ResourceMetrics` entry, extract `datum.project.id` from resource
+2. For each `ResourceMetrics` entry, extract `milo.project.id` from resource
    attributes
 3. If missing: increment
    `bridge_metric_datapoints_dropped_total{reason="missing_project_id"}`,
@@ -233,7 +233,7 @@ ClickHouse plugin schema. Key columns common to all of them:
 
 | Column | Type | Notes |
 |---|---|---|
-| `ProjectId` | `LowCardinality(String)` | Extracted from `datum.project.id` by bridge |
+| `ProjectId` | `LowCardinality(String)` | Extracted from `milo.project.id` by bridge |
 | `TimeUnix` | `DateTime64(9)` | OTel `time_unix_nano` |
 | `MetricName` | `LowCardinality(String)` | OTel metric name |
 | `Attributes` | `JSON` | OTel metric attributes (labels); `String` in `metrics_ingest`, cast in the MV |
@@ -261,7 +261,7 @@ Platform component / workload
 OTel Collector gateway (validates & enriches resource attributes)
     │
     ▼ OTLP/HTTP (gzip)
-OTLP-NATS bridge (extracts datum.project.id → telemetry.metrics.<project_id>)
+OTLP-NATS bridge (extracts milo.project.id → telemetry.metrics.<project_id>)
     │
     ▼ NATS core (edge leaf — in-memory buffer, no JetStream)
     │

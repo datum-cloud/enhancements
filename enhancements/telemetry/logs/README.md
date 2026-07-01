@@ -66,16 +66,16 @@ and is a baseline expectation for any infrastructure platform.
 ### Resource attribute contract
 
 The OTel Collector resource processor on each cluster is responsible for
-ensuring `datum.project.id` is present on every log record before it reaches
+ensuring `milo.project.id` is present on every log record before it reaches
 the bridge. There are two cases:
 
-**Tenant workloads** do not need to set `datum.project.id` themselves. The
+**Tenant workloads** do not need to set `milo.project.id` themselves. The
 Collector derives it from the namespace label
 `meta.datumapis.com/upstream-cluster-name` via the `k8sattributes` processor.
 The label value has the form `cluster-<project-id>` (e.g.
 `cluster-personal-project-2650fdb4`); the Collector strips the `cluster-`
-prefix and sets `datum.project.id = 'personal-project-2650fdb4'`.
-`datum.project.id` is a resource-scoped attribute: when it is absent on a
+prefix and sets `milo.project.id = 'personal-project-2650fdb4'`.
+`milo.project.id` is a resource-scoped attribute: when it is absent on a
 `ResourceLogs` (and not otherwise set), every `LogRecord` under that resource is
 dropped by the bridge and reported in the OTLP partial success response — not
 silently.
@@ -85,14 +85,14 @@ silently.
 | `service.name` | Service name from the OTel semantic conventions | `compute-workload` |
 | `service.namespace` | Kubernetes namespace | `tenant-acme-corp` |
 | `k8s.cluster.name` | Cluster where the workload runs | `us-east-1-edge-01` |
-| `datum.project.id` | Derived from namespace label `meta.datumapis.com/upstream-cluster-name` by stripping `cluster-` prefix | `personal-project-2650fdb4` |
+| `milo.project.id` | Derived from namespace label `meta.datumapis.com/upstream-cluster-name` by stripping `cluster-` prefix | `personal-project-2650fdb4` |
 
 **Internal platform components** (Envoy, control plane services, NATS,
-ClickHouse operator, etc.) do not set `datum.project.id` themselves. The
+ClickHouse operator, etc.) do not set `milo.project.id` themselves. The
 Collector resource processor detects these by Kubernetes namespace — any
-source in a platform namespace has `datum.project.id = 'datum-internal'`
+source in a platform namespace has `milo.project.id = 'internal'`
 injected automatically. This routes their logs to
-`telemetry.logs.datum-internal` on NATS and applies the 90-day retention tier
+`telemetry.logs.internal` on NATS and applies the 90-day retention tier
 (vs. 7 days for tenant data). See [retention](../retention/#log-ttl-tiers).
 
 The complete namespace list is an implementation detail maintained in the OTel
@@ -101,12 +101,12 @@ Collector resource processor config. Known platform namespaces include
 must be audited against the actual cluster namespaces before the Collector
 config is finalized.
 
-The bridge service extracts `datum.project.id` from the OTLP resource attributes
+The bridge service extracts `milo.project.id` from the OTLP resource attributes
 of each `ResourceLogs` entry and routes to the corresponding NATS subject
 (`telemetry.logs.<project_id>`). This attribute is the root tenancy signal for
 the entire pipeline.
 
-Before Phase 5, the bridge collects all records with a valid `datum.project.id`
+Before Phase 5, the bridge collects all records with a valid `milo.project.id`
 unconditionally. The `LogCollectionPolicy` opt-in gate is a Phase 5 feature;
 no policy is required for Phase 1 log collection to work. See
 [definition-policy](../definition-policy/) for the Phase 5 design.
@@ -120,7 +120,7 @@ Compute workload / Envoy
 OTel Collector gateway (validates & enriches resource attributes)
     │
     ▼ OTLP/HTTP (gzip)
-OTLP-NATS bridge (extracts datum.project.id → publishes to telemetry.logs.<project_id>)
+OTLP-NATS bridge (extracts milo.project.id → publishes to telemetry.logs.<project_id>)
     │
     ▼ NATS leaf (core NATS, no JetStream — bounded in-memory buffer only)
     │
@@ -141,7 +141,7 @@ messages. It routes; it does not enrich.
 For each `ResourceLogs` entry (project id is resource-scoped and applies to
 every child `LogRecord`):
 
-1. Extract `datum.project.id` from the resource attributes
+1. Extract `milo.project.id` from the resource attributes
 2. If missing: drop all child `LogRecord`s of that resource, increment
    `bridge_log_records_dropped_total{reason="missing_project_id"}` by the number
    of dropped records, exclude them from the NATS publish, and include them in
@@ -185,7 +185,7 @@ Key columns:
 
 | Column | Type | Notes |
 |---|---|---|
-| `ProjectId` | `LowCardinality(String)` | Extracted from `datum.project.id` by bridge |
+| `ProjectId` | `LowCardinality(String)` | Extracted from `milo.project.id` by bridge |
 | `Timestamp` | `DateTime64(9)` | OTLP `time_unix_nano`; may be 0 if the source did not set one |
 | `ObservedTimestamp` | `DateTime64(9)` | OTLP `observed_time_unix_nano`; set by the OTel Collector on receipt; always non-zero |
 | `ServiceName` | `LowCardinality(String)` | `service.name` |

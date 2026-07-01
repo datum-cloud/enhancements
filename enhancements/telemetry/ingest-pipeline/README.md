@@ -170,7 +170,7 @@ All log records are published to a per-project subject:
 telemetry.logs.<project_id>
 ```
 
-The bridge extracts `datum.project.id` from the OTLP resource attributes of
+The bridge extracts `milo.project.id` from the OTLP resource attributes of
 each `ResourceLogs` entry and routes to the corresponding subject. A single
 OTLP batch may contain records from multiple projects; the bridge splits by
 project before publishing. Org ID is not used for routing — it is materialized
@@ -245,9 +245,9 @@ alongside the OTel Collector and NATS leaf node.
    Phase 2 when the metrics pipeline lands.
 2. Parses the OTLP protobuf payload
 3. For each `ResourceLogs` (Phase 1) or `ResourceMetrics` (Phase 2) entry,
-   extracts `datum.project.id` from the resource attributes. The project applies
+   extracts `milo.project.id` from the resource attributes. The project applies
    to every child record under that resource.
-4. If `datum.project.id` is missing: increments
+4. If `milo.project.id` is missing: increments
    `bridge_log_records_dropped_total{reason="missing_project_id"}` (logs) or
    `bridge_metric_datapoints_dropped_total{reason="missing_project_id"}` (metrics, Phase 2),
    counting each child record under the resource, excludes those records from the
@@ -460,11 +460,11 @@ of what we're building. Required changes for the new Collector config:
 - **Switch exporter**: replace the existing ClickHouse exporter with
   `otlphttp` pointing at the bridge (`http://otlp-nats-bridge.telemetry.svc:4318`)
 - **Add resource processor**: configure the `k8sattributes` processor to
-  derive `datum.project.id` from the namespace label
+  derive `milo.project.id` from the namespace label
   `meta.datumapis.com/upstream-cluster-name` (strip `cluster-` prefix), and
-  inject `datum.project.id = 'datum-internal'` for platform namespaces
+  inject `milo.project.id = 'internal'` for platform namespaces
 
-Without these changes the bridge receives records with no `datum.project.id`
+Without these changes the bridge receives records with no `milo.project.id`
 and drops everything.
 
 **Query layer API user (#4 — query layer service initial implementation)**

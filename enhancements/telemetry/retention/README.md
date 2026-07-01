@@ -50,7 +50,7 @@ window expires.
 
 ### Goals
 
-- 7-day hot retention for tenant log data; 90 days for `datum-internal` logs
+- 7-day hot retention for tenant log data; 90 days for `internal` logs
 - 90-day retention for raw metrics at full resolution
 - 1-year retention for hourly metric rollups
 - Indefinite retention for daily metric rollups, for all metrics
@@ -76,7 +76,7 @@ window expires.
 | Category | Hot retention | Purpose |
 |---|---|---|
 | Tenant data (`allLogs`) | 7 days | Operational debugging, `datumctl logs` |
-| `datum-internal` | 90 days | Incident post-mortems, audit trail |
+| `internal` | 90 days | Incident post-mortems, audit trail |
 
 After the hot window expires, log records are deleted. Tenants who need a longer
 audit trail should configure an `ExportPolicy` to forward logs to their own
@@ -90,20 +90,20 @@ data is deleted at day 7, there is no cost benefit to an intermediate cold tier
 only effect of early cold migration would be degraded `datumctl logs` query
 latency for lookbacks beyond 1 day.
 
-`datum-internal` logs move to GCS cold storage at day 7 (the end of the hot
+`internal` logs move to GCS cold storage at day 7 (the end of the hot
 window) and are deleted at day 90. Days 1–7 are always on PD-SSD; the long
 audit tail lives cheaply on GCS.
 
 ```sql
 TTL
-    -- datum-internal: cold at day 7; tenant: never moved to cold (~100 years)
-    toDateTime(ObservedTimestamp) + toIntervalDay(if(ProjectId = 'datum-internal', 7, 36500)) TO VOLUME 'cold',
-    -- datum-internal: deleted at day 90; tenant: deleted at day 7
-    toDateTime(ObservedTimestamp) + toIntervalDay(if(ProjectId = 'datum-internal', 90, 7)) DELETE
+    -- internal: cold at day 7; tenant: never moved to cold (~100 years)
+    toDateTime(ObservedTimestamp) + toIntervalDay(if(ProjectId = 'internal', 7, 36500)) TO VOLUME 'cold',
+    -- internal: deleted at day 90; tenant: deleted at day 7
+    toDateTime(ObservedTimestamp) + toIntervalDay(if(ProjectId = 'internal', 90, 7)) DELETE
 ```
 
 For tenant data, the `TO VOLUME` deadline is set to ~100 years — effectively
-never — so only the `DELETE` at day 7 fires. For `datum-internal`, the cold
+never — so only the `DELETE` at day 7 fires. For `internal`, the cold
 move fires at day 7 and the `DELETE` fires at day 90. The two deadlines never
 coincide for either class of data, so there is no ambiguity about TTL rule
 ordering.
@@ -113,7 +113,7 @@ the TTL expression branching on `ProjectId` only needs to distinguish internal
 from tenant data — individual project retention is not configurable at the TTL
 layer.
 
-`datum-internal` is injected by the OTel Collector resource processor for
+`internal` is injected by the OTel Collector resource processor for
 platform components running in platform Kubernetes namespaces. See
 [logs — resource attribute contract](../logs/#resource-attribute-contract)
 for how internal logs acquire this value.
@@ -276,7 +276,7 @@ SELECT
     minMerge(ValueMin) AS min_value,
     maxMerge(ValueMax) AS max_value
 FROM otel_metrics_gauge_daily
-WHERE ProjectId = 'datum-internal'
+WHERE ProjectId = 'internal'
   AND Date >= '2026-01-01'
 GROUP BY MetricName
 ```

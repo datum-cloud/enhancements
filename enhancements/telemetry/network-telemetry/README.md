@@ -156,11 +156,11 @@ No separate SNMP Exporter deployment is required.
 
 The OTel Collector (already deployed for OTel log/metric ingest) adds a
 `snmpreceiver` configuration targeting each device. The resource processor
-injects `datum.device.id` and `datum.project.id = 'datum-internal'`; the
-bridge routes to `telemetry.metrics.datum-internal` on NATS. SNMP metrics land
+injects `milo.device.id` and `milo.project.id = 'internal'`; the
+bridge routes to `telemetry.metrics.internal` on NATS. SNMP metrics land
 in the `otel_metrics_*` ClickHouse tables and are queryable from Grafana by
-filtering on `ResourceAttributes['datum.device.id']`. Device data lives under the
-reserved `datum-internal` project and is read by operators via the
+filtering on `ResourceAttributes['milo.device.id']`. Device data lives under the
+reserved `internal` project and is read by operators via the
 no-row-policy operator path (e.g. `grafana_ops`), not the tenant `api_reader`
 path — network telemetry is internal-operations only in this phase.
 
@@ -211,11 +211,11 @@ receivers:
 processors:
   resource/snmp:
     attributes:
-      - key: datum.device.id
+      - key: milo.device.id
         from_attribute: device.id
         action: insert
-      - key: datum.project.id
-        value: datum-internal
+      - key: milo.project.id
+        value: internal
         action: insert
 
 exporters:
@@ -343,7 +343,7 @@ billing-relevant data when capacity is constrained.
 Akvorado does **not** use the NATS pipeline — it has its own internal Kafka
 buffer between inlet and ClickHouse. SNMP data enters the pipeline as OTLP
 metrics via the OTel Collector `snmpreceiver`, published to
-`telemetry.metrics.datum-internal` and landing in the `otel_metrics_*`
+`telemetry.metrics.internal` and landing in the `otel_metrics_*`
 ClickHouse tables — not in `network_ingest`. See [SNMP collection](#snmp-collection).
 
 ### ClickHouse schema — gNMIc network telemetry
@@ -371,7 +371,7 @@ also deferred to implementation.
 [Physical site — e.g. data center 1]
 
   Router / switch ──gNMI──► gNMIc ───────────────publish──► NATS leaf ──mTLS──► NATS hub (GCP)
-  Legacy device ───SNMP──► OTel Collector (snmpreceiver) ──► NATS leaf      (telemetry.metrics.datum-internal)
+  Legacy device ───SNMP──► OTel Collector (snmpreceiver) ──► NATS leaf      (telemetry.metrics.internal)
   Router / switch ──NetFlow──► Akvorado inlet ──► Akvorado ClickHouse
 
   NATS leaf: core NATS, no JetStream (bounded in-memory buffer)
