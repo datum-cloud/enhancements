@@ -96,8 +96,10 @@ telemetry data is exported. Users will be able to choose from
 [multiple sink protocols](#supported-sink-protocols) to choose the one that
 works best for their platform or use-case.
 
-An export policy will allow users to export data to any [OpenTelemetry
-protocol (OTLP)][OTLP] compatible endpoint.
+An export policy will allow users to export data to any
+[OpenTelemetry protocol (OTLP)][OTLP]-compatible or
+[Prometheus Remote Write][remote-write] endpoint (see
+[Supported Sink Protocols](#supported-sink-protocols)).
 
 > [!NOTE]
 >
@@ -167,56 +169,30 @@ logs, and traces from multiple resources to export. Telemetry sources will
 support filtering by namespace, resource labels, and resource kinds so users
 only export telemetry they care about.
 
-#### MVP Metric Source Configuration
+#### Metric Source Configuration
 
-To start, export policies will only support exporting **Metric** data from
-resources created on Datum Cloud. Users will be able to leverage a [metricsql]
-query to filter which metrics they'd like to receive. An empty query means all
-metrics will be exported.
-
-> [!WARNING]
->
-> **MetricsQL coupling:** The `metricsql` source field ties the ExportPolicy
-> API to a VictoriaMetrics-specific query language. If the metrics backend changes
-> (e.g. to Prometheus or Thanos), this field would require a breaking API change.
-> The backend-agnostic `resourceSelectors` approach is the intended long-term
-> direction but is not yet implemented.
-
-[metricsql]: https://docs.victoriametrics.com/metricsql/
-
-```yaml
-apiVersion: telemetry.datumapis.com/v1alpha1
-kind: ExportPolicy
-metadata:
-  name: gateway-export-policy  # Unique name for the export policy
-spec:
-  # Defines the telemetry sources that should be exported. An export policy can
-  # define multiple telemetry sources. Telemetry data will **not** be de-duped
-  # if its selected from multiple sources.
-  sources:
-    - name: "gateway-metrics"  # Descriptive name for the source
-      # Source metrics from the Datum Cloud platform
-      metrics:
-        # The options in this section are expected to be mutually exclusive. Users
-        # can either leverage metricsql or resource selectors.
-        #
-        # This option allows user to supply a metricsql query if they're already
-        # familiar with using metricsql queries to select metric data from
-        # Victoria Metrics.
-        metricsql: |
-          {service_name="networking.datumapis.com", resource_kind="Gateway", __name__=~"network_bytes_.*"}
-```
-
-#### Target Metric Source Configuration
-
-The export policy below is meant to highlight the configuration options we
-expect to offer in the future, that provides filtering options for those less
-comfortable with [metricsql].
+Export policies select metrics with `resourceSelectors` — a backend-agnostic,
+Kubernetes-style selector over namespace, resource labels, and resource
+group/Kind. This is the proposed metric-selection mechanism; it is not yet
+implemented.
 
 > [!NOTE]
 >
-> This configuration only specifies how to source Metric data right now. We will
-> also expand this to add Log and Trace configuration examples in the future.
+> **No `metricsql` field.** An earlier iteration exposed a `metricsql` query
+> field, tying the API to MetricsQL — a query language specific to
+> VictoriaMetrics, which is decommissioned in Phase 4. Because nothing runs
+> MetricsQL against the ClickHouse backend and there are no users to migrate,
+> the backend-agnostic `resourceSelectors` is proposed directly instead. See
+> [Alternatives](#alternatives).
+
+> [!NOTE]
+>
+> **Transport.** The export agent reads the selected metrics from the metrics
+> backend — VictoriaMetrics today, the NATS + ClickHouse pipeline after the
+> Phase 4 migration (a NATS consumer push on `telemetry.metrics.<project_id>`).
+> This configuration specifies only how to source Metric data; Log source
+> configuration is a Phase 5 addition (see
+> [Log Source Configuration](#log-source-configuration)).
 
 ```yaml
 apiVersion: telemetry.datumapis.com/v1alpha1
@@ -226,23 +202,13 @@ metadata:
 spec:
   # Defines the telemetry sources that should be exported. An export policy can
   # define multiple telemetry sources. Telemetry data will **not** be de-duped
-  # if its selected from multiple sources.
+  # if it's selected from multiple sources.
   sources:
     - name: "application-metrics"  # Descriptive name for the source
       # Source metrics from the Datum Cloud platform
       metrics:
-        # The options in this section are expected to be mutually exclusive. Users
-        # can either leverage metricsql or resource selectors.
-        #
-        # This option allows user to supply a metricsql query if they're already
-        # familiar with using metricsql queries to select metric data from
-        # Victoria Metrics.
-        metricsql: |
-          {service_name="networking.datumapis.com", resource_kind="Gateway", __name__=~"network_bytes_.*"}
-
-        # This gives the user a way of selecting resources using namespace
-        # selectors, group/kind info, and label selectors. This is a more k8s
-        # experience to selecting metric data.
+        # Select resources using namespace selectors, group/Kind info, and
+        # label selectors — a Kubernetes-style way to select metric data.
         resourceSelectors:
           # By default, a resource selector will only select resources from the
           # same namespace the export policy is created in. This can be
@@ -258,13 +224,15 @@ spec:
             labelSelectors:
               matchLabels:
                 app: "my-gateway"
+            # Each entry is a group + Kind (CamelCase singular Kind, not the
+            # lowercase plural resource name). "*" matches all Kinds in a group.
             kinds:
-              - apiGroups: ["gateway.networking.k8s.io"]
-                kind: ["gateways"]
-              - apiGroups: ["compute.datumapis.com"]
-                kind: ["workloads"]
-              - apiGroups: ["networking.datumapis.com"]
-                kind: ["*"]
+              - group: gateway.networking.k8s.io
+                kind: Gateway
+              - group: compute.datumapis.com
+                kind: Workload
+              - group: networking.datumapis.com
+                kind: "*"
 ```
 
 #### Log Source Configuration
@@ -276,9 +244,9 @@ spec:
 > described in [logs](../logs/). Log source support in ExportPolicy is planned for
 > Phase 5 (#18 — LogSource support in ExportPolicy).
 
-Customers can export log data by declaring a `logs` source. Log sources select
-by resource kind and log category, using the same `resourceSelectors` model as
-the metric source target configuration.
+Once Phase 5 ships, customers will be able to export log data by declaring a
+`logs` source. Log sources select by resource kind and log category, using the
+same `resourceSelectors` model as the metric source target configuration.
 
 ```yaml
 apiVersion: telemetry.datumapis.com/v1alpha1
@@ -290,12 +258,14 @@ spec:
     - name: gateway-access-logs
       logs:
         resourceSelectors:
-          - group: networking.datumapis.com
-            kind: HTTPProxy
-        # allLogs selects all log types declared by matching LogDefinitions.
-        # Individual log names can also be listed explicitly.
+          - kinds:
+              - group: networking.datumapis.com
+                kind: HTTPProxy
+        # "*" selects all log categories declared by matching LogDefinitions.
+        # Individual categories can also be listed explicitly (see
+        # definition-policy for the category vocabulary).
         categories:
-          - allLogs
+          - "*"
   sinks:
     - name: my-loki
       sources:
@@ -310,9 +280,10 @@ spec:
                 name: loki-credentials
 ```
 
-Log export respects `LogRedactionPolicy` rules — attributes marked `drop` or
+Log export will respect `LogRedactionPolicy` rules — attributes marked `drop` or
 `hash` in a redaction policy are transformed before the record leaves the
-platform, including before it reaches the export agent.
+platform, including before it reaches the export agent. (`LogRedactionPolicy` is
+itself a Phase 5 deliverable; see [definition-policy](../definition-policy/).)
 
 ### Configuring Sinks
 
@@ -335,11 +306,11 @@ metadata:
 spec:
   sources:
     - name: metrics
-      ...
+      # ... source configuration elided ...
 
   sinks:
     - name: grafana-cloud
-      # Configure which sources should be sent to this sink.
+      # Required: selects which named sources feed this sink.
       sources:
       - metrics
       target:
@@ -365,11 +336,6 @@ This example demonstrates how to configure an export policy to send telemetry
 data to an OpenTelemetry compatible endpoint. This sink supports using Basic and
 Bearer token authentication.
 
-> [!NOTE]
->
-> This example demonstrates how we will support the OpenTelemetry protocol in
-> the future.
-
 ```yaml
 apiVersion: telemetry.datumapis.com/v1alpha1
 kind: ExportPolicy
@@ -377,10 +343,13 @@ metadata:
   name: example-export-policy
 spec:
   sources:
-    ...
+    # ... source configuration elided ...
 
   sinks:
     - name: grafana-cloud-otel
+      # Required: selects which named sources feed this sink.
+      sources:
+      - metrics
       target:
         openTelemetry:
           http:
@@ -410,16 +379,16 @@ durable consumer per ExportPolicy is scoped to `telemetry.<signal>.<project_id>`
 by NATS ACL, so isolation is enforced at the subject layer rather than in
 application routing code.
 
-**MetricsQL pull as the permanent export model for metrics** — the current
-VictoriaMetrics pipeline uses export agents that query VictoriaMetrics via
-MetricsQL and push results to the customer sink. This is the implemented
-approach for the v0.3 launch and is reflected in the MVP source configuration
-above. It is not the intended long-term model. Once metrics move to the NATS +
-ClickHouse pipeline (see [metrics](../metrics/)), the export path becomes the
-same NATS consumer push used for logs — a durable consumer on
-`telemetry.metrics.<project_id>` streams records directly to the sink. The
-MetricsQL dependency is a transitional artifact of the current scrape-based
-pipeline, not a design goal.
+**MetricsQL pull as the export model for metrics** — the original design exposed
+a `metricsql` query field so export agents could query the metrics backend via
+MetricsQL and push results to the customer sink. Rejected: MetricsQL is specific
+to VictoriaMetrics, which is decommissioned in Phase 4, so the field tied the
+public API to a backend we are removing. With no users to migrate, there was no
+reason to carry the coupling forward. Metric selection instead uses the
+backend-agnostic `resourceSelectors` mechanism (see
+[Metric Source Configuration](#metric-source-configuration)), which works the
+same against VictoriaMetrics today and the NATS + ClickHouse pipeline (see
+[metrics](../metrics/)) after the migration.
 
 **Shared export agent per cluster** — a single export agent serving all
 ExportPolicies, with internal tenant routing, rather than one agent per policy.
