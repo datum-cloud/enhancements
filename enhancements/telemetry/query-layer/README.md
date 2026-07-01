@@ -126,16 +126,34 @@ This places it inside the kube-aggregator proxy chain that milo-api uses for all
 per-project API calls — `datumctl` does not need to know the query layer's
 address directly.
 
-The `datumctl` call chain:
+A Kubernetes `APIService` is a registration record that says "for API group X,
+reverse-proxy requests to backend service Y." The kube-aggregator reads this
+registry and forwards matching requests over a new HTTP connection to the
+backend pod. The original caller's identity is propagated via
+`X-Remote-User`/`X-Remote-Extra-*` request headers; this is how `project_id`
+travels from milo-api to the query layer without appearing in the URL.
+
+The `datumctl` call chain — each `──HTTP──►` is a separate TCP connection:
 
 ```
 datumctl
-  → milo-api /projects/<id>/control-plane/apis/<telemetry-group>/v1/logs
-    → milo-api request routing       (resolves to a single project,
-                                       injects the resolved project_id)
-      → project control plane        (per-project kube-aggregator)
-        → APIService proxy           (routes to query layer pod)
-          → query layer
+  │
+  │  HTTPS  GET /projects/<id>/control-plane/apis/<telemetry-group>/v1/logs
+  ▼
+milo-api  (resolves project from the URL; injects project_id into X-Remote-Extra-* headers)
+  │
+  │  HTTP reverse proxy  (kube-aggregator forwards to the per-project control plane)
+  ▼
+project control plane  (per-project kube-aggregator)
+  │  looks up the APIService registered for <telemetry-group>
+  │
+  │  HTTP reverse proxy  (APIService proxy forwards to the query layer pod)
+  ▼
+query layer pod
+  │  reads project_id from X-Remote-Extra-* headers
+  │  SET project_id = '...' → ClickHouse
+  ▼
+ClickHouse
 ```
 
 milo-api resolves each request to a single project and makes the resolved
