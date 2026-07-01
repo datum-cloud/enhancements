@@ -1,0 +1,48 @@
+@startuml system-overview
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include https://raw.githubusercontent.com/datum-cloud/enhancements/main/enhancements/datum-theme.puml
+
+title Telemetry System — End-to-End Overview
+
+LAYOUT_LEFT_RIGHT()
+
+' ── Edge (write side) ─────────────────────────────────────────────────────────
+System_Boundary(edge, "Edge cluster (×N) — no persistent storage") {
+    Container(workloads, "Workloads / Services", "Envoy, Compute, platform services", "Emit logs and metrics over OTLP")
+    Container(collector, "OTel Collector", "contrib", "Batches OTLP; injects milo.project.id")
+    Container(bridge, "OTLP-NATS bridge", "Go", "Extracts project_id; one NATS message per log record or data point")
+    ContainerQueue(leaf, "NATS leaf", "core NATS (no JetStream)", "Bounded in-memory buffer; forwards to hub on reconnect")
+}
+
+' ── GCP hub (storage + serving) ───────────────────────────────────────────────
+System_Boundary(gcp, "GCP hub — persistent storage") {
+    ContainerQueue(hub, "NATS hub", "JetStream", "48h durable buffer; aggregates all edge leaves")
+    ContainerDb(ch, "ClickHouse", "telemetry DB", "NATS engine tables (*_ingest) subscribe directly; MVs route to MergeTree storage")
+    Container(ql, "Query layer", "Go HTTP service", "Enforces tenant isolation; SET project_id per ClickHouse session")
+    Container(expcons, "Export consumer", "per ExportPolicy", "Scoped to telemetry.<signal>.<project_id>; pushes to tenant sink")
+}
+
+' ── External consumers ────────────────────────────────────────────────────────
+Person(tenant, "Tenant", "Queries logs and metrics via datumctl or API")
+Person(ops, "Platform operator", "Cross-tenant dashboards via Grafana")
+System_Ext(sink, "3rd-party platform", "Grafana Cloud, Datadog, etc. — receives via OTLP or Prometheus Remote Write")
+
+' ── Write path ────────────────────────────────────────────────────────────────
+Rel(workloads, collector, "OTLP/HTTP")
+Rel(collector, bridge, "OTLP/HTTP")
+Rel(bridge, leaf, "publish", "telemetry.<signal>.<project_id>")
+Rel(leaf, hub, "leaf→hub forward", "mTLS / port 7422")
+Rel(ch, hub, "NATS engine subscribes", "mTLS")
+
+' ── Read path ─────────────────────────────────────────────────────────────────
+Rel(ql, ch, "SELECT", "SET project_id per query")
+Rel_U(tenant, ql, "datumctl logs / metrics", "HTTPS")
+Rel_U(ops, ql, "Grafana", "HTTPS")
+
+' ── Export path ───────────────────────────────────────────────────────────────
+Rel(expcons, hub, "consume scoped subject", "mTLS")
+Rel(expcons, sink, "push", "OTLP / Prom Remote Write")
+
+SHOW_LEGEND()
+@enduml

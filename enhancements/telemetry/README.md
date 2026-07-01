@@ -300,3 +300,12 @@ Advanced features and data residency as a first-class property.
 ## System Context
 
 ![System context diagram](./system-context.png)
+
+## System Overview
+
+The diagram below shows the end-to-end telemetry system: the write path from
+workloads through the NATS ingest pipeline into ClickHouse, the read path
+through the query layer to `datumctl` and Grafana, and the export path from the
+NATS hub to tenant-configured sinks.
+
+![System overview diagram](./system-overview.png)

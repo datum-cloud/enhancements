@@ -19,8 +19,7 @@ System_Boundary(edge2, "Edge cluster — eu-west-1 (no persistent storage)") {
 
 System_Boundary(gcp, "GCP (persistent storage)") {
     ContainerQueue(hub, "NATS hub", "JetStream", "Aggregates all leaves; 48h durable buffer")
-    Container(chcons, "ClickHouse consumer", "durable", "Dials hub; batches INSERTs")
-    ContainerDb(ch, "ClickHouse", "telemetry DB", "System of record")
+    ContainerDb(ch, "ClickHouse", "telemetry DB", "NATS engine tables (*_ingest) subscribe directly to hub; MVs route to MergeTree")
     Container(export, "Customer export consumer", "per tenant, scoped", "Dials hub")
     Container(alert, "Alerting consumer", "future", "Real-time alerts")
 }
@@ -31,8 +30,7 @@ Rel(bridge1, leaf1, "publish", "telemetry.<signal>.<project_id>")
 Rel(leaf1, hub, "forward", "mTLS / WAN (7422)")
 Rel(col2, leaf2, "publish")
 Rel(leaf2, hub, "forward", "mTLS / WAN (7422)")
-Rel(chcons, hub, "dials; consumes", "mTLS")
-Rel(chcons, ch, "INSERT")
+Rel(ch, hub, "NATS engine subscribes", "mTLS")
 Rel(export, hub, "dials; consumes scoped subject", "mTLS")
 Rel_R(alert, hub, "dials; consumes", "mTLS")
 
