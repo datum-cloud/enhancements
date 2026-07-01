@@ -224,6 +224,19 @@ pipeline. Decommission Loki and VictoriaMetrics. See
     decommission. Update internal Grafana dashboards to query ClickHouse. Migrate
     ExportPolicy metric export from MetricsQL pull to NATS consumer push.
 
+> [!NOTE]
+>
+> **DNS observability migration**
+> ([enhancements#600](https://github.com/datum-cloud/enhancements/issues/600))
+> is Phase 4-aligned prep work: replace the current Vector-based DNS pipeline
+> with `OpenTelemetryCollector` CRDs before the backend migration, so that
+> Phase 4 only needs to change the exporter destination (OTelCollector →
+> OTLP-NATS bridge) rather than migrate the collector runtime and backend
+> simultaneously. DNS metrics are internal platform telemetry — not scoped per
+> project or org — and flow through `telemetry.metrics.internal` into
+> `otel_metrics_*` ClickHouse tables, visible to operators via Grafana only.
+> They are not surfaced in `datumctl` or `ExportPolicy`.
+
 ---
 
 ### Phase 5: Policy-Driven Logs and Metrics (target: Q1 2027)
