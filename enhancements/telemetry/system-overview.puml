@@ -29,7 +29,7 @@ Person(ops, "Platform operator", "Cross-tenant dashboards via Grafana")
 System_Ext(sink, "3rd-party platform", "Grafana Cloud, Datadog, etc. — receives via OTLP or Prometheus Remote Write")
 
 ' ── Write path ────────────────────────────────────────────────────────────────
-Rel(workloads, collector, "OTLP/HTTP")
+Rel(workloads, collector, "OTLP/gRPC")
 Rel(collector, bridge, "OTLP/HTTP")
 Rel(bridge, leaf, "publish", "telemetry.<signal>.<project_id>")
 Rel(leaf, hub, "leaf→hub forward", "mTLS / port 7422")

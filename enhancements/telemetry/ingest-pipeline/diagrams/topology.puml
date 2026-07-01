@@ -24,7 +24,7 @@ System_Boundary(gcp, "GCP (persistent storage)") {
     Container(alert, "Alerting consumer", "future", "Real-time alerts")
 }
 
-Rel(envoy1, col1, "OTLP/HTTP")
+Rel(envoy1, col1, "OTLP/gRPC")
 Rel(col1, bridge1, "OTLP/HTTP", "in-cluster")
 Rel(bridge1, leaf1, "publish", "telemetry.<signal>.<project_id>")
 Rel(leaf1, hub, "forward", "mTLS / WAN (7422)")
