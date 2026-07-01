@@ -84,18 +84,18 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 
 ## Projects
 
-| Project | Signals / Scope | Status |
-|---|---|---|
-| [Jamie Tartt](gslb-jamie-tartt.md) | GSLB / DNS — geo + health-aware PoP steering | Early definition |
-| [Dani Rojas](l4-load-balancing-dani-rojas.md) | L4 load balancing — Cilium, customer-configurable for compute targets | Early definition |
-| [Zava](envoy-routing-zava.md) | L7 routing — geo, health, WAF (Coraza), policy, protocol | Early definition |
-| [The Roy Kent Project](ip-geo-roy-kent.md) | Geography, ASN, IP Type | In progress |
-| [The Nate Project](health-checks-nate.md) | Health (Availability, Latency, Throughput) | Early definition |
-| [The Beard Project](ddos-scrubbing-beard.md) | DDoS detection and scrubbing — inline XDP/eBPF, BGP FlowSpec, RTBH | Early definition |
-| [Higgins Bus](signal-distribution-higgins-bus.md) | MOQT/QUIC signal distribution — carries all routing intelligence to every edge PoP in near real-time | In progress |
-| TBD | RTT, Packet Loss, Congestion | Not started |
-| TBD | Sovereignty, Risk | Not started |
-| TBD | Model Locality, GPU Availability | Not started |
+| Project | Signals / Scope |
+|---|---|
+| [Jamie Tartt](gslb-jamie-tartt.md) | GSLB / DNS — geo + health-aware PoP steering |
+| [Dani Rojas](l4-load-balancing-dani-rojas.md) | L4 load balancing — Cilium, customer-configurable for compute targets |
+| [Zava](envoy-routing-zava.md) | L7 routing — geo, health, WAF (Coraza), policy, protocol |
+| [The Roy Kent Project](ip-geo-roy-kent.md) | Geography, ASN, IP Type |
+| [The Nate Project](health-checks-nate.md) | Health (Availability, Latency, Throughput) |
+| [The Beard Project](ddos-scrubbing-beard.md) | DDoS detection and scrubbing — inline XDP/eBPF, BGP FlowSpec, RTBH |
+| [Higgins Bus](signal-distribution-higgins-bus.md) | MOQT/QUIC signal distribution — carries all routing intelligence to every edge PoP in near real-time |
+| TBD | RTT, Packet Loss, Congestion |
+| TBD | Sovereignty, Risk |
+| TBD | Model Locality, GPU Availability |
 
 ---
 
