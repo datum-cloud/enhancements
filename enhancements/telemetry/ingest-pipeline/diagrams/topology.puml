@@ -8,7 +8,7 @@ title NATS Ingest Pipeline — Production Topology
 System_Boundary(edge1, "Edge cluster — us-east-1 (no persistent storage)") {
     Container(envoy1, "Envoy / Compute", "workloads", "Emit logs (OTLP)")
     Container(col1, "OTel Collector", "in-cluster", "Batches OTLP")
-    Container(bridge1, "OTLP-NATS bridge", "in-cluster", "Extracts datum.project.id; publishes per-project subject")
+    Container(bridge1, "OTLP-NATS bridge", "in-cluster", "Extracts milo.project.id; publishes per-project subject")
     ContainerQueue(leaf1, "NATS leaf node", "core NATS, no JetStream", "Forwards to hub; bounded in-memory buffer only")
 }
 

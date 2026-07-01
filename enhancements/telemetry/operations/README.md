@@ -30,13 +30,14 @@ to alert on, what it means, and the initial investigation steps.
 counter (threshold TBD at implementation; baseline from staging).
 
 **What it means:** The OTLP-NATS bridge is receiving log records or metric
-data points without a `milo.project.id` resource attribute and silently
-dropping them. The OTel Collector is not retrying (the bridge returns HTTP 200
-with a partial success body), so these records are gone. A sustained elevated
+data points without a `milo.project.id` resource attribute and dropping them.
+The bridge returns HTTP 200 with a partial success body reporting the drop
+count; the OTel Collector does not retry on partial success, so these records
+are gone. A sustained elevated
 rate indicates a misconfigured or newly onboarded service that is not emitting
 the required resource attribute.
 
-**Impact:** Tenant or platform telemetry is silently lost. The affected
+**Impact:** Tenant or platform telemetry is lost. The affected
 workload's logs will not appear in `datumctl logs` or Grafana; dropped metric
 data points will create gaps in dashboards and rollup tables.
 
