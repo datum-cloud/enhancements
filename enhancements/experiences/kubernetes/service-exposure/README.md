@@ -19,7 +19,7 @@ latest-milestone: "v0.x"
 
 The Datum Cloud Kubernetes Operator enables organizations to expose services running in Kubernetes clusters through Datum Cloud's edge network without requiring inbound firewall rules, public IP addresses, or complex network configuration.
 
-Users install a single operator that integrates with standard Kubernetes APIs (Gateway API and Ingress). The operator handles all connectivity to Datum Cloud automatically, allowing developers to use familiar tools while platform teams maintain security and control.
+Users install a single operator that integrates with standard Kubernetes APIs ([Gateway API](https://kubernetes.io/docs/concepts/services-networking/gateway/) and [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/)). The operator handles all connectivity to Datum Cloud automatically, allowing developers to use familiar tools while platform teams maintain security and control.
 
 When DNS is hosted in Datum Cloud, services can be exposed on custom domains with automatic TLS certificate provisioning.
 
@@ -267,7 +267,7 @@ spec:
 
 ### Builds On
 
-- [Datum Connectors Enhancement](../connectors/initial-proposal/README.md) - Core connector resource model
+- [Datum Connectors Enhancement](../../../networking/connectors/initial-proposal/README.md) - Core connector resource model
 - [Datum Connect Application](https://github.com/datum-cloud/app) - Existing connector implementation
 
 ## Open Questions
@@ -276,6 +276,17 @@ spec:
 2. **High availability**: Should connectors support active-active deployment for HA?
 3. **Service mesh**: How does this interact with Istio/Linkerd if present?
 4. **Rate limiting**: Where should rate limits be configured (Datum Cloud vs. cluster)?
+
+## Further reading
+
+New to the Kubernetes resources this builds on? These upstream docs are good
+starting points:
+
+- [Gateway API](https://kubernetes.io/docs/concepts/services-networking/gateway/) — the GatewayClass, Gateway, and HTTPRoute resources used throughout this proposal
+- [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) — the alternative entry point the operator also supports
+- [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) — how a controller like `datum-cloud-operator` extends Kubernetes
+- [Service](https://kubernetes.io/docs/concepts/services-networking/service/) — the in-cluster workloads being exposed
+- [Helm](https://helm.sh/docs/) — used to install the operator
 
 ## Implementation History
 

@@ -28,6 +28,8 @@ Datum, the domain if it's fundamentally about what the platform can do.
 ## Experiences
 
 - [`datumctl/`](./datumctl) — the official command-line tool for Datum Cloud.
+- [`kubernetes/`](./kubernetes) — Datum Cloud connectivity brought into
+  Kubernetes through standard Gateway and Ingress APIs.
 
-Other experiences (Cloud Portal, API, Kubernetes Operator, CI/CD, …) can be added
-here as their enhancements are proposed.
+Other experiences (Cloud Portal, API, CI/CD, …) can be added here as their
+enhancements are proposed.
