@@ -21,11 +21,11 @@ latest-milestone: "v0.x"
 
 ## Summary
 
-Customers running workloads on Datum Cloud need visibility into the logs their
-workloads produce — access logs from gateways, compute workload stderr, WAF
-events. This enhancement covers the ingest pipeline and `datumctl logs` query
-interface. For the declarative log API (LogDefinition, LogCollectionPolicy,
-LogRedactionPolicy), see [definition-policy](../definition-policy/).
+Customers running workloads on in a service provider need visibility into the
+logs their workloads produce — access logs from gateways, compute workload
+stderr, WAF events. This enhancement covers the ingest pipeline and 
+`datumctl logs` query interface. For the declarative log API (LogDefinition, LogCollectionPolicy, LogRedactionPolicy), see
+[definition-policy](../definition-policy/).
 
 Logs flow through an OTel Collector → NATS → ClickHouse pipeline and are
 queryable by operations staff via Grafana and by customers via `datumctl logs`.
@@ -73,8 +73,8 @@ the bridge. There are two cases:
 Collector derives it from the namespace label
 `meta.datumapis.com/upstream-cluster-name` via the `k8sattributes` processor.
 The label value has the form `cluster-<project-id>` (e.g.
-`cluster-personal-project-2650fdb4`); the Collector strips the `cluster-`
-prefix and sets `milo.project.id = 'personal-project-2650fdb4'`.
+`cluster-personal-project-12345678`); the Collector strips the `cluster-`
+prefix and sets `milo.project.id = 'personal-project-12345678'`.
 `milo.project.id` is a resource-scoped attribute: when it is absent on a
 `ResourceLogs` (and not otherwise set), every `LogRecord` under that resource is
 dropped by the bridge and reported in the OTLP partial success response — not
@@ -85,7 +85,7 @@ silently.
 | `service.name` | Service name from the OTel semantic conventions | `compute-workload` |
 | `service.namespace` | Kubernetes namespace | `tenant-acme-corp` |
 | `k8s.cluster.name` | Cluster where the workload runs | `us-east-1-edge-01` |
-| `milo.project.id` | Derived from namespace label `meta.datumapis.com/upstream-cluster-name` by stripping `cluster-` prefix | `personal-project-2650fdb4` |
+| `milo.project.id` | Derived from namespace label `meta.datumapis.com/upstream-cluster-name` by stripping `cluster-` prefix | `personal-project-12345678` |
 
 **Internal platform components** (Envoy, control plane services, NATS,
 ClickHouse operator, etc.) do not set `milo.project.id` themselves. The

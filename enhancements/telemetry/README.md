@@ -54,7 +54,7 @@ them rather than restating them.
   entry) or the `SET` errors.
 - **NATS ports.** Local clients (bridge, collectors, gNMIc) connect to the leaf
   on the client port **4222**; the leaf↔hub (leafnode) connection uses port
-  **7422**. Service DNS names are environment-specific. Component docs reference
+  **443**. Service DNS names are environment-specific. Component docs reference
   these rather than restating them.
 
 ## Status at a Glance (as of June 2026)
@@ -63,7 +63,7 @@ them rather than restating them.
 |---|---|---|---|
 | Telemetry export (ExportPolicy) | [export-policies](./export-policies/) | **Shipped — v0.3.0** | — |
 | NATS ingest pipeline (write path) | [ingest-pipeline](./ingest-pipeline/) | **POC complete** — NATS → ClickHouse write path and subject routing validated | 1, 2 |
-| OTLP-NATS bridge | [ingest-pipeline](./ingest-pipeline/) | Not started — unbuilt sub-component of the ingest pipeline | 1 |
+| OTLP-NATS bridge | [ingest-pipeline](./ingest-pipeline/) | Designing | 1 |
 | Log pipeline | [logs](./logs/) | Designing | 1 |
 | Query layer | [query-layer](./query-layer/) | Designed | 1 |
 | Metrics pipeline | [metrics](./metrics/) | Designing | 2 |
@@ -312,6 +312,9 @@ Advanced features and data residency as a first-class property.
 | [operations](./operations/) | Platform alerts and runbooks for the telemetry pipeline |
 
 ## System Context
+
+The diagram belows shows the telemetry system, its telemetry sources, and the
+consumers of that telemetry data.
 
 ![System context diagram](./system-context.png)
 

@@ -159,7 +159,7 @@ engine ingestion) alongside common fields and type-specific value fields:
 
 ```json
 {
-  "ProjectId":          "personal-project-2650fdb4",
+  "ProjectId":          "personal-project-12345678",
   "MetricName":         "process.cpu.utilization",
   "MetricType":         "gauge",
   "TimeUnix":           1782043200000000000,

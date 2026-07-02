@@ -20,28 +20,28 @@ latest-milestone: "v0.x"
   - [ClickHouse consumer](#clickhouse-consumer)
   - [Customer export consumer](#customer-export-consumer)
   - [mTLS](#mtls)
-  - [POC topology](#poc-topology)
 - [Alternatives](#alternatives)
 
 ## Summary
 
 NATS JetStream is inserted between the OTel Collector and ClickHouse as the
 durable ingest hub. Telemetry from edge clusters flows to a local NATS leaf
-node, which forwards to a centralized JetStream hub in GCP. Edge clusters have
-no persistent storage, so the leaf is core NATS with a bounded in-memory buffer;
-durability begins at the hub. The hub fans out to multiple consumers: a
+node, which forwards to a centralized JetStream hub. Edge clusters without
+persistent storage run a core NATS leaf with a bounded in-memory buffer; edge
+clusters with persistent storage can run JetStream locally for durable
+store-and-forward. In both cases, the hub fans out to multiple consumers: a
 ClickHouse writer, customer export pipelines, and future real-time alerting —
 all reading from the same stream without coupling to each other or to the
 storage write path.
 
 ## Motivation
 
-The current write path is a direct OTel Collector → ClickHouse INSERT. This is
-simple and works at low scale, but has two structural weaknesses:
+A simple write path is a direct OTel Collector → ClickHouse INSERT. This works
+at low scale, but has two structural weaknesses:
 
 **Durability.** The OTel Collector has an in-memory queue. If ClickHouse is
 slow (compaction, schema migration, maintenance window) or the WAN link between
-an edge cluster and GCP is interrupted, the queue fills and logs are dropped.
+an edge cluster and the hub is interrupted, the queue fills and logs are dropped.
 There is no replay.
 
 **Fan-out.** Adding a second destination (customer export, alerting) requires
@@ -53,28 +53,27 @@ NATS JetStream addresses both **at the hub**: the stream is the durable record
 of what arrived, and consumers are independently positioned within it. ClickHouse
 and customer export each advance their own cursor; neither can block the other.
 The hub fully covers the ClickHouse-outage and consumer-stall cases. The WAN-outage
-case is only partially covered: edge clusters have no persistent storage, so a
-prolonged WAN outage is still bounded by the edge's in-memory buffer (see
-[Edge NATS](#edge-nats--leaf-nodes)).
+case is only partially covered for storage-constrained edges: a prolonged WAN
+outage is bounded by the in-memory buffer (see [Edge NATS](#edge-nats--leaf-nodes)).
+Edges with persistent storage running JetStream locally are fully covered.
 
-This also directly enables the customer export story. Datum's position is that
-it is not an observability company — customers who want long-term retention,
-custom dashboards, or integration with existing tooling should be able to export
-their telemetry. NATS makes that a separate consumer, not a separate write path.
+This also directly enables the customer export story. A service provider is
+not an observability company — customers who want long-term retention, custom
+dashboards, or integration with existing tooling should be able to export their
+telemetry. NATS makes that a separate consumer, not a separate write path.
 
 ### Goals
 
-- Durable ingest with replay **from the GCP hub onward**: once data reaches the
-  hub, JetStream provides a 48h durable buffer that survives transient ClickHouse
-  outages and consumer restarts
+- Durable ingest with replay **from the hub onward**: once data reaches the
+  hub, JetStream provides a configurable durable buffer that survives transient
+  ClickHouse outages and consumer restarts
 - Fan-out to multiple consumers (ClickHouse, customer export, alerting) without
   coupling between them
 - Per-project subject isolation: consumer ACLs enforce that a customer export
   consumer can only read that project's data
-- Tolerate transient WAN outages up to a bounded in-memory buffer at the edge.
-  Edge clusters have **no persistent storage**, so durability across a buffer
-  overflow or a leaf restart is explicitly not a goal in this phase — see
-  [Edge NATS](#edge-nats--leaf-nodes) and the buffer-priority open question
+- Tolerate transient WAN outages: edge clusters with persistent storage use a
+  local JetStream stream for durable store-and-forward; edge clusters without
+  storage use a bounded in-memory buffer — see [Edge NATS](#edge-nats--leaf-nodes)
 - Leaf-to-hub forwarding over mTLS
 
 ### Non-Goals
@@ -98,15 +97,9 @@ their telemetry. NATS makes that a separate consumer, not a separate write path.
 
 ### Edge NATS — leaf nodes
 
-> [!IMPORTANT]
->
-> **Edge clusters have no persistent storage.** This rules out running JetStream
-> (which requires a file or memory store sized for the workload) at the edge. The
-> edge therefore runs **core NATS** leaf nodes — routing only, no on-disk stream.
-> Durability begins at the GCP hub, where JetStream and persistent storage exist.
-
 Each edge cluster runs a NATS leaf node that dials the hub and forwards locally
-published telemetry to it. The leaf still earns its place even without disk:
+published telemetry to it. The leaf earns its place regardless of whether
+local storage exists:
 
 **Retry and buffering live in a battle-tested component.** This is the decisive
 reason to keep the leaf rather than have the bridge publish to the hub directly.
@@ -115,38 +108,45 @@ widely-operated component — instead of being reimplemented in the thin,
 purpose-built bridge. The bridge stays simple: publish to localhost and move on.
 
 **It dials out.** Leaf nodes initiate an outbound TCP connection to the hub on
-port 7422. Edge clusters need no inbound firewall rules and work behind NAT and
+port 443. Edge clusters need no inbound firewall rules and work behind NAT and
 on cellular or variable-quality networks.
 
 **It decouples the bridge from the WAN.** The bridge publishes to the local leaf
 and is never blocked on hub round-trips; the leaf owns reconnection and
 forwarding to the hub.
 
-**Buffering is in-memory and bounded.** When the leaf-to-hub link drops, the
-leaf can only hold messages in a bounded in-memory buffer (RAM on the edge node).
-The bridge and Collector keep running and keep publishing, but once the buffer is
-full, messages must be dropped — there is no disk to spill to, and nothing
-survives a leaf restart. This is a deliberate trade against the no-storage
-constraint, not a durable store-and-forward guarantee. The buffer sizing
-(memory budget, NATS pending limits) is TBD and must be set against measured edge
-throughput.
+**Storage determines durability mode:**
+
+- **With persistent storage — JetStream at the edge.** The leaf runs a
+  file-backed JetStream stream. Messages published during a WAN outage are
+  durably stored on local disk and replayed on reconnect, providing
+  store-and-forward across both hub outages and leaf restarts. This is the
+  preferred mode when disk is available.
+
+- **Without persistent storage — core NATS, bounded in-memory buffer.** The
+  leaf is routing-only. When the leaf-to-hub link drops, messages accumulate in
+  a bounded in-memory buffer (RAM on the edge node). Once the buffer is full,
+  messages must be dropped — nothing survives a leaf restart. The buffer sizing
+  (memory budget, NATS pending limits) is TBD and must be set against measured
+  edge throughput. This is a deliberate trade against the no-storage constraint,
+  not a durable store-and-forward guarantee.
 
 > [!WARNING]
 >
-> **Open question — buffer priority.** When the in-memory buffer fills during a
-> hub outage, not all telemetry is equally valuable: billing-relevant data
-> matters more than operational logs and metrics. We need to investigate a
-> prioritization scheme so that lower-value operations telemetry is dropped (or
-> sampled) before billing-relevant data, rather than dropping indiscriminately.
-> Whether core NATS can express this (e.g. via separate subjects/connections with
-> different buffer budgets) or whether it needs to be enforced upstream in the
-> bridge is TBD.
+> **Open question — buffer priority (no-storage case).** When the in-memory
+> buffer fills during a hub outage, not all telemetry is equally valuable:
+> billing-relevant data matters more than operational logs and metrics. A
+> prioritization scheme is needed so that lower-value operational telemetry is
+> dropped (or sampled) before billing-relevant data, rather than dropping
+> indiscriminately. Whether core NATS can express this (e.g. via separate
+> subjects/connections with different buffer budgets) or whether it needs to be
+> enforced upstream in the bridge is TBD.
 
 ![Edge buffering during hub outage](./diagrams/edge-accumulation.png)
 
 ### Hub NATS — centralized fan-out
 
-The hub cluster (GCP) is where all consumer logic lives. Its responsibilities:
+The hub cluster is where all consumer logic lives. Its responsibilities:
 
 - **Aggregate** telemetry forwarded from all regional leaf nodes into a single
   hub JetStream stream (the leaves forward over core NATS; the hub stream
@@ -185,9 +185,8 @@ telemetry.network.<device_id>      (Phase 3)
 
 ### JetStream stream design
 
-JetStream runs **only at the hub**, where persistent storage exists. The edge
-has no JetStream stream — its leaf is core NATS, forwarding to the hub with a
-bounded in-memory buffer (see [Edge NATS](#edge-nats--leaf-nodes)).
+JetStream runs at the hub and, where persistent storage is available, optionally
+at the edge (see [Edge NATS](#edge-nats--leaf-nodes)).
 
 **Hub — aggregate stream**
 
@@ -196,7 +195,7 @@ bounded in-memory buffer (see [Edge NATS](#edge-nats--leaf-nodes)).
 | Name | `TELEMETRY` |
 | Subjects | `telemetry.>` |
 | Storage | File |
-| Retention | Limits: 48h max age, 100 GiB max size |
+| Retention | Limits: max age and max size — tune to measured throughput and recovery time requirements (e.g. 48h / 100 GiB) |
 | Sources | Telemetry forwarded from each edge leaf |
 | Purpose | Durable buffer and fan-out point for consumers |
 
@@ -205,8 +204,8 @@ The stream uses `telemetry.>` to capture all signal types under the
 adds `telemetry.metrics.*`; Phase 3 adds `telemetry.network.*`. The stream
 config does not need to change as new signal types are introduced.
 
-48 hours of retention at the hub gives time to recover from a ClickHouse outage
-without data loss. It is not the system of record; ClickHouse is.
+The hub retention window should be sized to exceed the expected ClickHouse
+recovery time for the deployment. It is not the system of record; ClickHouse is.
 
 **Consumers (Phase 1 — logs)**
 
@@ -289,19 +288,10 @@ The three attribute columns (`ResourceAttributes`, `ScopeAttributes`,
 `LogAttributes`) are stored as `String` in the ingest table — the NATS engine
 does not support the `JSON` column type — and cast to `JSON` in the MV.
 
-Loading a nested JSON object from the message into a `String` column via
-`JSONEachRow` depends on a ClickHouse input-format setting that serializes the
-nested object back to a string (rather than erroring) — likely
-`input_format_json_read_objects_as_strings`, but the exact setting the POC
-relied on must be recorded from the POC config and verified before staging, as
-this behavior is version-sensitive.
-
 **JetStream durability caveat.** Binding the NATS engine to a JetStream durable
 consumer requires the `nats_stream` and `nats_consumer_name` settings. Without
 them the engine uses a core NATS subscription — messages published while
-ClickHouse is down are not replayed. The POC runs ClickHouse
-(`clickhouse/clickhouse-server:26.5.1-alpine`) but these settings were never
-enabled or tested.
+ClickHouse is down are not replayed.
 
 > [!WARNING]
 >
@@ -351,7 +341,7 @@ Leaf-to-hub mTLS is configured in the NATS leaf server config:
 leafnodes {
   remotes [
     {
-      url: "tls://nats-hub.telemetry.datum.net:7422"
+      url: "tls://nats-hub.telemetry.example.com:443"
       tls {
         cert_file: "/certs/leaf-client.crt"
         key_file:  "/certs/leaf-client.key"
@@ -361,117 +351,6 @@ leafnodes {
   ]
 }
 ```
-
-### POC topology
-
-The POC ran in two stages. The initial setup ran all components co-located in a
-single kind cluster (`telemetry-dev`); the diagram below reflects that layout. A
-second iteration extended to a two-cluster setup (hub + edge kind clusters) to
-exercise leaf-to-hub forwarding. The POC ran JetStream at the edge for
-convenience; production edge clusters have no persistent storage and run core
-NATS instead (see [Edge NATS](#edge-nats--leaf-nodes)). NATS runs as a single
-node in JetStream hub mode. ClickHouse runs in docker-compose on the host and is
-reached from the cluster at `host.docker.internal:9000`.
-
-![POC topology](./diagrams/poc-topology.png)
-
-**Validated:**
-- Per-project subject routing (both `gateway-tenant-001` and `compute-tenant-001` as project_id values in the POC)
-- gzip body decoding in the bridge
-- One JSON message per LogRecord with `ProjectId` as a top-level field
-- ClickHouse NATS engine (`ENGINE = NATS`) consuming from `telemetry.logs.>` with `JSONEachRow`
-- Materialized View casting `String`→`JSON` for attribute columns
-- Row policy enforcement on a per-project reader user
-- No separate consumer service — ClickHouse reads from NATS directly
-
-**Known limitations in the POC (`clickhouse/clickhouse-server:26.5.1-alpine`):**
-- JetStream durable consumer binding (`nats_stream` / `nats_consumer_name`) was
-  not enabled or tested. The engine uses a core NATS subscription; messages
-  published while ClickHouse is unavailable are not replayed. These settings
-  must be verified against the ClickHouse NATS engine docs before staging —
-  see the warning in the [ClickHouse consumer](#clickhouse-consumer) section.
-- `JSON` column type is not supported in NATS engine tables. Attribute columns
-  are stored as `String` and cast to `JSON` in the MV.
-
-**Not yet validated:** mTLS, leaf-to-hub WAN forwarding over core NATS, the
-bounded in-memory edge buffer (sizing and overflow behavior), file-backed
-JetStream storage at the hub, customer export consumer, JetStream durable
-consumer binding. These are deferred to an integration environment with a real
-leaf→hub topology.
-
-## Production Readiness
-
-The POC validates the core design. The following items are required before
-the pipeline can carry production traffic.
-
-### What remains
-
-**Hub and edge staging/production overlays (#2 — NATS ingest pipeline staging and production deployment)**
-
-The POC uses dev overlays with plaintext passwords and `NodePort` services.
-Production overlays must:
-- Reference ExternalSecrets for ClickHouse and NATS credentials
-- Patch services to `LoadBalancer` type with stable external IPs
-- Use the production GCS cold-storage bucket name in the CHI storage policy
-
-**mTLS for leaf-to-hub connections (#3 — NATS mTLS cert-manager integration)**
-
-All leaf-to-hub NATS connections must use mTLS. The leaf node config needs
-cert-manager `Certificate` resources that issue:
-- A CA cert for the hub cluster, trusted by all leaves
-- A per-leaf client certificate for the hub to verify leaf identity
-
-Hub NATS config must require TLS on the leafnode listener port (7422):
-
-```conf
-leafnodes {
-  port: 7422
-  tls {
-    cert_file: "/certs/hub-server.crt"
-    key_file:  "/certs/hub-server.key"
-    ca_file:   "/certs/ca.crt"
-    verify: true  # require and verify leaf client cert
-  }
-}
-```
-
-**JetStream durable consumers for ClickHouse**
-
-The POC runs ClickHouse (`clickhouse/clickhouse-server:26.5.1-alpine`) but
-`nats_stream` and `nats_consumer_name` were never enabled or tested. Verify
-these settings work against the ClickHouse NATS
-engine docs before staging — see the WARNING in the
-[ClickHouse consumer](#clickhouse-consumer) section. If they are confirmed,
-enable them in the staging and production NATS engine table definition to bind
-to a JetStream durable consumer and ensure messages published during a
-ClickHouse outage are replayed on restart.
-
-**Edge staging/production overlays (#2 — NATS ingest pipeline staging and production deployment)**
-
-Edge overlays need the real hub NATS endpoint (not `host.docker.internal`) and
-the production bridge image from the container registry.
-
-**OTel Collector config changes (#6 — OTLP-NATS bridge implementation and deployment)**
-
-The OTel Collector gateway config is part of the `milo-os/telemetry` codebase
-— the edge-logs-system Collector in `datum-cloud/infra` is deprecated in favour
-of what we're building. Required changes for the new Collector config:
-
-- **Switch exporter**: replace the existing ClickHouse exporter with
-  `otlphttp` pointing at the bridge (`http://otlp-nats-bridge.telemetry.svc:4318`)
-- **Add resource processor**: configure the `k8sattributes` processor to
-  derive `milo.project.id` from the namespace label
-  `meta.datumapis.com/upstream-cluster-name` (strip `cluster-` prefix), and
-  inject `milo.project.id = 'internal'` for platform namespaces
-
-Without these changes the bridge receives records with no `milo.project.id`
-and drops everything.
-
-**Query layer API user (#4 — query layer service initial implementation)**
-
-Create the `api_reader` ClickHouse user with the tenant row policy. The current
-schema has the user and policy defined as a placeholder in `schema.sql`; it
-must be wired to the query layer service's connection credentials.
 
 ---
 
@@ -530,19 +409,18 @@ fan-out without Collector-level dual-write, and in-memory-only buffering against
 WAN outages at the edge. Retained as the starting point; this enhancement is the
 planned follow-on.
 
-**Edge JetStream — file-backed local stream at the edge.** The original intent
-of this design: run a file-backed JetStream stream on each edge leaf so that a
-prolonged WAN outage is buffered durably on local disk and replayed on
-reconnect. **Rejected because edge clusters have no persistent storage.** Without
-a disk to spill to, JetStream's file store is not an option and its memory store
-offers no durability advantage over plain core NATS. This is the constraint that
-forced the core-NATS-only design below; revisit if persistent storage becomes
-available at the edge.
+**Edge JetStream — file-backed local stream at the edge.** Run a file-backed
+JetStream stream on each edge leaf so that a prolonged WAN outage is buffered
+durably on local disk and replayed on reconnect. This is the preferred edge
+mode **when persistent storage is available**: it provides full store-and-forward
+durability across hub outages and leaf restarts. Where storage is not available,
+JetStream's file store is not an option and its memory store offers no durability
+advantage over plain core NATS — see below.
 
-**Core NATS leaf, no edge JetStream — the chosen design.** The edge leaf
-forwards to the hub over core NATS with a bounded in-memory buffer. It provides
-no durability across a buffer overflow or a leaf restart. Chosen because, with
-edge durability off the table either way, the leaf keeps reconnection and
+**Core NATS leaf, no edge JetStream — the default for storage-constrained edges.**
+The edge leaf forwards to the hub over core NATS with a bounded in-memory buffer.
+It provides no durability across a buffer overflow or a leaf restart. Chosen for
+storage-constrained deployments because the leaf still keeps reconnection and
 in-flight buffering inside a mature, widely-operated component (NATS) rather than
 in the thin, from-scratch bridge, and gives a single point at which to enforce
 [buffer prioritization](#edge-nats--leaf-nodes). Durability begins at the hub.
