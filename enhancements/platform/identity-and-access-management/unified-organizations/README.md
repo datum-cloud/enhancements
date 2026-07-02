@@ -32,12 +32,10 @@ holds their projects, and ties together access and billing. Every organization
 works the same way: one kind of org, no Personal or Standard split, no
 second-class workspace created at signup.
 
-When someone signs up, they get a default organization. They finish a short
-onboarding flow (contact details, then a billing account with a valid payment
-method) before the rest of the platform opens up. The org they start with is the
-org they keep. A solo developer who later incorporates updates contact details
-instead of spinning up a new workspace. Team invites, billing settings, and an
-editable display name are there from the start.
+When someone signs up, the portal onboarding flow creates their first organization
+and project explicitly — nothing is auto-provisioned in the background. They finish
+a short onboarding flow (contact details, then a billing account with a valid payment
+method) before the rest of the platform opens up.
 
 Individual vs business is contact information on the org, not a label frozen at
 creation time.
@@ -87,18 +85,18 @@ several orgs and hold a different role in each.
 
 ### Organization lifecycle
 
-1. Created at signup (default org) or when the user creates another org in the
-   portal.
-2. Identified by a stable, opaque system name and an editable display name.
+1. Created in the portal during onboarding or when the user creates another org.
+2. Identified by a stable, opaque system name (`org-*`) and an editable display name.
    Users do not pick resource slugs.
 3. Onboarded through contact details and a billing account with a valid payment
-   method. Full platform access opens once both are done.
+   method. The API sets `status.conditions[OnboardingComplete]=True` when contact
+   info, a billing account, and `DefaultPaymentMethodReady` are all present.
 4. Operated over time as members, projects, and billing accounts are added.
 
 ## User experience
 
-At signup, a user gets a default organization with a neutral display name they
-can change later.
+At signup, the user completes fraud/profile gates, then creates an organization
+(display name only) and first project in the portal.
 
 Before they can use the platform, they provide org contact info (email and name
 required; address and business name optional) and set up a billing account with
@@ -107,10 +105,13 @@ billing.
 
 ```mermaid
 flowchart TD
-  signup[User signs up] --> defaultOrg[Default org created]
-  defaultOrg --> contact[Provide org contact info]
+  signup[User signs up] --> createOrg[Portal creates organization]
+  createOrg --> contact[Provide org contact info]
   contact --> billing[Add billing account with valid payment method]
-  billing --> access[Full platform access]
+  billing --> createProject[Create first project]
+  billing --> onboardingComplete[OnboardingComplete condition set]
+  contact --> onboardingComplete
+  createProject --> access[Full platform access]
 ```
 
 Day to day, every org has the same capabilities: invite teammates, manage
@@ -152,9 +153,9 @@ carry that information instead.
   contact. Email and name required; address and business name optional.
 - Opaque system-assigned internal names; users pick a display name only.
 - Onboarding (contact, then billing with a valid payment method) before full
-  platform access.
+  platform access, tracked via `OnboardingComplete` on the organization.
 - Existing Personal orgs upgraded to the same experience as Standard orgs.
-- Auto-create a default org at signup; the user keeps that org as they grow.
+- Explicit org and project creation from the portal during onboarding.
 
 ### Non-Goals
 
@@ -227,3 +228,4 @@ grace period should come first.
 
 - 2026-06-19: Initial enhancement document (provisional), derived from
   [milo-os/milo#636](https://github.com/milo-os/milo/issues/636).
+- 2026-06-28: UI-driven org/project creation; `OnboardingComplete` status condition.
