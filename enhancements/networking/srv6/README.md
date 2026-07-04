@@ -4,13 +4,15 @@
 
 This document defines the SRv6 micro-SID (uSID) structure and management for the platform. It covers the compressed uSID carrier layout, behavior registry, VRF ID argument semantics, and scaling requirements.
 
+The SRv6 overlay for tenant VPCs is modeled on RFC 9252 (BGP Overlay Services over SRv6), which defines the Service SID as the VRF/service identifier — locally significant at the egress node. The compressed SID encoding follows RFC 9800 (Compressed SRv6 Segment List Encoding).
+
 For the underlying address allocation (SRv6 uSID locator blocks, per-PoP `/48` assignments), see [IP Addressing Plan](../ipv6/README.md).
 
 ---
 
 ## SID Structure (uSID Carrier)
 
-SIDs within a PoP's `/48` block follow the standard **`uFMT 48+16`** compressed layout specified in RFC 9374. Multiple 16-bit micro-SIDs are packed into a single 128-bit IPv6 destination address container.
+SIDs within a PoP's `/48` block follow the compressed SRv6 segment list encoding (C-SID) specified in RFC 9800. Multiple 16-bit micro-SIDs are packed into a single 128-bit IPv6 destination address container.
 
 ```
 |<------- 48 bits ------->|<-- 16 bits -->|<-- 16 bits -->|<------- 48 bits ------->|
@@ -31,7 +33,7 @@ The uSID block is PoP-scoped, allowing aggregate advertisement and clean per-PoP
 
 ## Behavior Registry
 
-The uSID behavior field encodes the compressed SRv6 operation applied at the endpoint. These behavior identifiers are platform-wide constants.
+The uSID behavior field encodes the compressed SRv6 operation applied at the endpoint. Per RFC 9800, C-SID values are scoped per Locator-Block (i.e., per PoP) — this allows a 16-bit space to be reused across sites without exhaustion. The behavior codes below are platform-wide constants, but the full Active uSID (behavior + node identifier) is only guaranteed unique within a PoP's `/48` locator block.
 
 | Code          | Behavior    | Description                                                     |
 |---------------|-------------|-----------------------------------------------------------------|
@@ -56,10 +58,13 @@ VRF ID `0x0000` is reserved and must not be allocated.
 
 The platform allocates VRF IDs sequentially within each PoP's namespace when a tenant VPC is first instantiated at that PoP. The platform tracks the mapping of tenant VPC to VRF ID independently per PoP.
 
+> [!NOTE]
+> Per RFC 9800, the compressed VRF-selection behaviors (`uDT` / REPLACE-CSID for End.DT4/DT6/DT46) ignore the Argument value during endpoint processing — VRF selection occurs via table lookup on the entire compressed SID rather than by arithmetically decoding the argument bits. The VRF ID in this slot serves as the platform's logical identifier for the tenant VRF; the control plane programs the data plane with the full SID-to-VRF mapping.
+
 ### VRF ID to Infrastructure Mapping
 
 1. **The platform** allocates a VRF ID when a tenant VPC is instantiated at a PoP.
-2. **The uSID Argument slot** carries the VRF ID. The endpoint behavior extracts this argument to select the correct forwarding table.
+2. **The uSID Argument slot** carries the VRF ID. The control plane programs the endpoint's forwarding table with the full compressed SID as the lookup key for VRF selection.
 3. **The VRF instance** at the PoP uses this ID to isolate the lookup space.
 4. **Tenant routes** are imported into this local VRF instance by the control plane.
 

@@ -173,10 +173,10 @@ PoP VPC /48
 
 ### SRv6 Locator /48
 
-Each PoP receives a `/48` from the platform's registered SRv6 locator block. This `/48` functions as the **uSID Block** — the global routing domain prefix — under a standard `uFMT 48+16` carrier format per RFC 9374.
+Each PoP receives a `/48` from the platform's registered SRv6 locator block. This `/48` functions as the **uSID Block** — the global routing domain prefix — under a `uFMT 48+16` carrier format per RFC 9800.
 
 > [!NOTE]
-> The `uFMT 48+16` format defines the SRv6 SID structure as a 48-bit uSID Block (the PoP-scoped IPv6 prefix) followed by a 16-bit Active uSID slot. The remaining bits encode the per-tenant VRF argument and function-specific fields. This format is the default carrier format for micro-SID deployments and is used throughout the platform.
+> The `uFMT 48+16` format defines the SRv6 SID structure as a 48-bit uSID Block (the PoP-scoped IPv6 prefix) followed by a 16-bit Active C-SID slot. The remaining bits encode the per-tenant VRF argument and function-specific fields. This format is the default carrier format for compressed SRv6 deployments and is used throughout the platform.
 
 In a uSID architecture, individual routers or nodes within the PoP do not receive separate locator subnets carved out of this `/48`. Instead, all nodes share the same `/48` prefix, and traffic is steered to specific nodes and functions via the first 16-bit slot immediately following the prefix — the **Active uSID** slot (bits 49–64). This slot selects the egress node (or "thread") within the PoP's SRv6 fabric, eliminating the need for per-router locator allocations that characterize classic SRv6 designs.
 
