@@ -63,12 +63,14 @@ Each PoP receives exactly three `/48` allocations, one from each platform pool.
 
 ```
 Per PoP
-├── /48  ULA private VPC space       (from fd00::/8)
+├── /48  ULA internal infrastructure (from fd00::/8)
 ├── /48  SRv6 SID locator space      (from [LOCATOR-BLOCK])
 └── /48  Infrastructure loopbacks    (from [INFRA-BLOCK])
-         ├── /49  Underlay BGP router loopbacks
-         └── /49  Overlay BGP router loopbacks
+     ├── /49  Underlay BGP router loopbacks
+     └── /49  Overlay BGP router loopbacks
 ```
+
+Tenant VPC addressing is independent of this per-PoP allocation. Tenants define their own CIDR blocks (ULA or GUA) and subnet them across PoPs; see [VPC Address Space Options](#vpc-address-space-options).
 
 Per-PoP address assignments (actual prefix values) are tracked in the platform's IPAM service. This document defines the allocation scheme; the IPAM service is the source of truth for specific assignments.
 
@@ -80,18 +82,15 @@ Per-PoP address assignments (actual prefix values) are tracked in the platform's
 
 ### VPC Address Space Options
 
-The per-PoP VPC address pool is an implementation decision. Two options are defined below; ULA is the default.
+Tenant VPC addressing is fully abstracted from the provider's infrastructure locator space. Tenants define a contiguous CIDR block — either from the ULA range (`fd00::/8`) or from their own globally unique allocation — and subnet it across PoPs and availability zones as needed. The tenant's IP space travels strictly as the inner payload inside the SRv6 encapsulation; it is agnostic to the physical PoP's locator block and never advertised into the underlay. Two addressing models are supported; ULA is the default.
 
 **Option A — ULA (`fd00::/8`)**, default
 
-Each PoP's ULA `/48` is drawn from `fd00::/8` and assigned at PoP provisioning time. These prefixes are private by definition and universally filtered by upstreams; there is no policy required to prevent external advertisement.
+Tenants select a ULA prefix from `fd00::/8` as their VPC address space. These prefixes are private by definition and universally filtered by upstreams; there is no policy required to prevent external advertisement. Per RFC 4193 §3.2.5, the 40-bit Global ID must be pseudo-randomly generated to minimize collision risk — the platform must not constrain tenants to a shared recommended range, as that shrinks entropy and increases collision probability on interconnects. If operational visibility into "which prefixes are ours" is required, the platform tracks assigned prefixes in IPAM without constraining the generation range.
 
-> [!NOTE]
-> The per-PoP `/48` ULA allocation should be drawn from a contiguous per-region range within `fd00::/8`, enabling eventual region-level aggregation if route scale management becomes necessary.
+**Option B — GUA (tenant-owned or platform-allocated)**
 
-**Option B — GUA (platform RIR PI block)**
-
-Each PoP's GUA `/48` is drawn from a platform-registered RIR PI block reserved exclusively for tenant overlay use. The block must not overlap with `[LOCATOR-BLOCK]` or `[INFRA-BLOCK]`. Because GUA space is globally routable, leakage does not fail safe the way ULA does — a misconfigured export policy will result in the prefix appearing in the global DFZ. The policy requirements in [GUA Tenant Addressing Policy](#gua-tenant-addressing-policy) are mandatory, not advisory, whenever Option B is in use.
+Tenants use their own globally unique IPv6 allocation — either a Provider Independent (PI) block obtained from a RIR, a platform-allocated block, or a BYOP prefix. Because GUA space is globally routable, leakage does not fail safe the way ULA does — a misconfigured export policy will result in the prefix appearing in the global DFZ. The policy requirements in [GUA Tenant Addressing Policy](#gua-tenant-addressing-policy) are mandatory, not advisory, whenever Option B is in use.
 
 #### Comparison
 
@@ -109,15 +108,14 @@ ULA is the simpler default for a closed overlay. GUA is preferable if tenants re
 
 ### Internal Infrastructure Addressing
 
-The per-PoP ULA `/48` serves two purposes: customer VPC subnets and the platform's internal infrastructure. Internal infrastructure subnets are allocated from a dedicated `/52` block carved out of the PoP's `/48`, separate from the customer VPC pool. This separation prevents customer VPC capacity from consuming internal infrastructure address space and allows independent scaling.
+The per-PoP ULA `/48` is reserved exclusively for the platform's internal infrastructure. Internal infrastructure subnets are allocated from a dedicated `/52` block carved out of the PoP's `/48`. This space is entirely separate from tenant VPC addressing — tenant prefixes are defined by the tenant and carried as inner payload inside the SRv6 encapsulation (see [VPC Address Space Options](#vpc-address-space-options)).
 
 ```
 PoP ULA /48
-├── /52  Internal infrastructure (platform-owned)
-│    ├── /64   per compute node network
-│    ├── /64   per management subnet
-│    └── /64   reserved for future use
-└── /64   per customer VPC (remaining ~61,440 subnets)
+└── /52  Internal infrastructure (platform-owned)
+     ├── /64   per compute node network
+     ├── /64   per management subnet
+     └── /64   reserved for future use
 ```
 
 | Subnet type  | Allocation       | Purpose                                                                                                                                                                             |
@@ -129,9 +127,6 @@ PoP ULA /48
 Internal infrastructure subnets are **not** customer VPCs. They are not assigned to tenants, not tracked as VPCAttachment resources, and not subject to tenant-facing policies. They are allocated by IPAM when infrastructure services (compute, management, storage) are provisioned at a PoP and are managed by the platform operations team.
 
 Internal infrastructure subnets must not be reachable from tenant networks. This is enforced by the same import deny policy that blocks the infrastructure loopback block — the entire internal infrastructure `/52` range must appear in the tenant VRF prefix deny list.
-
-> [!NOTE]
-> If Option B (GUA) is chosen for customer VPCs, the internal infrastructure `/52` is drawn from the GUA block instead of ULA. The same separation principles apply: internal infrastructure has its own contiguous allocation within the PoP's `/48`, separate from customer VPC subnets.
 
 #### GUA Tenant Addressing Policy
 
@@ -160,16 +155,23 @@ These rules are mandatory whenever GUA VPC addressing (Option B) is in use. They
 
 Emergency quarantine is disruptive to any tenant that legitimately exports GUA prefixes. This is acceptable. A leak into the DFZ is more disruptive and harder to recover from than a controlled withdrawal.
 
-From the PoP's `/48` (regardless of which option is chosen), each consumer VPC at that PoP is allocated a `/64`. A `/48` provides 65,536 possible `/64` allocations — this is the practical capacity ceiling for tenant VPCs at a single PoP, not a hard platform limit. The platform tracks allocations by association (VPC ↔ location) in the IPAM service, not by encoding topology in address bits.
+#### Tenant Subnet Allocation
+
+Tenants subdivide their allocated CIDR block across PoPs and availability zones. The platform does not impose a fixed per-VPC prefix length; tenants choose their own subnet granularity based on host density requirements. A `/64` per VPC is the recommended default, consistent with RFC 4291 §2.5.1 (64-bit interface identifiers for SLAAC-capable unicast formats) and RFC 7421 (operational rationale for uniform /64 subnet sizing).
+
+```
+Tenant CIDR (e.g., /56 ULA or /48 GUA)
+├── /64  per VPC at PoP A
+│    └── /128  per instance / endpoint address
+├── /64  per VPC at PoP B
+│    └── /128  per instance / endpoint address
+└── ...  additional PoP allocations
+```
+
+The platform tracks tenant prefix assignments by association (VPC ↔ location) in the IPAM service, without encoding topology in address bits. Tenant prefixes are programmed into the VRF forwarding table by the control plane and distributed via BGP EVPN Type-5 routes (see [SRv6 SID Plan — Control Plane Mechanics](../srv6/README.md#control-plane-mechanics)).
 
 > [!NOTE]
-> Default VPC allocation is `/64` per VPC. Projects requiring more than 65,536 subnets per PoP, or that need larger per-VPC blocks, require a non-default allocation request. The platform reserves the right to make larger allocations on a per-request basis.
-
-```
-PoP VPC /48
-└── /64  per consumer VPC at this PoP
-     └── /128  per instance / endpoint address
-```
+> Tenants requiring larger per-VPC blocks (e.g., `/56` or `/48` per VPC) or a greater number of subnets than their allocated CIDR supports should request a larger CIDR allocation at provisioning time.
 
 ### SRv6 Locator /48
 
@@ -178,11 +180,11 @@ Each PoP receives a `/48` from the platform's registered SRv6 locator block. Thi
 > [!NOTE]
 > The `uFMT 48+16` format defines the SRv6 SID structure as a 48-bit uSID Block (the PoP-scoped IPv6 prefix) followed by a 16-bit Active C-SID slot. The remaining bits encode the per-tenant VRF argument and function-specific fields. This format is the default carrier format for compressed SRv6 deployments and is used throughout the platform.
 
-In a uSID architecture, individual routers or nodes within the PoP do not receive separate locator subnets carved out of this `/48`. Instead, all nodes share the same `/48` prefix, and traffic is steered to specific nodes and functions via the first 16-bit slot immediately following the prefix — the **Active uSID** slot (bits 49–64). This slot selects the egress node (or "thread") within the PoP's SRv6 fabric, eliminating the need for per-router locator allocations that characterize classic SRv6 designs.
+The PoP's `/48` uSID Block is subdivided into per-node `/64` locators. Each node within the PoP is assigned a unique 16-bit Node ID, forming a `/64` locator as the concatenation of the 48-bit uSID Block and the 16-bit Node ID.
 
-The locator block is PoP-scoped. All SIDs for a given PoP share the same `/48` uSID Block prefix, enabling aggregate advertisement and clean per-PoP filtering.
+**Underlay advertisement is per-node, not aggregate.** Each node *must* advertise its unique `/64` locator into the underlay IGP and BGP IPv6 Unicast. Advertising only the aggregate `/48` would create an anycast route: the underlay ECMP could steer encapsulated packets to any node within the PoP, causing uSID stepping failures when the packet lands on a node that does not own the target VRF or behavior context. Per-node `/64` advertisement ensures unicast delivery to the exact egress node identified by the Active uSID.
 
-The PoP's `/48` locator prefix is advertised into the underlay via BGP IPv6 Unicast. This is not optional — underlay reachability of the locator is a prerequisite for SRv6 forwarding. Without it, remote PoPs cannot route encapsulated packets to their destination. The aggregate `/48` is advertised, not individual SIDs.
+The Node ID embedded in the `/64` locator corresponds to the node-selection portion of the Active uSID (bits 49–64). The control plane programs each node's forwarding entry such that the Active uSID (Node ID + behavior code) maps to the correct endpoint behavior. When traffic arrives at the destination node, the hardware processes the Active uSID, shifts the SID, and uses the VRF ID argument to perform the tenant lookup.
 
 SID structure, function code registry, and VRF ID semantics are defined in [SRv6 SID Plan](../srv6/README.md).
 
@@ -205,16 +207,16 @@ External advertisement — required for Internet transit PoPs — uses the cover
 
 ### Backbone Links
 
-Point-to-point links between underlay routers are numbered from the underlay BGP router loopback `/49`. Each backbone link receives a `/64` subnet.
+Point-to-point links between underlay routers are numbered from the underlay BGP router loopback `/49`. Each backbone link receives a `/127` subnet, per RFC 6164, which recommends `/127` for point-to-point interfaces to minimize the Neighbor Discovery exhaustion and ping-pong attack surface inherent in full `/64` subnets.
 
 ```
 Underlay /49
 ├── /128  per router loopback
-├── /64   per backbone link
-└── ...   additional /64 subnets as needed
+├── /127  per backbone link
+└── ...   additional /127 subnets as needed
 ```
 
-The underlay `/49` provides over one million possible `/64` subnets — more than sufficient for the lifetime of any PoP.
+A `/49` provides 2^78 possible `/127` subnets — an effectively unlimited supply for the lifetime of any PoP.
 
 Backbone link subnets are not advertised externally — they are only needed for underlay routing between routers. External peers do not need to reach individual backbone link addresses; only loopbacks (for BGP peering) and SIDs (for SRv6 forwarding) require external reachability. As with loopbacks, backbone link addresses must not be reachable from tenant networks. This is enforced by the same import deny policy that blocks the infrastructure loopback block.
 
@@ -231,7 +233,12 @@ Backbone link subnets are not advertised externally — they are only needed for
 Additional SRv6 locator and infrastructure loopback blocks must be registered with a RIR before existing allocations are exhausted. Procurement lead time for PI space is measured in weeks to months; initiate the process well in advance of exhaustion. Block sizing and procurement thresholds are tracked in the IPAM service.
 
 > [!NOTE]
-> **uSID VRF scaling limit.** Under a uSID architecture with `uFMT 48+16`, the per-tenant VRF context is encoded in bits 65–80 of the SID (a 16-bit argument field). This establishes a hard architectural boundary of **65,535 concurrent VRF IDs per PoP domain**. This limit is per-PoP and independent of the tenant VPC `/64` subnet capacity (65,536 subnets from the ULA `/48`). When a PoP approaches this VRF ID exhaustion threshold, additional capacity requires either (a) introducing a secondary uSID Block from a new RIR PI allocation and renumbering, or (b) redistributing VRF load across multiple PoP domains.
+> **uSID VRF scaling limit.** Under a uSID architecture with `uFMT 48+16`, the per-tenant VRF context is encoded in bits 65–80 of the SID (a 16-bit argument field). This establishes a namespace of **65,535 usable VRF IDs per uSID Block**. When a PoP approaches this threshold, the platform supports two scaling paths:
+>
+> 1. **Secondary uSID Block allocation** — A second `/48` locator block is assigned to the same physical PoP, creating a distinct VRF ID namespace. The control plane partitions VRF IDs across blocks, maintaining a unified forwarding view. Tenant SIDs referencing the secondary block use the same Active uSID and VRF ID values but with a different 48-bit prefix. This requires a supplementary RIR PI allocation but avoids tenant-visible renumbering.
+> 2. **Logical PoP partitioning** — The physical PoP is split into two logical domains (e.g., PoP-1A, PoP-1B), each with its own `/48` locator block. This creates independent VRF ID namespaces while preserving the tenant experience through transparent cross-domain steering.
+>
+> See [SRv6 SID Plan — VRF ID Space and Scale](../srv6/README.md#vrf-id-space-and-scale) for the operational thresholds and mitigation playbook.
 
 ---
 
@@ -240,15 +247,16 @@ Additional SRv6 locator and infrastructure loopback blocks must be registered wi
 | Resource                                      | Block      | Source                                 |
 |-----------------------------------------------|------------|----------------------------------------|
 | Platform ULA pool                             | `fd00::/8` | RFC 4193 ULA                           |
-| Per-PoP ULA VPC space                         | `/48`      | From `fd00::/8`                        |
-| Per-PoP internal infra                        | `/52`      | From PoP ULA `/48`                     |
+| Per-PoP ULA internal infrastructure           | `/48`      | From `fd00::/8`                        |
+| Per-PoP internal infra subnets                | `/52`      | From PoP ULA `/48`                     |
 | Per-PoP SRv6 locator (uSID Block)             | `/48`      | RIR PI block                           |
+| Per-Node SRv6 locator (underlay reachable)    | `/64`      | uSID Block + 16-bit Node ID            |
 | Per-Node Instruction + Behavior (Active uSID) | N/A        | Embedded in bits 49–64                 |
 | Per-Tenant VRF Context (Argument)             | N/A        | Embedded in bits 65–80                 |
 | Per-PoP loopback block                        | `/48`      | RIR PI (infrastructure loopback block) |
 | Per-PoP underlay loopbacks                    | `/49`      | From PoP loopback `/48`                |
 | Per-PoP overlay loopbacks                     | `/49`      | From PoP loopback `/48`                |
-| Per-VPC at a PoP                              | `/64`      | From PoP ULA `/48`                     |
+| Per-VPC at a PoP                              | `/64`      | From tenant-allocated CIDR             |
 | Per-instance address                          | `/128`     | From subnet `/64`                      |
 | Per-router loopback                           | `/128`     | From PoP `/49`                         |
 
