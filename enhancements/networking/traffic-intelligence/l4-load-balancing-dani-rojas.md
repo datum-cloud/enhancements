@@ -14,7 +14,7 @@ Layer 4 load balancing works the same way. No application-layer inspection, no h
 
 ---
 
-Datum uses **Cilium** as its Layer 4 (transport-layer) load balancer. Cilium operates at the TCP/UDP level and provides the first load-balancing hop for inbound traffic, sitting in front of Envoy (Datum's Layer 7 load balancer) in the platform stack. Today Cilium is platform-managed and not customer-configurable. The goal is to expose it as the customer-configurable L4 load balancer for compute workloads — UFO Compute (Unikraft) and any other compute target a customer places behind Datum's edge.
+Datum uses **Cilium** as its Layer 4 (transport-layer) load balancer. Cilium operates at the TCP/UDP level and provides the first load-balancing hop for inbound traffic, sitting in front of Envoy (Datum's Layer 7 load balancer) in the platform stack. Today Cilium is platform-managed and not customer-configurable. The goal is to expose it as the customer-configurable L4 load balancer for compute workloads — Compute instances and any other compute target a customer places behind Datum's edge.
 
 ---
 
@@ -30,13 +30,13 @@ Cilium (L4 LB)   ← customer-configurable for compute targets
     │        │
     │        └─── Origin upstreams / delivery edge
     │
-    └─── UFO Compute (Unikraft)   ← customer-configurable L4 target
+    └─── Compute (Unikraft)   ← customer-configurable L4 target
     └─── Other customer compute   ← customer-configurable L4 target
 ```
 
 The L4→Envoy path is platform-managed infrastructure — Cilium's routing to Envoy is not customer-configurable. Customers who need Layer 7 features (HTTP routing, TLS termination, header manipulation) configure those through Envoy's delivery policy surface, not through the L4 layer.
 
-The L4→compute path is customer-configurable. When a customer deploys compute workloads (UFO, VMs, containers, or other targets) behind Datum's edge, they configure Cilium directly to balance traffic across those backends.
+The L4→compute path is customer-configurable. When a customer deploys compute workloads (VMs, containers, unikernel instances, or other targets) behind Datum's edge, they configure Cilium directly to balance traffic across those backends.
 
 ---
 
@@ -63,7 +63,7 @@ Every Datum PoP that runs compute exposes an L4 load balancer option. Customers 
 
 | Target | Description |
 |---|---|
-| **UFO Compute (Unikraft)** | Unikernel workloads running on Datum's compute infrastructure |
+| **Compute (Unikraft)** | Unikernel workloads running on Datum's compute infrastructure |
 | **Customer compute** | VMs, containers, bare metal, or any other compute the customer connects via Datum |
 
 Configuration controls which backends receive traffic, how load is distributed across them, and how health is assessed at the transport layer.
@@ -110,10 +110,10 @@ spec:
     - name: acme-l4-gw
   rules:
     - backendRefs:
-        - name: ufo-workload-a
+        - name: compute-workload-a
           port: 8080
           weight: 70
-        - name: ufo-workload-b
+        - name: compute-workload-b
           port: 8080
           weight: 30
 
@@ -242,6 +242,6 @@ A customer can run both. Nate checks against the same origin that Cilium is load
 
 - **Resource model.** What Kubernetes-native resource type represents a customer L4 load balancer? Does it align with the Gateway API (GatewayClass, Gateway, TCPRoute) or use a Datum-specific type?
 - **IP assignment.** Does each L4 load balancer get a dedicated IP, or does it share a VIP with other listeners? How are IPs allocated and advertised?
-- **UFO integration.** How does the L4 LB discover UFO Compute backend IPs as unikernel instances start and stop? Does it read from the UFO control plane, or does the customer configure static pools?
+- **Compute integration.** How does the L4 LB discover Compute instance backend IPs as unikernel instances start and stop? Does it read from the compute control plane, or does the customer configure static pools?
 - **Quota limits.** How many L4 load balancers can a customer create? What limits apply to backend pool size, listener count, and connection rate?
 - **Health check signals to Higgins Bus.** Resolved — see Health Signals and Higgins Bus section above. L4 checks remain local; pool state changes are published to Higgins Bus for observability only.

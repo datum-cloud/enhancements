@@ -32,7 +32,7 @@ Cilium (L4 LB)   ← Dani Rojas: TCP/UDP routing to Envoy and compute targets
 Envoy (L7 LB)    ← this document: HTTP routing, TLS, origin selection
     │
     ├─── Origin upstreams / delivery edge
-    └─── UFO Compute (Unikraft) via Connectors
+    └─── Compute (Unikraft) via Connectors
 ```
 
 Envoy is platform-managed. Customers configure Envoy behavior through Datum delivery policies — they do not interact with Envoy configuration directly.
