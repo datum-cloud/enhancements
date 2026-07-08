@@ -18,15 +18,19 @@ Related: [datum-cloud/auth-provider-openfga](https://github.com/datum-cloud/auth
 - [Proposal](#proposal)
   - [How it works today](#how-it-works-today)
   - [The change](#the-change)
+  - [Notes/Constraints/Caveats](#notesconstraintscaveats)
+  - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
   - [Authorization model](#authorization-model)
   - [Policy reconciler](#policy-reconciler)
   - [Migration](#migration)
-- [Risks and Mitigations](#risks-and-mitigations)
+- [Production Readiness Review Questionnaire](#production-readiness-review-questionnaire)
+  - [Feature Enablement and Rollback](#feature-enablement-and-rollback)
+  - [Monitoring Requirements](#monitoring-requirements)
+  - [Scalability](#scalability)
+- [Implementation History](#implementation-history)
 - [Drawbacks](#drawbacks)
 - [Alternatives](#alternatives)
-- [Open Questions](#open-questions)
-- [Implementation History](#implementation-history)
 
 ## Summary
 
@@ -139,6 +143,44 @@ not disappear. It moves into the authorization model, which is computed once and
 updated only when roles or protected resources change, rather than being copied
 into tuple storage on every binding.
 
+### Notes/Constraints/Caveats
+
+Two questions are still open and should be settled before this moves to
+`implementable`.
+
+<<[UNRESOLVED role-scoping ]>>
+Should role relations be added to every resource type, or only to the types a
+given role actually targets? The first is simpler; the second keeps the model
+smaller.
+<<[/UNRESOLVED]>>
+
+<<[UNRESOLVED groups ]>>
+Group-based subjects already resolve through `member`. Confirm the role-based
+path composes correctly with group membership so a group granted a role still
+resolves every permission.
+<<[/UNRESOLVED]>>
+
+### Risks and Mitigations
+
+The main risk is an authorization regression: a subtle difference between the
+old and new resolution paths could grant or deny something incorrectly.
+Mitigations:
+
+- Keep both representations valid at once so rollback is a reconciler flag, not a
+  data migration.
+- Add Check-equivalence tests that assert, for a representative set of subjects,
+  roles, and resources, that the role-based model returns the same decision as
+  the per-permission model.
+- Roll out on staging first and diff authorization decisions against production
+  behavior before backfilling.
+
+A secondary risk is model size. Unioning every permission over every role could
+make the model large. If that becomes a problem, scope role relations to the
+resource types a role actually targets rather than all types.
+
+Security review should be done by the IAM owners, since the change is entirely
+within the authorization boundary.
+
 ## Design Details
 
 ### Authorization model
@@ -182,23 +224,47 @@ The two representations resolve to the same Check results, so they can coexist:
 
 Each step is independently revertible.
 
-## Risks and Mitigations
+## Production Readiness Review Questionnaire
 
-The main risk is an authorization regression: a subtle difference between the
-old and new resolution paths could grant or deny something incorrectly.
-Mitigations:
+### Feature Enablement and Rollback
 
-- Keep both representations valid at once so rollback is a reconciler flag, not a
-  data migration.
-- Add Check-equivalence tests that assert, for a representative set of subjects,
-  roles, and resources, that the role-based model returns the same decision as
-  the per-permission model.
-- Roll out on staging first and diff authorization decisions against production
-  behavior before backfilling.
+- [x] Other
+  - Describe the mechanism: a reconciler-level flag selects whether a binding
+    writes role tuples or per-permission tuples. The authorization model carries
+    both role relations and per-permission relations, so either mode resolves
+    correctly.
+  - Will enabling / disabling the feature require downtime of the control plane?
+    No. It is a controller flag and takes effect on the next reconcile.
+  - Will enabling / disabling the feature require downtime or reprovisioning of a
+    node? No.
 
-A secondary risk is model size. Unioning every permission over every role could
-make the model large. If that becomes a problem, scope role relations to the
-resource types a role actually targets rather than all types.
+Enabling the feature changes the internal tuple representation but not any
+observable authorization decision. Disabling it after enablement is safe while
+per-permission relations remain in the model: bindings re-reconcile back to
+per-permission tuples. Re-enabling is equally safe and idempotent.
+
+### Monitoring Requirements
+
+An operator can tell the feature is working by watching the tuple count written
+per owner binding drop from 351 to 1, and by watching the time from organization
+creation to the owner PolicyBinding reaching `Ready` fall and tighten. A rollback
+signal would be any divergence in authorization decisions between the two modes,
+surfaced by the Check-equivalence tests, or a rise in `Check` latency caused by
+deeper model resolution.
+
+### Scalability
+
+The change removes API and storage load rather than adding it. Owner-binding
+tuple writes fall from 351 to 1, which reduces OpenFGA `Write` volume and
+`policybinding` reconcile time on the signup path. The tradeoff is a larger
+authorization model, bounded by (roles x permissions) and written once, plus
+potentially one extra resolution hop per `Check` as permissions resolve through
+a role. `Check` p99 is about 10ms today, so there is headroom, and this should
+be verified on staging before backfill.
+
+## Implementation History
+
+- (provisional) Summary and motivation drafted from staging signup analysis.
 
 ## Drawbacks
 
@@ -221,21 +287,3 @@ product behavior and does not address the general case of any broad role.
 **Precompute owner tuples at org creation.** Write the owner grant as part of
 org bootstrap rather than through a PolicyBinding. This narrows the fix to one
 role and leaves the fan-out in place for every other broad binding.
-
-## Open Questions
-
-<<[UNRESOLVED role-scoping ]>>
-Should role relations be added to every resource type, or only to the types a
-given role actually targets? The first is simpler; the second keeps the model
-smaller.
-<<[/UNRESOLVED]>>
-
-<<[UNRESOLVED groups ]>>
-Group-based subjects already resolve through `member`. Confirm the role-based
-path composes correctly with group membership so a group granted a role still
-resolves every permission.
-<<[/UNRESOLVED]>>
-
-## Implementation History
-
-- (provisional) Summary and motivation drafted from staging signup analysis.
