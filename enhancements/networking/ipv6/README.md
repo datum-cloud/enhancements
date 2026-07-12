@@ -19,7 +19,7 @@ The platform draws from three top-level IPv6 address pools. These pools are mana
 |--------------------------|-----------------------------|-----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
 | VPC (ULA, default)       | `fd00::/8`                  | Tenant overlay addressing                     | Overlay only — never leaves the overlay; see [VPC Address Space Options](#vpc-address-space-options)                                       |
 | VPC (GUA, alternative)   | `[VPC-BLOCK]` (RIR PI)      | Tenant overlay addressing                     | Overlay only — must not be advertised externally; policy enforcement required; see [VPC Address Space Options](#vpc-address-space-options) |
-| SRv6 SID locators        | `[LOCATOR-BLOCK]` (RIR PI)  | SRv6 segment identifiers                      | Advertised in the underlay (BGP IPv6 Unicast); reachability is required for SRv6 forwarding                                                |
+| SRv6 SID locators        | `[LOCATOR-BLOCK]` (RIR PI)  | SRv6 segment identifiers                      | Advertised in the underlay per node (`/64`s, not the `/48` aggregate); reachability is required for SRv6 forwarding                        |
 | Infrastructure loopbacks | `[INFRA-BLOCK]` (RIR PI)    | Router loopbacks for underlay and overlay BGP | Underlay-reachable; aggregate-only to external peers                                                                                       |
 
 > [!NOTE]
@@ -42,14 +42,14 @@ The platform draws from three top-level IPv6 address pools. These pools are mana
 > The specific RIR used depends on the platform's operational region and upstream carrier relationships.
 
 > [!NOTE]
-> As the platform scales, additional RIR PI blocks must be obtained for both the SRv6 locator and infrastructure loopback pools. Initiate RIR procurement well before existing allocations are exhausted; lead time for PI space is measured in weeks to months.
+> As the platform scales, additional RIR PI blocks must be obtained for both the SRv6 locator and infrastructure loopback pools. Initiate RIR procurement well before existing allocations are exhausted. Lead time varies: straightforward requests from organizations with an existing RIR/LIR relationship and complete justification are often processed in days to about two weeks; first-time applicants or requests needing to establish LIR/RIR membership first should budget for a month or more.
 
-The ULA pool (`fd00::/8`) is used exclusively for private tenant networking. These prefixes are private by definition and universally filtered by upstreams; there is no policy required to prevent external advertisement.
+The ULA pool (`fd00::/8`) is used exclusively for private tenant networking. These prefixes are private by definition (RFC 4193 §4.1 mandates default filtering of `fc00::/7` at exterior BGP sessions) and are treated as bogon space by essentially all transit providers and IXPs, giving ULA a strong filtering backstop GUA lacks — though this is an operational convention enforced by other operators' configurations, not a structural internet guarantee, so no policy is required on this platform's side to prevent external advertisement, though outbound filtering at the PoP border remains good defense-in-depth practice.
 
 > [!NOTE]
 > **What is the DFZ?** The Default-Free Zone (DFZ) is the set of Internet core routers — operated by Tier-1 carriers such as Lumen, NTT, and Cogent — that carry a full global BGP routing table with no default route. If a prefix is not in the table, the packet is dropped. Advertising individual `/128` loopbacks into the DFZ is operationally hostile: it bloats the global routing table, exposes internal infrastructure topology, and will be filtered by most peers regardless — IPv6 prefix length limits at the DFZ boundary are typically `/48` maximum. Aggregates only.
 
-The SRv6 SID locator block is a globally registered PI prefix. It is a platform-registered RIR PI block, subdivided per PoP. Each PoP's `/48` locator is advertised into the underlay via BGP IPv6 Unicast SAFI — underlay reachability of the locator prefix is required for SRv6 forwarding. It must not overlap with the ULA pool or the infrastructure loopback block.
+The SRv6 SID locator block is a globally registered PI prefix. It is a platform-registered RIR PI block, subdivided per PoP. Within a PoP, each node advertises its own `/64` locator into the underlay via IGP and BGP IPv6 Unicast SAFI — the `/48` itself is never advertised as an aggregate route inside the PoP, since that would create an anycast route ambiguous as to which node owns a given SID (see [SRv6 Locator /48](#srv6-locator-48)). The `/48` remains the unit of RIR registration and of any inter-PoP or external advertisement. It must not overlap with the ULA pool or the infrastructure loopback block.
 
 ---
 
@@ -86,7 +86,7 @@ Tenant VPC addressing is fully abstracted from the provider's infrastructure loc
 
 **Option A — ULA (`fd00::/8`)**, default
 
-Tenants select a ULA prefix from `fd00::/8` as their VPC address space. These prefixes are private by definition and universally filtered by upstreams; there is no policy required to prevent external advertisement. Per RFC 4193 §3.2.5, the 40-bit Global ID must be pseudo-randomly generated to minimize collision risk — the platform must not constrain tenants to a shared recommended range, as that shrinks entropy and increases collision probability on interconnects. If operational visibility into "which prefixes are ours" is required, the platform tracks assigned prefixes in IPAM without constraining the generation range.
+Tenants select a ULA prefix from `fd00::/8` as their VPC address space. These prefixes are private by definition and are treated as bogon space by essentially all transit providers and IXPs, so no policy is required on this platform's side to prevent external advertisement. Per RFC 4193 §3.2.1 (Global IDs MUST be generated with a pseudo-random algorithm and MUST NOT be assigned sequentially or from well-known values) and the uniqueness analysis in §3.2.3 (collision probability rises as the effective Global ID field length shrinks), the platform should not constrain tenants to a narrow shared sub-range of the 40-bit Global ID space, as doing so reduces effective entropy and increases collision probability on interconnects. If operational visibility into "which prefixes are ours" is required, the platform tracks assigned prefixes in IPAM without constraining the generation range.
 
 **Option B — GUA (tenant-owned or platform-allocated)**
 
@@ -94,15 +94,15 @@ Tenants use their own globally unique IPv6 allocation — either a Provider Inde
 
 #### Comparison
 
-| Criterion                         | ULA (`fd00::/8`)                                      | GUA (RIR PI)                                               |
-|-----------------------------------|-------------------------------------------------------|------------------------------------------------------------|
-| RIR registration required         | No                                                    | Yes                                                        |
-| Global address uniqueness         | Not guaranteed; overlap possible across organizations | Guaranteed                                                 |
-| Risk of accidental DFZ leakage    | None — upstreams universally filter `fd00::/8`        | Certain if export policy is absent or misconfigured        |
-| Multi-cloud / direct interconnect | Overlap risk requires coordination between parties    | No overlap risk; prefixes are unambiguous across providers |
-| Bring-your-own-prefix (BYOP)      | Not applicable                                        | Tenants may bring own PI space                             |
-| IPAM governance                   | Self-managed; no RIR involvement                      | Requires RIR allocation and lifecycle management           |
-| Scale                             | Effectively unbounded                                 | Bounded by allocated block size                            |
+| Criterion                         | ULA (`fd00::/8`)                                                                                                             | GUA (RIR PI)                                                                       |
+|-----------------------------------|------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------|
+| RIR registration required         | No                                                                                                                           | Yes                                                                                |
+| Global address uniqueness         | Not guaranteed; overlap possible across organizations                                                                        | Guaranteed                                                                         |
+| Risk of accidental DFZ leakage    | Very low — no known reachability; upstreams conventionally filter `fd00::/8` as bogon space (not a protocol-level guarantee) | High if export policy is absent or misconfigured — no automatic filtering backstop |
+| Multi-cloud / direct interconnect | Overlap risk requires coordination between parties                                                                           | No overlap risk; prefixes are unambiguous across providers                         |
+| Bring-your-own-prefix (BYOP)      | Not applicable                                                                                                               | Tenants may bring own PI space                                                     |
+| IPAM governance                   | Self-managed; no RIR involvement                                                                                             | Requires RIR allocation and lifecycle management                                   |
+| Scale                             | Effectively unbounded                                                                                                        | Bounded by allocated block size                                                    |
 
 ULA is the simpler default for a closed overlay. GUA is preferable if tenants require direct IPv6 interconnects with external networks, or if the platform intends to offer bring-your-own-prefix (BYOP) services.
 
@@ -132,19 +132,21 @@ Internal infrastructure subnets must not be reachable from tenant networks. This
 
 These rules are mandatory whenever GUA VPC addressing (Option B) is in use. They apply to both platform-allocated GUA space and BYOP tenant space. Failure to enforce them will result in tenant prefixes entering the global DFZ.
 
-**Default deny export.** All prefixes that fall within the GUA VPC block are denied export at every underlay-facing BGP session by default. This is a BGP outbound prefix list applied at the session level, not a route-map condition that depends on community or attribute matching. The deny is unconditional — no match condition can override it without an explicit allowlist entry. There is no opt-out for individual sessions.
+**Default deny export.** All prefixes that fall within the GUA VPC block are denied export at every underlay-facing BGP session by default. This is a BGP outbound prefix list applied at the session level, not a route-map condition that depends on community or attribute matching. For this control to be effective, the deny term must be evaluated after all allowlist permit terms in the session's export policy chain, and no other export policy applied to the same session may contain a terminating accept for a GUA VPC prefix based on other attributes — operators must verify per-platform that no earlier-evaluated policy term can produce a terminating permit before the deny is reached. There is no opt-out for individual sessions.
 
 **Explicit export intent required.** A GUA VPC prefix may only be exported from the overlay if it appears on a per-session explicit allowlist maintained by the platform operations team. Adding a prefix to the allowlist requires: (1) a documented tenant request, (2) successful prefix ownership validation (see below), (3) a valid RPKI ROA, and (4) change-control approval. Operator convenience is not a valid justification for export. The default is deny; any export is an exception that must be justified, reviewed, and recorded.
 
 **Per-tenant prefix lists.** The export allowlist is maintained at the individual prefix level, not at the covering GUA block level. A single platform-wide community-based policy is insufficient — it creates a single control point whose misconfiguration or exception exposes all tenants. Each tenant's permitted export prefixes must be enumerated explicitly in a per-tenant prefix list. Allowlist membership does not transfer between tenants.
 
-**RPKI and ROA requirements.** The operator must publish ROAs for the platform's GUA VPC block with `maxLength = 48`. This ensures that any advertisement of a more-specific prefix (e.g., an individual `/64`) is RPKI Invalid and will be rejected by ROV-enforcing peers, providing an out-of-band backstop against more-specific leaks. For BYOP prefixes, the tenant must hold a valid ROA that either (a) origin-authorizes the platform's overlay ASN or (b) origin-authorizes the tenant's own ASN if the tenant manages route origination. Prefixes with RPKI Invalid status must not enter the overlay and must not be exported under any circumstances.
+**RPKI and ROA requirements.** The operator must publish ROAs for the platform's GUA VPC block with `maxLength = 48`. Per RFC 6483's ROA validation algorithm, this ensures any advertisement of a more-specific prefix (e.g., an individual `/64`) is classified RPKI Invalid; whether an Invalid route is actually dropped or merely deprioritized is a matter of each receiving peer's local policy (RFC 6811 §5 permits either), though in practice many transit and peering networks do filter Invalid routes outright, so this ROA still functions as a meaningful out-of-band backstop against more-specific leaks — treat it as defense-in-depth alongside the export prefix-list and route-leak-detection controls, not a substitute for them. For BYOP prefixes, the tenant must hold a valid ROA that either (a) origin-authorizes the platform's overlay ASN or (b) origin-authorizes the tenant's own ASN if the tenant manages route origination. Prefixes with RPKI Invalid status must not enter the overlay and must not be exported under any circumstances.
 
-**BYOP validation.** A tenant may use their own Provider Independent (PI) IPv6 space as their VPC address block. Before a BYOP prefix is accepted into the overlay, the platform must verify: (1) the tenant's RIR allocation record (ARIN, RIPE, APNIC, or equivalent) confirms the prefix is theirs, (2) the prefix is not currently being announced in the global DFZ by another origin AS, and (3) a valid ROA exists. The maximum prefix length for a BYOP allocation is the allocation's RIR-registered length — sub-allocations that are more specific than the registered block are not accepted without additional RIR evidence. BYOP validation is re-run on a scheduled basis; if a tenant's RIR record lapses, the BYOP prefix is quarantined pending re-validation.
+**BYOP validation.** A tenant may use their own Provider Independent (PI) IPv6 space as their VPC address block. Before a BYOP prefix is accepted into the overlay, the platform must verify: (1) the tenant's RIR allocation record (ARIN, RIPE, APNIC, or equivalent) confirms the prefix is theirs, (2) the tenant demonstrates current control of the prefix via a platform-issued challenge — publishing a platform-provided token or certificate in the prefix's RDAP record (analogous to AWS's X.509-certificate-in-RDAP plus signed authorization message), creating a PTR record under the prefix resolving to a platform-issued token (analogous to GCP's reverse-DNS validation), or a signed Letter of Authorization on company letterhead (as commonly required by transit providers and Cloudflare's BYOIP program), (3) the prefix is not currently being announced in the global DFZ by another origin AS (a migration/conflict-safety check, not itself an ownership proof), and (4) a valid ROA exists. The maximum prefix length for a BYOP allocation is the allocation's RIR-registered length — sub-allocations that are more specific than the registered block are not accepted without additional RIR evidence. BYOP validation is re-run on a scheduled basis; if a tenant's RIR record lapses, the BYOP prefix is quarantined pending re-validation.
 
-**Maximum prefix length for export.** Only the per-PoP `/48` aggregate may be exported at the underlay boundary. No prefix longer than `/48` may appear in an underlay BGP RIB or be sent to any external peer. This applies to all export paths: transit, peering, and customer interconnects. Individual subnet `/64`s and instance `/128`s must never leave the overlay.
+**Maximum prefix length for export.** Only the per-PoP `/48` aggregate may be exported at the underlay boundary — this is the platform's own conservative export ceiling, chosen to align with widely-adopted (though not RFC-mandated) DFZ filtering practice among major transit providers, which commonly cap accepted IPv6 prefix length at `/48`. No prefix longer than `/48` may appear in an underlay BGP RIB or be sent to any external peer, regardless of whether a given peer's own filters would accept something more specific. This applies to all export paths: transit, peering, and customer interconnects. Individual subnet `/64`s and instance `/128`s must never leave the overlay.
 
 **Route leak detection.** Every underlay BGP session must be monitored for the appearance of GUA VPC prefixes in the peer's received-routes table. A GUA VPC prefix appearing in an underlay RIB is an operational emergency. Route leak detection must integrate with the platform's observability and alerting infrastructure and must page on-call immediately, without waiting for a human to notice.
+
+**External global monitoring.** In addition to session-level Adj-RIB-In monitoring, the platform must continuously check the GUA VPC block and any registered BYOP prefixes against independent, third-party route-collector data (e.g., RIPE RIS, RouteViews/BGPStream) for unexpected origin ASes or more-specific announcements anywhere in the global DFZ — a leak that has already propagated past a directly-monitored session will not be visible from local Adj-RIB-In monitoring alone. Any such appearance triggers the same emergency quarantine procedure below.
 
 **Emergency quarantine.** If a GUA VPC prefix is detected outside the overlay:
 
@@ -157,7 +159,7 @@ Emergency quarantine is disruptive to any tenant that legitimately exports GUA p
 
 #### Tenant Subnet Allocation
 
-Tenants subdivide their allocated CIDR block across PoPs and availability zones. The platform does not impose a fixed per-VPC prefix length; tenants choose their own subnet granularity based on host density requirements. A `/64` per VPC is the recommended default, consistent with RFC 4291 §2.5.1 (64-bit interface identifiers for SLAAC-capable unicast formats) and RFC 7421 (operational rationale for uniform /64 subnet sizing).
+Tenants subdivide their allocated CIDR block across PoPs and availability zones. The platform does not impose a fixed per-VPC prefix length; tenants choose their own subnet granularity based on host density requirements. A `/64` per VPC is the recommended default. This aligns with the prevailing IPv6 operational convention: RFC 4291 §2.5.1 fixes the interface-identifier field at 64 bits for standard unicast address formats, and RFC 7421 documents the operational risks and tooling assumptions that make deviating from /64 costly in practice — even though neither RFC mandates /64 for overlay/VRF subnet allocation, and this platform assigns addresses via IPAM rather than SLAAC.
 
 ```
 Tenant CIDR (e.g., /56 ULA or /48 GUA)
@@ -168,25 +170,31 @@ Tenant CIDR (e.g., /56 ULA or /48 GUA)
 └── ...  additional PoP allocations
 ```
 
-The platform tracks tenant prefix assignments by association (VPC ↔ location) in the IPAM service, without encoding topology in address bits. Tenant prefixes are programmed into the VRF forwarding table by the control plane and distributed via BGP EVPN Type-5 routes (see [SRv6 SID Plan — Control Plane Mechanics](../srv6/README.md#control-plane-mechanics)).
+The platform tracks tenant prefix and MAC assignments by association (VPC ↔ location) in the IPAM service, without encoding topology in address bits. Tenant prefixes and MACs are programmed into VRF and Bridge Domain forwarding tables by the control plane and distributed via BGP EVPN Route Type 5 and Route Type 2 routes (see [SRv6 uSID Plan — Control Plane Mechanics](../srv6/README.md#control-plane-mechanics-bgp-evpn-l2vpn)).
 
 > [!NOTE]
 > Tenants requiring larger per-VPC blocks (e.g., `/56` or `/48` per VPC) or a greater number of subnets than their allocated CIDR supports should request a larger CIDR allocation at provisioning time.
 
 ### SRv6 Locator /48
 
-Each PoP receives a `/48` from the platform's registered SRv6 locator block. This `/48` functions as the **uSID Block** — the global routing domain prefix — under a `uFMT 48+16` carrier format per RFC 9800.
+Each PoP receives a `/48` from the platform's registered SRv6 locator block. This `/48` functions as the **uSID Block** — the global routing domain prefix — under this platform's `uFMT 48+16` (F4816) carrier format, built on the compressed SID structure defined in RFC 9800.
 
 > [!NOTE]
-> The `uFMT 48+16` format defines the SRv6 SID structure as a 48-bit uSID Block (the PoP-scoped IPv6 prefix) followed by a 16-bit Active C-SID slot. The remaining bits encode the per-tenant VRF argument and function-specific fields. This format is the default carrier format for compressed SRv6 deployments and is used throughout the platform.
+> `uFMT 48+16` is this platform's shorthand for the F4816 NEXT-C-SID format with a shared Next uSID slot. The format defines the SRv6 SID structure as a 48-bit uSID Block (the PoP-scoped IPv6 prefix) followed by a 16-bit Node-ID (Locator-Node / LNL = 16) and a shared 16-bit slot containing a 4-bit Function (FL = 4) and a 12-bit Instance ID (AL = 12) as Argument. The remaining 48 bits of the 128-bit SID container are zero-filled padding, automatically populated as uSIDs are shifted left during processing. The 16-bit C-SID space is partitioned into a Global ID Block (GIB) for Node-IDs (`0x0001–0xDFFF`) and a Local ID Block (LIB) for local endpoint functions (`0xE000–0xFFFF`). See [SRv6 uSID Plan — SID Structure](../srv6/README.md#sid-structure-usid-carrier) for the full field layout.
 
-The PoP's `/48` uSID Block is subdivided into per-node `/64` locators. Each node within the PoP is assigned a unique 16-bit Node ID, forming a `/64` locator as the concatenation of the 48-bit uSID Block and the 16-bit Node ID.
+The PoP's `/48` uSID Block is subdivided into per-node `/64` locators. Each node within the PoP is assigned a unique 16-bit Node-ID (Locator-Node), which forms the node's `/64` locator prefix (`[uSID Block][Node-ID]::/64`). Underlay routing resolves packets based on this `/64` prefix to deliver them to the exact node.
 
-**Underlay advertisement is per-node, not aggregate.** Each node *must* advertise its unique `/64` locator into the underlay IGP and BGP IPv6 Unicast. Advertising only the aggregate `/48` would create an anycast route: the underlay ECMP could steer encapsulated packets to any node within the PoP, causing uSID stepping failures when the packet lands on a node that does not own the target VRF or behavior context. Per-node `/64` advertisement ensures unicast delivery to the exact egress node identified by the Active uSID.
+**Underlay advertisement is per-node, not aggregate.** Each node *must* advertise its unique `/64` locator into the underlay IGP and BGP IPv6 Unicast. Advertising only the aggregate `/48` would create an anycast route: the underlay ECMP could steer encapsulated packets to any node within the PoP, causing uSID stepping failures when the packet lands on a node that does not own the target VRF or behavior context. Per-node `/64` advertisement ensures unicast delivery to the exact egress node identified by the Node-ID. This requirement is scoped to the PoP's internal underlay domain — see [PoP Boundary Aggregation Policy](#pop-boundary-aggregation-policy) for how the PoP summarizes these locators when advertising outward.
 
-The Node ID embedded in the `/64` locator corresponds to the node-selection portion of the Active uSID (bits 49–64). The control plane programs each node's forwarding entry such that the Active uSID (Node ID + behavior code) maps to the correct endpoint behavior. When traffic arrives at the destination node, the hardware processes the Active uSID, shifts the SID, and uses the VRF ID argument to perform the tenant lookup.
+#### PoP Boundary Aggregation Policy
 
-SID structure, function code registry, and VRF ID semantics are defined in [SRv6 SID Plan](../srv6/README.md).
+Per-node `/64` advertisement (above) applies within the PoP's internal underlay IGP/BGP domain, where per-node granularity is what lets the underlay deliver a packet to the specific node identified by the Node-ID. This does not extend to the wider network: PoP boundary/edge nodes must summarize all of a PoP's per-node `/64` locators into the single covering `/48` uSID Block aggregate before advertising toward the broader underlay core or other PoPs. Individual `/64` node locators must be suppressed at the PoP perimeter and must never leak into the global underlay backbone routing table.
+
+This bounds the blast radius of per-node route churn (link flaps, node reboots) to the originating PoP's internal IGP area rather than propagating it network-wide, while still letting external routers reach the PoP as a whole via the `/48`. This is a deliberate departure from typical Segment Routing operational practice, which normally disables route summarization for Node-SID-carrying prefixes precisely because SR/SRv6 forwarding depends on end-to-end unicast reachability to the specific node (RFC 8402 §3.2 requires Node-SID uniqueness only *within a routing domain*, but says nothing about whether the prefix carrying it may be aggregated at a domain boundary — summarizing it typically breaks reachability, which is exactly why vendor SR implementation guides document disabling summarization for loopback/Node-SID prefixes at area/level boundaries). This design is safe here only because of this platform's specific topology: the boundary node performing the aggregation is itself a full participant in the destination PoP's internal IGP domain (analogous to an OSPF Area Border Router or an IS-IS Level-1/Level-2 router) — it holds the complete set of per-node `/64` routes in its local RIB from that internal adjacency, even though it originates only the `/48` summary toward the backbone or other PoPs. Once a packet ingresses the destination PoP via that boundary node, the PoP's own IGP takes over and resolves the exact egress node — the boundary node need not itself resolve the specific node, only route the packet into the PoP that owns it.
+
+The Node-ID embedded in the `/64` locator corresponds to the 16-bit Active uSID (bits 49–64, using this document's 1-based, MSB-first bit numbering — see [SRv6 uSID Plan — SID Structure](../srv6/README.md#sid-structure-usid-carrier)). The next 16-bit slot (bits 65–80) is the shared Next uSID block carrying the 4-bit Function code (FL = 4, bits 65–68) and the 12-bit Instance ID (AL = 12, bits 69–80) as Argument. The control plane programs each node's FIB/local-SID-table entry to match on its own locator `[uSID Block][Node-ID]::/64` via longest-prefix match. When a packet matches this entry, the node executes the NEXT-C-SID behavior, shifting the IPv6 destination address left by 16 bits to expose the shared `[Func (4)][Instance ID (12)]` block in the active position, which selects the correct endpoint behavior based on the Function prefix (matching `LBL+FL = 52` bits: `[uSID Block][Function]::/52`). The Instance ID is read out of the Argument bits by the endpoint behavior to select the tenant VRF or Bridge Domain (see [SRv6 uSID Plan — VRF / EVI ID](../srv6/README.md#vrf-evi-id-argument)).
+
+SID structure, function code registry, and VRF ID semantics are defined in [SRv6 uSID Plan](../srv6/README.md).
 
 ### Infrastructure Loopback /48
 
@@ -207,7 +215,7 @@ External advertisement — required for Internet transit PoPs — uses the cover
 
 ### Backbone Links
 
-Point-to-point links between underlay routers are numbered from the underlay BGP router loopback `/49`. Each backbone link receives a `/127` subnet, per RFC 6164, which recommends `/127` for point-to-point interfaces to minimize the Neighbor Discovery exhaustion and ping-pong attack surface inherent in full `/64` subnets.
+Point-to-point links between underlay routers are numbered from the underlay BGP router loopback `/49`. Each backbone link receives a `/127` subnet. RFC 6164 documents `/127` as the useful practice for point-to-point inter-router links, since it eliminates the Neighbor Discovery/neighbor-cache exhaustion and ping-pong forwarding-loop attack surface inherent in full `/64` point-to-point subnets; per RFC 6164 §6, routers MUST also disable Subnet-Router anycast for the prefix when `/127`s are used.
 
 ```
 Underlay /49
@@ -230,43 +238,45 @@ Backbone link subnets are not advertised externally — they are only needed for
 | Infrastructure loopback `/48`s | One per PoP; additional RIR PI blocks required as the platform scales        |
 | ULA VPC space                  | Effectively unbounded (`fd00::/8`)                                           |
 
-Additional SRv6 locator and infrastructure loopback blocks must be registered with a RIR before existing allocations are exhausted. Procurement lead time for PI space is measured in weeks to months; initiate the process well in advance of exhaustion. Block sizing and procurement thresholds are tracked in the IPAM service.
+Additional SRv6 locator and infrastructure loopback blocks must be registered with a RIR before existing allocations are exhausted. Procurement lead time for PI space varies — straightforward requests from organizations with an existing RIR/LIR relationship are often processed in days to about two weeks, while first-time applicants should budget for a month or more; initiate the process well in advance of exhaustion. Block sizing and procurement thresholds are tracked in the IPAM service.
 
 > [!NOTE]
-> **uSID VRF scaling limit.** Under a uSID architecture with `uFMT 48+16`, the per-tenant VRF context is encoded in bits 65–80 of the SID (a 16-bit argument field). This establishes a namespace of **65,535 usable VRF IDs per uSID Block**. When a PoP approaches this threshold, the platform supports two scaling paths:
+> **uSID Instance scaling limit.** Under the selected uSID architecture with `uFMT 48+16` (F4816) and a shared Next uSID slot, the per-tenant VRF or EVI ID is encoded in bits 69–80 of the SID (the 12-bit Argument field). This establishes a namespace of **4,095 usable Instance IDs per uSID Block per universe (4,095 VRF IDs and 4,095 EVI IDs)**. When a PoP approaches this threshold, the platform supports two scaling paths:
 >
-> 1. **Secondary uSID Block allocation** — A second `/48` locator block is assigned to the same physical PoP, creating a distinct VRF ID namespace. The control plane partitions VRF IDs across blocks, maintaining a unified forwarding view. Tenant SIDs referencing the secondary block use the same Active uSID and VRF ID values but with a different 48-bit prefix. This requires a supplementary RIR PI allocation but avoids tenant-visible renumbering.
-> 2. **Logical PoP partitioning** — The physical PoP is split into two logical domains (e.g., PoP-1A, PoP-1B), each with its own `/48` locator block. This creates independent VRF ID namespaces while preserving the tenant experience through transparent cross-domain steering.
+> 1. **Secondary uSID Block allocation** — A second `/48` locator block is assigned to the same physical PoP, creating a distinct, independent Instance ID namespace of 4,095 IDs. Each block allocates its range independently — the primary and secondary blocks each serve Instance IDs 1–4,095 — for a combined capacity of 8,190 Instance IDs per universe on the same physical PoP. Tenant SIDs referencing the secondary block use the same Node-ID, Function, and Instance ID values but with the secondary block's `/48` prefix. This requires a supplementary RIR PI allocation but avoids tenant-visible renumbering.
+> 2. **Logical PoP partitioning** — The physical PoP is split into two logical domains (e.g., PoP-1A, PoP-1B), each with its own `/48` locator block. This creates independent Instance ID namespaces while preserving the tenant experience through transparent cross-domain steering.
 >
-> See [SRv6 SID Plan — VRF ID Space and Scale](../srv6/README.md#vrf-id-space-and-scale) for the operational thresholds and mitigation playbook.
+> See [SRv6 uSID Plan — Instance ID Space and Scale](../srv6/README.md#instance-id-space-and-scale) for the operational thresholds and mitigation playbook.
 
 ---
 
 ## Allocation Hierarchy Summary
 
-| Resource                                      | Block      | Source                                 |
-|-----------------------------------------------|------------|----------------------------------------|
-| Platform ULA pool                             | `fd00::/8` | RFC 4193 ULA                           |
-| Per-PoP ULA internal infrastructure           | `/48`      | From `fd00::/8`                        |
-| Per-PoP internal infra subnets                | `/52`      | From PoP ULA `/48`                     |
-| Per-PoP SRv6 locator (uSID Block)             | `/48`      | RIR PI block                           |
-| Per-Node SRv6 locator (underlay reachable)    | `/64`      | uSID Block + 16-bit Node ID            |
-| Per-Node Instruction + Behavior (Active uSID) | N/A        | Embedded in bits 49–64                 |
-| Per-Tenant VRF Context (Argument)             | N/A        | Embedded in bits 65–80                 |
-| Per-PoP loopback block                        | `/48`      | RIR PI (infrastructure loopback block) |
-| Per-PoP underlay loopbacks                    | `/49`      | From PoP loopback `/48`                |
-| Per-PoP overlay loopbacks                     | `/49`      | From PoP loopback `/48`                |
-| Per-VPC at a PoP                              | `/64`      | From tenant-allocated CIDR             |
-| Per-instance address                          | `/128`     | From subnet `/64`                      |
-| Per-router loopback                           | `/128`     | From PoP `/49`                         |
+| Resource                                   | Block      | Source                                          |
+|--------------------------------------------|------------|-------------------------------------------------|
+| Platform ULA pool                          | `fd00::/8` | RFC 4193 ULA                                    |
+| Per-PoP ULA internal infrastructure        | `/48`      | From `fd00::/8`                                 |
+| Per-PoP internal infra subnets             | `/52`      | From PoP ULA `/48`                              |
+| Per-PoP SRv6 locator (uSID Block)          | `/48`      | RIR PI block                                    |
+| Per-Node SRv6 locator (underlay reachable) | `/64`      | uSID Block + 16-bit Node-ID                     |
+| Per-Node ID (Active uSID)                  | N/A        | 16-bit Node-ID (GIB: 0x0001–0xDFFF), bits 49–64 |
+| Per-Node Instruction (Function)            | N/A        | 4-bit Function (FL = 4), bits 65–68             |
+| Per-Tenant VRF / EVI ID (Argument)         | N/A        | 12-bit Instance ID (AL = 12), bits 69–80        |
+| Padding                                    | N/A        | Zero-filled, bits 81–128                        |
+| Per-PoP loopback block                     | `/48`      | RIR PI (infrastructure loopback block)          |
+| Per-PoP underlay loopbacks                 | `/49`      | From PoP loopback `/48`                         |
+| Per-PoP overlay loopbacks                  | `/49`      | From PoP loopback `/48`                         |
+| Per-VPC at a PoP                           | `/64`      | From tenant-allocated CIDR                      |
+| Per-instance address                       | `/128`     | From subnet `/64`                               |
+| Per-router loopback                        | `/128`     | From PoP `/49`                                  |
 
 ---
 
 ## Isolation and Security Properties
 
-**VPC space never leaves the overlay.** The VPC pool — whether ULA or GUA — must not be advertised to the underlay, leaked to transit providers, or made reachable from outside the overlay. For ULA (`fd00::/8`), this is fail-safe: upstreams universally filter `fd00::/8`, so a misconfiguration does not result in global reachability. For GUA, there is no automatic filtering backstop — a missing or misconfigured export policy will result in the prefix entering the global DFZ. GUA VPC addressing therefore requires the full set of controls defined in [GUA Tenant Addressing Policy](#gua-tenant-addressing-policy): default deny export, explicit allowlist per tenant, RPKI ROA enforcement, route leak detection, and a defined emergency quarantine procedure. Any advertisement of VPC prefixes outside the overlay is a misconfiguration regardless of which option is in use.
+**VPC space never leaves the overlay.** The VPC pool — whether ULA or GUA — must not be advertised to the underlay, leaked to transit providers, or made reachable from outside the overlay. For ULA (`fd00::/8`), this has a strong backstop: upstreams conventionally filter `fd00::/8` as bogon space (RFC 4193 §4.1 mandates this default at exterior BGP sessions), so a misconfiguration is unlikely to result in global reachability — though, as with any convention enforced by other operators' configurations rather than the protocol itself, the platform should still apply its own outbound filtering as defense-in-depth. For GUA, there is no automatic filtering backstop — a missing or misconfigured export policy will result in the prefix entering the global DFZ. GUA VPC addressing therefore requires the full set of controls defined in [GUA Tenant Addressing Policy](#gua-tenant-addressing-policy): default deny export, explicit allowlist per tenant, RPKI ROA enforcement, route leak detection, and a defined emergency quarantine procedure. Any advertisement of VPC prefixes outside the overlay is a misconfiguration regardless of which option is in use.
 
-**Locator and infrastructure blocks do not overlap.** The SRv6 locator block (`[LOCATOR-BLOCK]`) and the infrastructure loopback block (`[INFRA-BLOCK]`) must be drawn from distinct, non-overlapping allocations confirmed at RIR registration time. Routing policy must be able to distinguish them unambiguously. In a uSID deployment, the `/48` uSID Block is shared across all nodes within a PoP — there are no per-router locator subnets to manage or filter. The Active uSID slot (bits 49–64) and VRF argument (bits 65–80) are opaque to underlay routing and do not affect prefix reachability or filtering.
+**Locator and infrastructure blocks do not overlap.** The SRv6 locator block (`[LOCATOR-BLOCK]`) and the infrastructure loopback block (`[INFRA-BLOCK]`) must be drawn from distinct, non-overlapping allocations confirmed at RIR registration time. Routing policy must be able to distinguish them unambiguously. In a uSID deployment, the `/48` uSID Block is the shared registration and filtering unit for all nodes within a PoP; individually, each node also advertises its own `/64` locator carved from that block (see [SRv6 Locator /48](#srv6-locator-48)) so the underlay can route to the correct node. The Active uSID slot (bits 49–64) and VRF ID slot (bits 65–80) are opaque to underlay routing and do not affect prefix reachability or filtering — routing policy still only needs to key off the covering `/48` for isolation purposes.
 
 **Infrastructure loopbacks are not reachable from tenant networks.** Tenant VRFs must not have routes to the infrastructure loopback block. This is enforced by import policy at the VRF handoff point — the `[INFRA-BLOCK]` aggregate must appear in a prefix deny list applied to all tenant VRF imports.
 
