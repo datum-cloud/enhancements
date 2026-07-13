@@ -1,7 +1,7 @@
 ---
 status: provisional
 stage: alpha
-latest-milestone: "v0.1"
+latest-milestone: "v0.x"
 ---
 <!--
 Inspired by https://github.com/kubernetes/enhancements/tree/master/keps/NNNN-kep-template
@@ -60,8 +60,7 @@ should be approved by the remaining approvers and/or the owning SIG (or
 SIG Architecture for cross-cutting RFCs).
 -->
 
-<!-- omit from toc -->
-# Telemetry Export Policies
+# Initial Scope for Billing Datum Cloud Consumers
 
 <!--
 This is the title of your Enhancement. Keep it short, simple, and descriptive. A good
@@ -75,22 +74,13 @@ highlighting any additional information provided beyond the standard Enhancement
 template.
 -->
 
-- [Summary](#summary)
-- [Motivation](#motivation)
-  - [Goals](#goals)
-  - [Non-Goals](#non-goals)
-- [Proposal](#proposal)
-  - [Telemetry Data](#telemetry-data)
-  - [Supported Sink Protocols](#supported-sink-protocols)
-  - [Delivery Guarantees](#delivery-guarantees)
-- [Design Details](#design-details)
-  - [Configuring Sources](#configuring-sources)
-    - [MVP Metric Source Configuration](#mvp-metric-source-configuration)
-    - [Target Metric Source Configuration](#target-metric-source-configuration)
-  - [Configuring Sinks](#configuring-sinks)
-    - [Prometheus Remote Write](#prometheus-remote-write)
-    - [OpenTelemetry](#opentelemetry)
-- [Implementation History](#implementation-history)
+- [Initial Scope for Billing Datum Cloud Consumers](#initial-scope-for-billing-datum-cloud-consumers)
+  - [Summary](#summary)
+  - [Motivation](#motivation)
+    - [Goals](#goals)
+    - [Non-Goals](#non-goals)
+  - [Glossary](#glossary)
+  - [Functional Requirements](#functional-requirements)
 
 ## Summary
 
@@ -112,18 +102,9 @@ updates.
 [documentation style guide]: https://github.com/kubernetes/community/blob/master/contributors/guide/style-guide.md
 -->
 
-Users will be able to create Export Policies on Datum Cloud to configure how
-telemetry from resources they create in Datum Cloud (Gateways, Workloads,
-Networks, etc) are exported to third-party telemetry platforms allowing users to
-continue using their existing telemetry stack.
-
-Export policies can be used to send to any telemetry platform that supports
-receiving data through through one of our supported sink protocols. The
-telemetry system will provide at-least once delivery guarantees over all
-telemetry data that is received from Datum Cloud resources.
-
-[Grafana Cloud]: https://grafana.com/products/cloud/
-[Datadog]: https://www.datadoghq.com
+This enhancement is focused on getting alignment around the functionality that
+needs to be designed and developed in order to bill consumers of Datum Cloud's
+services.
 
 ## Motivation
 
@@ -132,16 +113,7 @@ This section is for explicitly listing the motivation, goals, and non-goals of
 this Enhancement.  Describe why the change is important and the benefits to users.
 -->
 
-Datum Cloud users want visibility into the resources they create on Datum Cloud
-so they can understand the health of their infrastructure. For example, users
-that configure L7 Gateways in our networking services will want metrics around
-the HTTP traffic our gateways are processing. Users will also want CPU / Memory
-metrics for any instances that are created for the compute service.
 
-Some users may have an existing telemetry stack they want to use to explore and
-analyze the telemetry data available from Datum Cloud. By introducing
-configurable export policies, we empower consumers to control how telemetry data
-is exported to their existing telemetry platform.
 
 ### Goals
 
@@ -150,17 +122,8 @@ List the specific goals of the Enhancement. What is it trying to achieve? How wi
 know that this has succeeded?
 -->
 
-- Provide a mechanism for consumers to configure how telemetry for resources
-  they've created is exported to their existing telemetry system
-- Support standard protocols for shipping telemetry data (e.g. [Prometheus
-  Remote Write][remote-write], [OpenTelemetry][OTLP]) that's in use across the
-  industry and supported by major telemetry platforms (e.g. [Grafana Cloud],
-  [Datadog]).
-- Enable fine-grained control over what telemetry data is exported.
-- Provide a self-service experience via API and UI for easy configuration.
-
-[OTLP]: https://opentelemetry.io/docs/specs/otel/protocol/
-[remote-write]: https://prometheus.io/docs/specs/prw/remote_write_spec/
+- Define requirements for functionality that needs to be available to support
+  billing consumer's of Datum Cloud services
 
 ### Non-Goals
 
@@ -169,10 +132,70 @@ What is out of scope for this Enhancement? Listing non-goals helps to focus disc
 and make progress.
 -->
 
-- Mandating a specific third-party provider.
-- Managing consumer-side ingestion costs or quotas.
+- Define requirements for individual systems and components. Additional
+  enhancements will be created to flesh our details of each component.
 
-## Proposal
+## Glossary
+
+This glossary helps define terms used throughout the rest of the document that
+readers may find helpful.
+
+- **Service Provider**: A provider that is using Milo to offer their services to
+  **Consumer**(s) (e.g. Datum Technology, Inc)
+- **Consumer**: An entity (*Business* or *Individual*) that is consuming a
+  service offered by a **Service Provider**.
+- **Service**: A discrete service that is offered to **Consumer**(s) by a
+  **Service Provider** (e.g. *Datum Cloud DNS*)
+
+## Functional Requirements
+
+This functional requirements provide clarity over functionality various users of
+the platform would expect at the completion of this enhancement.
+
+- A **Service Provider** can register a **Service** and configure the pricing
+  that can be used to charge **Consumers**. The **Service Provider** can also
+  configure every feature available with from the **Service** that may be
+  enabled for **Consumers**.
+- A **Service Provider** can charge a **Consumer** for a **Service** using
+  one-time charges, recurring-charges, or usage-based charges.
+- A **Service Provider** is able to configure usage reported by a **Service** to
+  be billed to a **Consumer**.
+- A **Consumer** is able to create a billing account for their organization and
+  attach a payment profile that configures how the organization should be
+  billed.
+- A **Consumer** is able to configure the contact details for the billing
+  account to ensure billing notifications are routed to the correct contact.
+- A **Consumer** is able to attach a project to a billing account so any usage
+  consumed by the project is billed correctly.
+- A **Service Provider** is able to create multiple offers that **Consumers**
+  can choose from to get access to **Services** (e.g. *Free*, *Pro*,
+  *Enterprise*). An offer may provide access to multiple **Services** sold as a
+  single offer and may offer a sub-set of features available with a service.
+- A **Consumer** is able to view all publicly available offers so they can
+  choose the best one that meets their needs. A **Consumer** is able to purchase
+  an offer allowing them to access the service. A **Consumer** is able to cancel
+  their services at any time.
+- A **Consumer** will be invoiced at the end of each month that includes all
+  charges from **Services** they consumed. **Consumers** will be able to
+  retrieve all of their invoices and download them in PDF format.
+- A **Service Provider** can charge the payment profile configured for a
+  **Consumer**'s billing account for any outstanding invoices. Payments must
+  automatically be reconciled against invoices.
+- A **Consumer** should be able to view all payment history for their billing
+  account, including successful and failed payments.
+- A **Service Provider** can suspend a **Consumer**'s billing account if they do
+  not pay their bills on time. A **Consumer**'s billing contacts should receive
+  a notification before a billing account is suspended for non-payment.
+- A **Service Provider** can issue a refund for a **Consumer**'s payment. A
+  refund may be partial or a full refund of the payment.
+- A **Service Provider** can write-off an invoice as bed-debt in case of
+  non-payment.
+- A **Service Provider** can configure payment retry logic and escalation for
+  overdue payments.
+- All billing resources will be auditable with the activity system so **Service
+  Providers** and **Consumers** can audit the state of the system over time.
+
+<!-- ## Proposal -->
 
 <!--
 This is where we get down to the specifics of what the proposal actually is.
@@ -183,68 +206,118 @@ The "Design Details" section below is for the real
 nitty-gritty.
 -->
 
-Users will be able to configure one or more **ExportPolicy** within Datum Cloud
-projects to control how telemetry data published by resources in their projects
-are exported to third-party telemetry systems. ExportPolicies will support
-configuring a single sink to configure how telemetry data is exported. Users
-will be able to choose from [multiple sink protocols](#supported-sink-protocols)
-to choose the one that works best for their platform or use-case.
+<!-- This proposal section covers the functionality or concepts that have been
+identified as in scope or out of scope of this enhancement. This list is
+expected to shift as we get alignment around the functionality offered. -->
 
- An export policy will allow users to exporting data to any [OpenTelemetry
-protocol (OTLP)][OTLP] compatible endpoint.
+<!-- ### Billing -->
 
-> [!NOTE]
->
-> In the future, we will plan to support organization-level export policies to
-> make it easier to export telemetry across multiple projects.
+<!-- omit from toc -->
+<!-- #### In Scope -->
+<!--
+- **Billing Accounts** are organization-level resources that define how an
+  organization expects to be billed for **Services**. Organization admins will
+  be required to create at least one billing account when setting up an
+  organization. Existing organizations will need to create a billing account to
+  avoid service disruption. Organization admins will also be required to
+  associate projects with billing accounts to configure how a project's
+  consumption is billed to the organization. Refer to the [billing account
+  enhancement](https://github.com/datum-cloud/enhancements/pull/253/files) for
+  more detail.
 
-![](./container-diagram.png)
+- **Entitlements** are resources tied to a billing account that determines what
+  the billing account is entitled to consume from the platform. Entitlements
+  contain the pricing configuration a billing account will pay for any
+  **Service** it consumes. This includes one time charges, recurring static
+  charges, and usage based charges.
 
-Export policies will also allow users to leverage telemetry filters to provide
-fine-grained control over which telemetry data is exported so they only export
-telemetry data they care about.
+- **Payment Profile** are resources associated with a billing account that
+  defines how the billing account will pay for any charges attached to
+  entitlements. For the scope of this effort, we will only support Credit Card
+  based payment profiles. Future efforts may add support for ACH / Wire Transfer
+  / Other payment methods.
 
-### Telemetry Data
+- **Invoices** will be generated every month for each billing account. Invoices
+  will contain line items for any charges the billing account owes for the
+  billing period. Users will be expected to pay for invoices using the **Payment
+  Profile** configured on their billing account.
 
-- **Metrics** - Resources will publish metrics that can be used by consumers to
-  understand the health and performance of the resource. E.g. Our L7 Gateway
-  will publish HTTP traffic stats to provide visibility about traffic being
-  processed at all of our edge locations.
-- **Logs** - Resources will publish log and event data to provide users with
-  visibility on behavior and actions taken against the resource. E.g. Audit logs
-  will be produced for all resources to capture what change was made, who
-  changed it, and when it was changed.
-- **Traces** - In the future, users will be able to enable tracing functionality
-  to be able to visualize traffic flows through our network.
+- **Usage** will need to be collected by the **Telemetry** service and
+  aggregated for billing purposes. For the scope of this effort, we will **not**
+  support detailed usage reports. Users will only receive invoices with total
+  usage per line-item.
 
-The [Design Details](#design-details) section goes into more detail on how the
-user may be expected to configure an export policy to publish various types of
-telemetry and filter it to their needs.
+#### Out of Scope
 
-### Supported Sink Protocols
+- **Commitments** are used to bind consumers to termed contracts, typically used
+  when engaging with large / enterprise consumers. Commitments are often used to
+  offer lower pricing for committing to longer-term deals. Without commitments,
+  consumers will be able to terminate their entitlements at any time.
 
-Below are a list of the protocols we plan to support for exporting telemetry
-data through export policies. Additional sink protocols may be added in the
-future. If there's a sink protocol you would like to see supported, please open
-a new enhancement issue.
+- **Budgets** allow billing account admins to configure threshold based alerts
+  when spend limits are approaching or have been exceeded.
 
-- **[OpenTelemetry][OTLP]**
-- **[Prometheus Remote Write][remote-write]**
+- **Multi-Currency** support will allows **Service Providers** to offer their
+  **Services** in currencies other than **USD**.
 
-### Delivery Guarantees
+- **Hierarchical Billing** will add support for sub-account billing for advanced
+  reseller / partner use-cases.
 
-An export policy will provide at-least once delivery guarantee over telemetry
-data that's received from resources. Users can configure retry and backoff
-policies to control how telemetry data is handled when configured sinks aren't
-accepting telemetry data.
+- **Discounting** will enable **Service Providers** to offer their **Consumers**
+  discounts on **Service Pricing**.
 
-> [!IMPORTANT]
->
-> We will have limits in place to control how long we will store telemetry data
-> that’s failing to export to configured sink endpoints. After those limits are
-> reached, we will no longer be able to guarantee at-least once delivery.
+- **Detailed Reporting** would provide **Consumers** with detailed billing
+  reports so their can understand their billing accounts usage and which
+  projects and services consumed it.
 
-<!-- ### User Stories (Optional) -->
+### Telemetry
+
+#### In Scope
+
+- **Metric Definitions** will be defined by **Service Providers** for every
+  metric that's available to **Consumers** of a **Service**. Metrics can be used
+  for *operational visibility* into the service or be used for *billing usage*.
+  This will be required so we know what metrics are available from a **Service**
+  enabling a **Service Provider** to configure a price for the metric.
+- **Metric Policies** will be defined by **Service Providers** for every metric
+  that defines how metrics are produced from resources in the control plane or
+  data-plane telemetry. See [policy-driven metrics
+  platform](https://github.com/datum-cloud/enhancements/pull/252) for more
+  information.
+- **Metric Exporting** will allow systems like the **Billing** platform to
+  subscribe to real-time metrics reporting from services so it can be consumed
+  and sent to configured billing providers.
+
+#### Out of Scope
+
+### Service Catalog
+
+- **Services** must be configured by **Service Providers** to register the
+  services that will be available to their **Consumers**.
+
+- **Service Pricing** must be configured for each **Service** a **Service
+  Provider** is offering to their **Consumer**(s). Pricing must be configured
+  for one-time charges, recurring charges, and usage based charges. Usage based
+  charges will be associated with a **Metric Definition** to define how the
+  metric is billed to **Consumers**.
+
+### Price Book
+
+- **Offers** configure how **Service Pricing** configurations can be combined
+  into a single offer that can be accepted by consumers. Service providers may
+  have multiple offers with varying level of usage / pricing (e.g. Free, Pro,
+  Enterprise). **Consumers** will be expected to accept an offer which will
+  result in an **Entitlement** being created for their billing account.
+
+### Quota
+
+- **Entitlements** would need to be integrated with the quota system to enable
+  users access to features / resources after an entitlement has been activated
+  on their account. This helps ensure that a user cannot consume a service until
+  there's an active entitlement for the service. This _may_ require us to add
+  support for feature flagging in the quota system.
+
+### User Stories -->
 
 <!--
 Detail the things that people will be able to do if this Enhancement is implemented.
@@ -253,7 +326,7 @@ the system. The goal here is to make this feel real for users without getting
 bogged down.
 -->
 
-<!-- #### Story 1 -->
+<!-- #### Define service pricing -->
 
 <!-- #### Story 2 -->
 
@@ -280,7 +353,7 @@ How will UX be reviewed, and by whom?
 Consider including folks who also work outside of your immediate team.
 -->
 
-## Design Details
+<!-- ## Design Details -->
 
 <!--
 This section should contain enough information that the specifics of your
@@ -288,198 +361,6 @@ change are understandable. This may include API specs (though not always
 required) or even code snippets. If there's any ambiguity about HOW your
 proposal will be implemented, this is the place to discuss them.
 -->
-
-Users will be able to manage one or more **ExportPolicy** resources in Datum
-Cloud Projects to configure how they would like telemetry from resources they
-create to be exported to a third-party telemetry platform.
-
-Export Policies are constructed of multiple sources to select telemetry data
-that should be exported and multiple sink configurations to control where
-telemetry data is sent.
-
-### Configuring Sources
-
-Users can configure multiple telemetry sources so they can include metrics,
-logs, and traces from multiple resources to export. Telemetry sources will
-support filtering by namespace, resource labels, and resource kinds so users
-only export telemetry they care about.
-
-#### MVP Metric Source Configuration
-
-To start, export policies will only support exporting **Metric** data from
-resources created on Datum Cloud. Users will be able to leverage a [metricsql]
-query to filter which metrics they'd like to receive. An empty query means all
-metrics will be exported.
-
-[metricsql]: https://docs.victoriametrics.com/metricsql/
-
-```yaml
-apiVersion: telemetry.datumapis.com/v1alpha1
-kind: ExportPolicy
-metadata:
-  name: gateway-export-policy  # Unique name for the export policy
-spec:
-  # Defines the telemetry sources that should be exported. An export policy can
-  # define multiple telemetry sources. Telemetry data will **not** be de-duped
-  # if its selected from multiple sources.
-  sources:
-    - name: "gateway-metrics"  # Descriptive name for the source
-      # Source metrics from the Datum Cloud platform
-      metrics:
-        # The options in this section are expected to be mutually exclusive. Users
-        # can either leverage metricsql or resource selectors.
-        #
-        # This option allows user to supply a metricsql query if they're already
-        # familiar with using metricsql queries to select metric data from
-        # Victoria Metrics.
-        metricsql: |
-          {service_name="networking.datumapis.com", resource_kind="Gateway", __name__=~"network_bytes_.*"}
-```
-
-#### Target Metric Source Configuration
-
-The export policy below is meant to highlight the configuration options we
-expect to offer in the future, that provides filtering options for those less
-comfortable with [metricsql].
-
-> [!NOTE]
->
-> This configuration only specifies how to source Metric data right now. We will
-> also expand this to add Log and Trace configuration examples in the future.
-
-```yaml
-apiVersion: telemetry.datumapis.com/v1alpha1
-kind: ExportPolicy
-metadata:
-  name: example-export-policy  # Unique name for the export policy
-spec:
-  # Defines the telemetry sources that should be exported. An export policy can
-  # define multiple telemetry sources. Telemetry data will **not** be de-duped
-  # if its selected from multiple sources.
-  sources:
-    - name: "application-metrics"  # Descriptive name for the source
-      # Source metrics from the Datum Cloud platform
-      metrics:
-        # The options in this section are expected to be mutually exclusive. Users
-        # can either leverage metricsql or resource selectors.
-        #
-        # This option allows user to supply a metricsql query if they're already
-        # familiar with using metricsql queries to select metric data from
-        # Victoria Metrics.
-        metricsql: |
-          {service_name=“networking.datumapis.com”, resource_kind="Gateway", __name__=~”network_bytes_.*”}
-
-        # This gives the user a way of selecting resources using namespace
-        # selectors, group/kind info, and label selectors. This is a more k8s
-        # experience to selecting metric data.
-        resourceSelectors:
-          # By default, a resource selector will only select resources from the
-          # same namespace the export policy is created in. This can be
-          # overridden so users can create a project wide collector if they wish
-          # to.
-          - namespaceSelector:
-              # Only match resources in namespaces used for the production
-              # environment.
-              matchLabels:
-                environment: production
-            # Filter which metrics should be selected based on label values that
-            # may be on the resource the metrics were sourced from.
-            labelSelectors:
-              matchLabels:
-                app: "my-gateway"
-            kinds:
-              - apiGroups: ["gateway.networking.k8s.io"]
-                resources: ["gateways"]
-              - apiGroups: ["compute.datumapis.com"]
-                kind: ["workloads"]
-              - apiGroups: ["networking.datumapis.com"]
-                kind: ["*"]
-```
-
-### Configuring Sinks
-
-Users can configure multiple sinks to control how telemetry data is exported to
-their telemetry systems. Some sink protocols may only support one type of
-telemetry data so multiple sinks can be used to support exporting all telemetry
-data to the correct sink.
-
-#### Prometheus Remote Write
-
-Users can also configure a sink to use the [Prometheus Remote Write
-protocol][remote-write] to export metric data to their telemetry platform. This
-sink supports using Basic and Bearer token authentication.
-
-```yaml
-apiVersion: telemetry.datumapis.com/v1alpha1
-kind: ExportPolicy
-metadata:
-  name: example-export-policy
-spec:
-  sources:
-    - name: metrics
-      ...
-
-  sinks:
-    - name: grafana-cloud
-      # Configure which sources should be sent to this sink.
-      sources:
-      - metrics
-      target:
-        prometheusRemoteWrite:
-          endpoint: https://prometheus-prod-56-prod-us-east-2.grafana.net/api/prom/push
-          authentication:
-            basic:
-              # A reference to a `kubernetes.io/basic-auth` secret type. Must
-              # contain `username` and `password` keys.
-              secretRef:
-                name: "grafana-cloud-credentials"
-          batch:
-            timeout: 5s           # Batch timeout before sending telemetry
-            maxSize: 500          # Maximum number of telemetry entries per batch
-          retry:
-            maxAttempts: 3        # Maximum retry attempts
-            backoffDuration: 2s   # Delay between retry attempts
-```
-
-#### OpenTelemetry
-
-This example demonstrates how to configure an export policy to send telemetry
-data to an OpenTelemetry compatible endpoint. This sink supports using Basic and
-Bearer token authentication.
-
-> [!NOTE]
->
-> This example demonstrates how we will support the OpenTelemetry protocol in
-> the future.
-
-```yaml
-apiVersion: telemetry.datumapis.com/v1alpha1
-kind: ExportPolicy
-metadata:
-  name: example-export-policy
-spec:
-  sources:
-    ...
-
-  sinks:
-    - name: grafana-cloud-otel
-      target:
-        openTelemetry:
-          http:
-            endpoint: "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
-          authentication:
-            basic:
-              # A reference to a `kubernetes.io/basic-auth` secret type. Must
-              # contain `username` and `password` keys.
-              secretRef:
-                name: "grafana-cloud-credentials"
-          batch:
-            timeout: 5s           # Batch timeout before sending telemetry
-            maxSize: 500          # Maximum number of telemetry entries per batch
-          retry:
-            maxAttempts: 3        # Maximum retry attempts
-            backoffDuration: 2s   # Delay between retry attempts
-```
 
 <!-- ## Production Readiness Review Questionnaire -->
 
@@ -507,6 +388,7 @@ This section must be completed when targeting alpha to a release.
 <!--
 Pick one of these and delete the rest.
 -->
+
 <!--
 - [ ] Feature gate
   - Feature gate name:
@@ -604,6 +486,7 @@ Please describe all items visible to end users below with sufficient detail so
 that they can verify correct enablement and operation of this feature.
 Recall that end users cannot usually observe component logs or access metrics.
 -->
+
 <!--
 - [ ] Events
   - Event Reason:
@@ -636,7 +519,8 @@ question.
 Pick one more of these and delete the rest.
 -->
 
-<!-- - [ ] Metrics
+<!--
+- [ ] Metrics
   - Metric name:
   - [Optional] Aggregation method:
   - Components exposing the metric:
@@ -790,7 +674,7 @@ For each of them, fill in the following information by copying the below templat
 
 <!-- #### What steps should be taken if SLOs are not being met to determine the problem? -->
 
-## Implementation History
+<!-- ## Implementation History -->
 
 <!--
 Major milestones in the lifecycle of a Enhancement should be tracked in this section.
@@ -802,12 +686,6 @@ Major milestones might include:
 - the version where the Enhancement graduated to general availability
 - when the Enhancement was retired or superseded
 -->
-
-- 2025-03-11 - Define initial enhancement goals, system architecture, and API
-  design
-- 2025-04-22 - Initial implementation of the Export Policy API ([v0.1.0])
-
-[v0.1.0]: https://github.com/datum-cloud/telemetry-services-operator/releases/tag/v0.1.0
 
 <!-- ## Drawbacks -->
 

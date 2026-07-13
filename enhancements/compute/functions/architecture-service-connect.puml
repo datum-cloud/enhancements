@@ -1,0 +1,26 @@
+@startuml architecture-service-connect
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include ../../datum-theme.puml
+
+title Functions - Private Connectivity via Service Connect
+
+System_Boundary(consumer_project, "Consumer Project") {
+    Container_Ext(gateway, "Gateway", "Gateway API", "Routes HTTP traffic")
+    Container_Ext(service_endpoint, "ServiceEndpoint", "Service Connect", "Private IP for Function backend")
+}
+
+System_Boundary(provider_cp, "Service Control Plane") {
+    Container_Ext(service_publication, "ServicePublication", "Service Connect", "Exposes Workload privately")
+    Container_Ext(workload, "Workload", "CRD", "Function instances")
+}
+
+System_Ext(backbone, "Datum Backbone", "Private connectivity")
+
+Rel_U(gateway, service_endpoint, "Routes to backend", "HTTPRoute backendRef")
+Rel_R(service_endpoint, backbone, "Routes through")
+Rel_R(backbone, service_publication, "Delivers to")
+Rel_D(service_publication, workload, "Load balances to")
+
+SHOW_LEGEND()
+@enduml
