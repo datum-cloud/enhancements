@@ -14,7 +14,7 @@ Tracking issue:
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
 - [Proposal](#proposal)
-  - [The capability, in product terms](#the-capability-in-product-terms)
+  - [What suspension does](#what-suspension-does)
   - [How suspension works](#how-suspension-works)
   - [The lifecycle state machine](#the-lifecycle-state-machine)
   - [User Stories](#user-stories)
@@ -125,7 +125,7 @@ control fixes all three.
 
 ## Proposal
 
-### The capability, in product terms
+### What suspension does
 
 Project suspension is a switch an operator (or an automated policy) can flip on a
 project. When flipped **on**:
@@ -355,9 +355,8 @@ pause/resume actions *observable*:
 ## Service Integration Contract
 
 This is the heart of the enhancement. Suspension only works if every managed
-service honors it consistently. This section defines the contract in
-product/behavioral terms; API specifics are sketched in
-[Design Details](#design-details).
+service honors it consistently. This section describes what a service must do;
+the API specifics are sketched in [Design Details](#design-details).
 
 ### What the platform provides
 
