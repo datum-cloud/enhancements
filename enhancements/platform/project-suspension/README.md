@@ -154,7 +154,17 @@ teardown, and no N×M web of per-trigger, per-service integrations.
 ### What suspension does
 
 Project suspension is a switch an operator (or an automated policy) can flip on a
-project. When flipped **on**:
+project.
+
+> [!NOTE]
+> The service-specific examples below — compute instances, served endpoints, DNS
+> records — are **representative of what the platform enables**, not a
+> specification of how any service implements it. How each managed service
+> actually pauses and resumes its work is out of scope for this document; each
+> service owns those mechanics in its own enhancement (see
+> [Non-Goals](#non-goals)).
+
+When flipped **on**:
 
 1. **The project freezes.** No one can create new resources or change existing
    configuration in the project. The project's control plane accepts reads but
