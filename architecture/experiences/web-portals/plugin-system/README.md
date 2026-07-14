@@ -47,6 +47,9 @@ This shows up identically in both portals today: the consumer portal carries a h
 
 ## Architecture overview
 
+> [!IMPORTANT]
+> Everything from here down — resource kinds, API groups, field names, the manifest shape, extension-point types — is illustrative of the design's *shape*, not a final contract. Expect the exact schema to change as the design is reviewed and implementation starts.
+
 ```mermaid
 sequenceDiagram
     participant ST as Service team
