@@ -130,6 +130,19 @@ control fixes all three.
 
 ## Proposal
 
+Project suspension is deliberately a **platform primitive**, not a feature of any
+one service. Several independent policies need to stop a project *now* and
+reversibly — a trust-and-safety operator acting on an abuse report, the
+fraud-and-abuse system crossing a score threshold, billing cascading from a
+suspended account, a compliance hold — and none of them should build or own that
+stop themselves. They declare intent against one primitive; it derives a single
+`Suspended` state and fans that signal out to every managed service through the
+one integration contract the service catalog already defines. A new service
+inherits suspension by implementing that contract — no bespoke per-service
+teardown, and no N×M web of per-trigger, per-service integrations.
+
+![Project suspension system context: many triggers depend on one reversible primitive, which every managed service honors through the single service-catalog contract](context.png)
+
 ### What suspension does
 
 Project suspension is a switch an operator (or an automated policy) can flip on a
