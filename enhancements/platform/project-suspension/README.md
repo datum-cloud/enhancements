@@ -579,10 +579,9 @@ human-attributed) and the authoritative-vs-derived distinction are covered in
 
 ### Where the state lives
 
-Two questions from issue #800 — *where does the state live* and *is it a Project
-field or Milo `PlatformAccess`* — resolve as follows.
-
-`PlatformAccess` already has a reversible `Suspended` state, but it is
+Suspension state could live on the `Project` itself or reuse Milo's existing
+`PlatformAccess` `Suspended` state. `PlatformAccess` already has a reversible
+`Suspended` state, but it is
 **user-scoped** (at most one per user) and its enforcement is **external** (the
 auth provider revokes sessions). It is the right *pattern* but the wrong *scope*
 and *enforcement point* for projects. Project suspension therefore lives on the
