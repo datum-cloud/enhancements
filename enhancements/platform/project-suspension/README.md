@@ -126,6 +126,12 @@ control fixes all three.
   in `services.miloapis.com` and never touch the `Project`), so it is left to a
   future service-catalog enhancement. This document covers *project*-scoped
   suspension only.
+- **The billing service's integration into suspension** — how billing detects
+  delinquency and fans a suspension out across the projects its billing-account
+  bindings fund. Billing is a *trigger* here: it creates `ProjectSuspension`s with
+  `reason: Billing` like any other trigger. But the cascade mechanics and the
+  account-to-project traversal are billing-side logic, left to a separate
+  billing-integration enhancement.
 - **Throttling** or **soft-limiting** a project (a degraded-but-running state).
   Suspension is a hard, binary pause. Graduated responses are a possible future
   extension, noted in [Alternatives](#alternatives).
@@ -367,17 +373,16 @@ pause/resume actions *observable*:
   They stay on the resource and in the audit log, not on the consumer's activity
   feed. Suspension is agnostic to those signals (see [Non-Goals](#non-goals)), and
   its consumer-facing surface stays deliberately minimal.
-- **Billing-account suspension cascades to its projects.** A billing account
-  already has its own `Suspended` state, and a billing-account binding records
-  which account is responsible for each project. When an account is suspended for
-  delinquency, the billing system fans out over its active bindings and creates
-  one suspension (`reason: Billing`, `reinstateAuthority: Consumer`) per bound
-  project — the same trigger-then-enforce split used for abuse. Project
-  suspension is what gives billing-account suspension real teeth: today a
-  suspended account
-  keeps its bindings but has no way to actually pause the projects' workloads.
-  Billing owns the account-to-project mapping and does the fan-out; suspension
-  does not watch billing accounts itself, so the two stay cleanly separated.
+- **Billing is a trigger, not a special case.** A suspended billing account
+  produces project suspensions with `reason: Billing` and
+  `reinstateAuthority: Consumer` (the customer self-remediates by settling the
+  balance). Project suspension is what gives a suspended billing account real
+  teeth — today the account keeps its bindings but cannot actually pause the
+  projects' workloads. Suspension does not watch billing accounts itself; billing
+  creates the `ProjectSuspension`s, exactly as any other trigger does. The cascade
+  mechanics — traversing billing-account bindings and mapping accounts to projects
+  — are billing-side logic left to a separate enhancement (see
+  [Non-Goals](#non-goals)).
 - **The pause must be genuinely non-destructive.** Any service that cannot pause
   without data loss (e.g. because it lacks a snapshot/suspend capability yet)
   must degrade to the least-destructive option available and clearly report that
@@ -750,10 +755,11 @@ recovers.
   API live entirely in `services.miloapis.com` and never touch the `Project`, so
   it belongs to a future service-catalog enhancement; this document now covers
   project-scoped suspension only.
-- 2026-07-14: Clarified the billing-account relationship — a suspended billing
-  account fans out to a per-project suspension over its bindings, and a project
-  may carry multiple concurrent suspensions that each lift by their own
-  authority.
+- 2026-07-14: Scoped the billing-service integration out to a separate
+  enhancement — billing remains a trigger that creates `reason: Billing`
+  suspensions, but delinquency detection and the cascade over billing-account
+  bindings are billing-side logic. A project may carry multiple concurrent
+  suspensions that each lift by their own authority.
 
 ## Drawbacks
 
