@@ -32,11 +32,10 @@ case (Active)
 case (Suspended  — NEW)
   :Pause execution & serving;<<#E6F59F>>
   :Retain all data, config,\nand projected resources;<<#E6F59F>>
-  :Revoke per-consumer access\n(PolicyBinding, reversibly);<<#E6F59F>>
   :Report "paused" to platform;
   stop
 case (Reinstated  — NEW)
-  :Resume from preserved state\n(restart instances, serve, restore access);<<#E6F59F>>
+  :Resume from preserved state\n(restart instances, serve);<<#E6F59F>>
   :Report "resumed" to platform;
   stop
 case (Disabled / Deleted)

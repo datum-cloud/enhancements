@@ -86,7 +86,7 @@ Deleting workloads to stop abuse has three unacceptable properties: it is
 **destructive** (the customer's data and configuration are gone), it is
 **irreversible** (a wrongly-flagged customer cannot be made whole), and it is
 **incomplete** (it addresses running compute but says nothing about the project's
-identity, networking, or other enabled services). A reversible project-level
+networking, DNS, or other enabled services). A reversible project-level
 control fixes all three.
 
 ### Goals
@@ -95,8 +95,8 @@ control fixes all three.
   with a clear `Active ⇄ Suspended` lifecycle and a full audit trail.
 - **Block all new work** in a suspended project (no new resources, no
   configuration changes) via admission.
-- **Pause all running work** — compute instances, served traffic, live
-  credentials — through a service-integration contract, without deleting data.
+- **Pause all running work** — compute instances and served traffic — through a
+  service-integration contract, without deleting data.
 - Define a **single integration contract** that every managed service uses to
   honor suspension, so behavior is uniform across compute, networking, DNS, and
   future services.
@@ -139,8 +139,7 @@ project. When flipped **on**:
    configuration in the project. The project's control plane accepts reads but
    rejects writes.
 2. **Everything running stops — but nothing is deleted.** Compute instances are
-   paused, published endpoints stop serving, and the project's access to its
-   enabled services is revoked. Disks, configuration, IP allocations,
+   paused and published endpoints stop serving. Disks, configuration, IP allocations,
    DNS records, and enabled-service state all remain in place.
 3. **The customer is told why, and how to appeal.** Suspension records a reason
    and notifies the project's owners, with a path to request review.
@@ -149,7 +148,7 @@ When flipped **off** (reinstatement):
 
 1. **The project unfreezes** and accepts writes again.
 2. **Everything resumes** from where it left off — instances start from their
-   preserved state, endpoints serve again, and access is restored.
+   preserved state and endpoints serve again.
 3. **The full history** of who suspended and reinstated the project, when, and
    why, is retained for audit and appeal.
 
@@ -182,7 +181,7 @@ sequenceDiagram
     CP-->>Adm: Suspension state propagates
     CP-->>Svc: Suspension signal propagates<br/>(via ServiceConsumer / project CP watch)
     Adm->>Adm: Reject new writes (admission)
-    Svc->>Svc: Pause running work & revoke<br/>per-consumer access (retain data)
+    Svc->>Svc: Pause execution & serving<br/>(retain data)
     Svc-->>CP: Report "paused" status
     Note over CP,Svc: Project is fully suspended,<br/>no data lost
 
@@ -199,8 +198,8 @@ it outward. Two independent enforcement layers then act on that single signal
 (detailed in [Enforcement layers](#enforcement-layers)):
 
 - **Admission** blocks new writes in the project's control plane.
-- **Managed services** pause the running work they own for the project and revoke
-  the per-consumer access they granted it — reversibly, retaining all data.
+- **Managed services** pause the running work they own for the project — stopping
+  execution and serving while retaining all data.
 
 No single component has to know about all of the others. Each observes the
 project's suspension state and does its part — the same loosely-coupled,
@@ -266,9 +265,9 @@ and it works for every project, using the same watch loop I already run.
 **Story 6 — Service provider suspends one consumer's access to its own service.**
 As the owner of a managed service, I detect abuse of *my* service by one consumer
 (or a per-service billing hold) that does not warrant suspending their whole
-project. I suspend just that consumer's access to my service; their access is
-revoked and their work on it is paused non-destructively, while the rest of their
-project keeps running. *Experience:* I can enforce at the granularity I own,
+project. I suspend just that consumer's access to my service; my service stops
+serving them and their work on it is paused non-destructively, while the rest of
+their project keeps running. *Experience:* I can enforce at the granularity I own,
 reversibly, instead of destructively disabling the service or escalating to a
 project-wide action.
 
@@ -439,9 +438,8 @@ the API specifics are sketched in [Design Details](#design-details).
 
 When a consumer project transitions to **suspended**, the service must:
 
-- **Stop serving and stop executing** the project's work — pause instances, stop
-  answering on published endpoints, and stop honoring the project's workload
-  identities.
+- **Stop serving and stop executing** the project's work — pause instances and
+  stop answering on published endpoints.
 - **Retain everything.** Keep all data, disks, configuration, allocations, and
   projected resources. Do **not** invoke the destructive teardown path used for
   service *disable*.
@@ -451,8 +449,8 @@ When a consumer project transitions to **suspended**, the service must:
 
 When the project is **reinstated**, the service must:
 
-- **Resume from the preserved state** — restart paused instances, resume serving,
-  re-enable identities.
+- **Resume from the preserved state** — restart paused instances and resume
+  serving.
 - **Report resumed** and emit a control-plane Event (`reason: ProjectResumed`).
 
 This is deliberately the *inverse* of today's behavior. Currently, when a
@@ -500,8 +498,7 @@ provider stamping the *same* suspended state onto the *one* `ServiceConsumer` it
 owns for that consumer. Nothing downstream changes:
 
 - The engagement library's **Suspend hook fires for that one relationship** — the
-  service revokes the consumer's access (reversibly), pauses what it serves for
-  them, and retains their data. Reinstatement runs the Resume hook, same as a
+  service pauses what it serves for that consumer and retains their data. Reinstatement runs the Resume hook, same as a
   project-wide lift.
 - **The blast radius stops at this service.** The consumer's other enabled
   services and their project stay `Active`; only this service goes dark for them.
@@ -537,13 +534,11 @@ Suspension slots directly into this model:
 
 - The **watch loop** that already reconciles per-consumer resources is where the
   service observes the suspension signal.
-- The **"instant revocation" property** (deleting a PolicyBinding immediately
-  revokes access) is exactly the access-revocation behavior suspension needs — but
-  suspension must do it *reversibly* (revoke while suspended, restore on
-  reinstate) rather than by permanent deletion.
 - The catalog's per-consumer engagement library gains the Suspend/Resume hooks
   so the transform/status loop has a defined, non-destructive path for a
-  suspended consumer.
+  suspended consumer — pause execution and serving, retain everything — distinct
+  from the existing destructive teardown (which deletes the consumer's projected
+  resources and `PolicyBinding`s).
 
 ### Making suspension observable (activities and events)
 
@@ -688,16 +683,14 @@ state:
    plane declares intent, and a gate refuses to persist new work that violates
    it. Deny responses carry a typed reason so clients can surface "this project
    is suspended."
-2. **Managed services (pause work and revoke access, reversibly).** Each service
-   pauses execution and serving for the project per the
-   [Service Integration Contract](#service-integration-contract), retaining data,
-   and revokes the per-consumer access it granted — the `PolicyBinding`s the
-   managed-service pattern already issues per consumer. Deleting a `PolicyBinding`
-   is how a service is disabled today ("delete PolicyBinding = immediate access
-   loss"); suspension reuses that instant-revocation behavior but applies it
-   *reversibly* — revoked while suspended, restored on reinstatement — never by
-   permanent deletion. The access being revoked is the per-consumer grant the
-   service already owns; there is no separate workload-identity system involved.
+2. **Managed services (pause running work).** Each service pauses execution and
+   serving for the project per the
+   [Service Integration Contract](#service-integration-contract), retaining data.
+   A paused project runs no code and serves no traffic, so it can no longer act —
+   pausing the work *is* the enforcement; there is no separate project "identity"
+   or credential to revoke on top of it. (Permanently deleting a service's
+   per-consumer `PolicyBinding`s is the *destructive disable* path, which
+   suspension deliberately does not use.)
 
 ### Reinstatement and reversibility
 
@@ -726,7 +719,7 @@ design. The mapping:
 | Resource Manager project lifecycle | Declarative project state; suspension enforced *on top of* state | First-class `Suspended` condition on the Project (cleaner than GCP's implicit approach) |
 | Project suspension (abuse/ToS) | Workloads shut down, access revoked, resources **retained**; reversible via appeal | Non-destructive pause + operator-gated reinstatement + appeal path |
 | **Service Control `Check`** | Every request checks consumer/billing/abuse/enablement status before executing | Admission gate blocks writes in a suspended project; services consult suspension state before serving |
-| Control-plane intent vs data-plane enforcement | State stored centrally; enforced per-request + by async reconcilers | Project declares `Suspended`; admission + services + identity enforce independently |
+| Control-plane intent vs data-plane enforcement | State stored centrally; enforced per-request + by async reconcilers | Project declares `Suspended`; admission and services enforce independently |
 | Suspension reasons (abuse vs billing) | Different triggers, different reinstate owners | `reason` + `reinstateAuthority` fields |
 | Compute suspend/stop/delete ladder | Graded reversibility; suspend retains RAM + disk | Depend on the compute instance pause primitive for lossless compute pause |
 | Deletion recovery window | 30-day `DELETE_REQUESTED` + undelete | Time-boxed retention before suspension escalates to deletion |

@@ -19,7 +19,7 @@ System_Boundary(projectcp, "Project Control Plane") {
 
 System_Boundary(services, "Managed Service Control Planes") {
     Container(consumer_rec, "ServiceConsumer", "services.miloapis.com", "Per-consumer record that\ncarries the suspension signal")
-    Container(svcctrl, "Service Controllers", "watch / transform loop", "Layer 2: pause & retain running work\nand revoke the per-consumer\nPolicyBinding (reversibly, no teardown)")
+    Container(svcctrl, "Service Controllers", "watch / transform loop", "Layer 2: pause execution & serving,\nretain running work\n(no teardown)")
 }
 
 Rel_D(operator, suspension_api, "Creates / lifts", "reason + authority")
