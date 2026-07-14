@@ -287,13 +287,12 @@ when it is reinstated, I resume. *Experience:* I write suspension handling once
 and it works for every project, using the same watch loop I already run.
 
 **Story 6 — Consumer sees, in plain English, what happened and what to do.**
-As a project member, when my project is suspended I see an activity in my
-project's timeline — "Project acme-prod was suspended — reason: abuse. Learn how
-to appeal." — and, as each service confirms it has paused, follow-on activities
-("Compute paused 12 instances", "DNS stopped serving acme-prod") that reassure me
-nothing was deleted. On reinstatement I see "Project acme-prod was reinstated"
-and the per-service "resumed" entries as my work comes back. *Experience:* I am
-never left guessing what state my project is in or why.
+As a project member, when my project is suspended I see a clear, plain-English
+activity in my project's timeline telling me what happened, why, and how to
+appeal — followed by per-service entries as work pauses and later resumes.
+*Experience:* I am never left guessing what state my project is in or why. (The
+expected activity sequence is detailed in
+[The activity and control-plane event experience](#the-activity-and-control-plane-event-experience).)
 
 **Story 7 — Service provider observes and audits its own conformance.**
 As the owner of a managed service, I can watch the control-plane event and
@@ -321,10 +320,23 @@ service render the human-readable timeline from them:
 
 For the consumer, the suspension surfaces as the **reason category and how to
 appeal** — enough to know what happened and what to do (what stays internal, and
-why, is covered in [Notes](#notes-constraints-and-caveats)). Turning these events
-and audit entries into a plain-English, per-project timeline is the
-[activity service](../activity/README.md)'s job, delivered through its standard
-mechanism; those specifics live with that service.
+why, is covered in [Notes](#notes-constraints-and-caveats)). Concretely, a
+customer should expect their project timeline to read as a legible sequence:
+
+1. **Suspended.** "Project `acme-prod` was suspended — reason: abuse. Learn how to
+   appeal." — the headline event, with the reason category and next step.
+2. **Each service pauses.** As services confirm they have paused, follow-on
+   entries appear — "Compute paused 12 instances", "DNS stopped serving
+   `acme-prod`" — reassuring the customer that work stopped and nothing was
+   deleted.
+3. **Reinstated.** On lift, the mirror sequence: "Project `acme-prod` was
+   reinstated," followed by per-service "resumed" entries as work comes back
+   online.
+
+The customer is never left guessing what state their project is in or why.
+Turning these events and audit entries into that plain-English, per-project
+timeline is the [activity service](../activity/README.md)'s job, delivered
+through its standard mechanism; those specifics live with that service.
 
 ### Notes, Constraints, and Caveats
 
