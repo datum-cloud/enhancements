@@ -138,7 +138,7 @@ control fixes all three.
 
 ## Proposal
 
-Project suspension is deliberately a **platform primitive**, not a feature of any
+Project suspension is a **platform primitive**, not a feature of any
 one service. Several independent policies need to stop a project *now* and
 reversibly — a trust-and-safety operator acting on an abuse report, the
 fraud-and-abuse system crossing a score threshold, billing cascading from a
@@ -337,7 +337,7 @@ with that service.
   scores, abuse-report IDs) — are for operators, compliance, and appeals review.
   They stay on the resource and in the audit log, not on the consumer's activity
   feed. Suspension is agnostic to those signals (see [Non-Goals](#non-goals)), and
-  its consumer-facing surface stays deliberately minimal.
+  its consumer-facing surface stays minimal.
 - **Billing is a trigger, not a special case.** A suspended billing account
   produces project suspensions with `reason: Billing` and
   `reinstateAuthority: Consumer` (the customer self-remediates by settling the
@@ -370,7 +370,7 @@ with that service.
 
 ## Service Integration Contract
 
-This is the heart of the enhancement. Suspension only works if every managed
+Suspension only works if every managed
 service honors it consistently. This section describes what a service must do;
 the API specifics are sketched in [Design Details](#design-details).
 
@@ -420,7 +420,7 @@ When the project is **reinstated**, the service must:
   serving.
 - **Report resumed** and emit a control-plane Event (`reason: ProjectResumed`).
 
-This is deliberately the *inverse* of today's behavior. Currently, when a
+This is the *inverse* of today's behavior. Currently, when a
 consumer's entitlement becomes non-`Active`, the catalog's projection and
 engagement logic **tear the service's resources down** (delete projected
 bindings, cancel the per-consumer context, delete labeled resources). Suspension
@@ -488,8 +488,8 @@ its own pause/resume detail on top. See
 ## Design Details
 
 > [!NOTE]
-> This section sketches the API and mechanics at the altitude needed to validate
-> the proposal. Concrete field-level API definitions will be refined in
+> This section sketches the API and mechanics. Concrete field-level API
+> definitions will be refined in
 > follow-up PRs as this enhancement moves toward `implementable`.
 
 ### Where the state lives
@@ -576,7 +576,7 @@ service-scoped suspension — the out-of-scope capability noted in
 
 The propagation controller and the aggregate rollup (waiting for every service to
 report paused before marking the project fully `Suspended`) are new components.
-Importantly, suspension is a **distinct signal from
+Suspension is a **distinct signal from
 `Ready`** — it must not be implemented by flipping the project's `Ready`
 condition to `False`, because that path already means "not provisioned" and
 triggers the multicluster provider to *disengage and tear down* controllers for
@@ -600,7 +600,7 @@ state:
    [Service Integration Contract](#service-integration-contract), retaining data.
    A paused project runs no code and serves no traffic, so it can no longer act.
    (Permanently deleting a service's per-consumer `PolicyBinding`s is the
-   *destructive disable* path, which suspension deliberately does not use.)
+   *destructive disable* path, which suspension does not use.)
 
 ### Reinstatement and reversibility
 
@@ -634,7 +634,7 @@ design. The mapping:
 | Compute suspend/stop/delete ladder | Graded reversibility; suspend retains RAM + disk | Depend on the compute instance pause primitive for lossless compute pause |
 | Deletion recovery window | 30-day `DELETE_REQUESTED` + undelete | Time-boxed retention before suspension escalates to deletion |
 
-The central lesson Datum adopts: **the control plane declares intent (the project
+Datum adopts the same split: **the control plane declares intent (the project
 is suspended) and the data plane enforces it (services refuse to serve, admission
 refuses to write).** This keeps the state flip non-destructive and therefore
 reversible.
