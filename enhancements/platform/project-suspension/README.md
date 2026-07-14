@@ -56,8 +56,9 @@ work is blocked at admission, running work is paused (not destroyed) by the
 services that own it, and reinstatement restores the project to exactly where it
 left off.
 
-The core design principle, borrowed from how Milo already handles user
-deactivation and billing-account suspension, is **"suspension is never
+The core design principle, borrowed from how Milo already handles
+[user deactivation](../identity-and-access-management/README.md) and
+[billing-account suspension](../billing/README.md), is **"suspension is never
 deletion."** A suspended project retains all of its resources and configuration;
 only their *execution* is paused. This gives Datum a safe, proportionate abuse
 response and gives wrongly-flagged customers a clean path back.
@@ -75,8 +76,8 @@ the project:
 
 | Layer | Reversible stop today? | Primitive |
 | --- | --- | --- |
-| User | Yes | `UserDeactivation` (iam), `PlatformAccess` `Suspended` state |
-| Billing account | Yes | Account `Suspended` state, preserves project bindings |
+| User | Yes | [`UserDeactivation`](../identity-and-access-management/README.md) (iam), `PlatformAccess` `Suspended` state |
+| Billing account | Yes | [Account `Suspended` state](../billing/README.md), preserves project bindings |
 | Workload / instance | No (delete only) | none — deletion is destructive |
 | **Project** | **No** | **none — this enhancement** |
 
@@ -114,8 +115,10 @@ control fixes all three.
   [#536](https://github.com/datum-cloud/enhancements/issues/536)).
 - Defining the **per-resource-type pause mechanics** for compute (how a specific
   instance snapshots and suspends its memory/disk state). That is the separate
-  compute *instance snapshot & suspend/resume* work; project suspension *depends
-  on* that primitive and defines the project-level orchestration around it. See
+  compute *instance snapshot & suspend/resume* work, tracked in
+  [datum-cloud/compute#182](https://github.com/datum-cloud/compute/issues/182);
+  project suspension *depends on* that primitive and defines the project-level
+  orchestration around it. See
   [The shared non-destructive pause primitive](#the-shared-non-destructive-pause-primitive).
 - Suspending individual **users** or **billing accounts** — those primitives
   already exist and are complementary.
@@ -321,9 +324,9 @@ service render the human-readable timeline from them:
 For the consumer, the suspension surfaces as the **reason category and how to
 appeal** — enough to know what happened and what to do (what stays internal, and
 why, is covered in [Notes](#notes-constraints-and-caveats)). Turning these events
-and audit entries into a plain-English, per-project timeline is the activity
-service's job, delivered through its standard mechanism; those specifics live
-with that service.
+and audit entries into a plain-English, per-project timeline is the
+[activity service](../activity/README.md)'s job, delivered through its standard
+mechanism; those specifics live with that service.
 
 ### Notes, Constraints, and Caveats
 
@@ -489,7 +492,7 @@ way it surfaces any of its other work: as it pauses or resumes a consumer, its
 controller emits Kubernetes Events with the standardized `reason`s
 (`ProjectPaused`, `ProjectResumed`, `PauseFailed`) on the record it reconciles.
 Those Events are immediately available as machine-readable control-plane Events,
-and the activity service renders them into the per-project timeline through its
+and the [activity service](../activity/README.md) renders them into the per-project timeline through its
 standard mechanism — no bespoke telemetry and no new notification path. The
 platform guarantees the project-level suspend/reinstate story; each service adds
 its own pause/resume detail on top. See
@@ -564,7 +567,7 @@ The `ProjectSuspension`'s presence is what matters; the controller derives the
 
 ### How the state propagates
 
-Milo's control planes are layered: a **core** control plane (Project,
+Milo's [control planes](../control-plane/README.md) are layered: a **core** control plane (Project,
 Organization, IAM), **per-project** control planes (consumer-facing resources),
 and **per-service** control planes (a managed service's infrastructure).
 
@@ -619,7 +622,8 @@ state:
   layer must have a symmetric resume.
 - **Reinstatement authority depends on reason.** Abuse and compliance suspensions
   are **operator-gated** — a human must review and lift them, and an improving
-  signal never auto-reinstates (matching fraud-and-abuse's asymmetric
+  signal never auto-reinstates (matching
+  [fraud-and-abuse](../fraud-and-abuse/README.md)'s asymmetric
   reinstatement, which avoids prematurely un-suspending a bad actor). Billing
   suspensions are **customer-remediable** — resolving the payment issue lifts
   them.
@@ -636,9 +640,9 @@ design. The mapping:
 
 | Google Cloud | Mechanism | Project suspension |
 | --- | --- | --- |
-| Resource Manager project lifecycle | Declarative project state; suspension enforced *on top of* state | First-class `Suspended` condition on the Project (cleaner than GCP's implicit approach) |
+| [Resource Manager project lifecycle](https://cloud.google.com/resource-manager/docs/creating-managing-projects) | Declarative project state; suspension enforced *on top of* state | First-class `Suspended` condition on the Project (cleaner than GCP's implicit approach) |
 | Project suspension (abuse/ToS) | Workloads shut down, access revoked, resources **retained**; reversible via appeal | Non-destructive pause + operator-gated reinstatement + appeal path |
-| **Service Control `Check`** | Every request checks consumer/billing/abuse/enablement status before executing | Admission gate blocks writes in a suspended project; services consult suspension state before serving |
+| [**Service Control `Check`**](https://cloud.google.com/service-infrastructure/docs/service-control/getting-started) | Every request checks consumer/billing/abuse/enablement status before executing | Admission gate blocks writes in a suspended project; services consult suspension state before serving |
 | Control-plane intent vs data-plane enforcement | State stored centrally; enforced per-request + by async reconcilers | Project declares `Suspended`; admission and services enforce independently |
 | Suspension reasons (abuse vs billing) | Different triggers, different reinstate owners | `reason` + `reinstateAuthority` fields |
 | Compute suspend/stop/delete ladder | Graded reversibility; suspend retains RAM + disk | Depend on the compute instance pause primitive for lossless compute pause |
@@ -677,7 +681,8 @@ primitive for lossless compute pause; on the
 service-catalog consumer-engagement library for
 the Suspend/Resume hooks; and on the
 managed-service pattern watch/transform
-loops in each integrating service. The **activity service**
+loops in each integrating service. The
+[**activity service**](../activity/README.md)
 (`activity.miloapis.com`) is a soft dependency for the human-readable timeline:
 suspend/reinstate and per-service pause/resume are surfaced by the activity
 service, but because that timeline is a derived,
