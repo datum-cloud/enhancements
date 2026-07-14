@@ -96,9 +96,11 @@ control fixes all three.
   configuration changes) via admission.
 - **Pause all running work** — compute instances and served traffic — through a
   service-integration contract, without deleting data.
-- Define a **single integration contract** that every managed service uses to
-  honor suspension, so behavior is uniform across compute, networking, DNS, and
-  future services.
+- Define a **single integration contract** that any managed service uses to
+  honor suspension, so behavior is uniform as services adopt it. **Compute is the
+  only service integrating for this enhancement's launch**; the contract is
+  designed so other services (networking, DNS, and beyond) adopt it later without
+  bespoke work.
 - Support distinct **suspension reasons** (abuse, billing, compliance,
   administrative) with the correct **reinstatement authority** for each.
 - Provide **operator controls and a runbook** for suspend and reinstate, with an
@@ -333,10 +335,10 @@ customer should expect their project timeline to read as a legible sequence:
    reinstated," followed by per-service "resumed" entries as work comes back
    online.
 
-The customer is never left guessing what state their project is in or why.
-Turning these events and audit entries into that plain-English, per-project
-timeline is the [activity service](../activity/README.md)'s job, delivered
-through its standard mechanism; those specifics live with that service.
+The customer is never left guessing what state their project is in or why. The
+suspension feature ships the `ActivityPolicy` that turns these events and audit
+entries into that plain-English, per-project timeline; the
+[activity service](../activity/README.md) provides the rendering mechanism.
 
 ### Notes, Constraints, and Caveats
 
@@ -774,6 +776,7 @@ recovers.
   a non-destructive pause/resume path.
 - Standardized control-plane Events and audit records for `ProjectSuspension` and
   the `Project` suspend/reinstate transitions, plus per-service
-  `ProjectPaused`/`ProjectResumed`/`PauseFailed` Events. Rendering these into the
-  human-readable timeline (authoring the `ActivityPolicy` rules on
-  `activity.miloapis.com`) is activity-service work, tracked with that service.
+  `ProjectPaused`/`ProjectResumed`/`PauseFailed` Events. The `ActivityPolicy` that
+  renders the project-level transitions into a human-readable timeline is authored
+  in `milo` and shipped with the platform; the activity service
+  (`activity.miloapis.com`) provides the rendering mechanism.
