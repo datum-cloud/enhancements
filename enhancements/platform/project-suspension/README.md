@@ -48,10 +48,10 @@ operator responding to abuse is to delete the offending workloads — a
 destructive action that permanently loses the customer's state and cannot be
 undone if the customer was wrongly flagged.
 
-This enhancement introduces **project suspension**: a reversible, non-destructive
-control that *pauses* everything a project is running — instances, served
-traffic, and live access — without deleting any data, and *resumes* it intact
-when the project is reinstated. Suspension is a first-class state on the Project
+**Project suspension** is a reversible, non-destructive control that *pauses*
+everything a project is running — instances, served traffic, and live access —
+without deleting any data, and *resumes* it intact when the project is
+reinstated. Suspension is a first-class state on the Project
 resource. It is declared once in the control plane and honored everywhere: new
 work is blocked at admission, running work is paused (not destroyed) by the
 services that own it, and reinstatement restores the project to exactly where it
@@ -110,8 +110,8 @@ control fixes all three.
 
 ### Non-Goals
 
-- **Detecting** abuse. This enhancement is the *enforcement* primitive; the
-  signals that trigger suspension (fraud scoring, abuse reports, billing
+- **Detecting** abuse. Suspension is the *enforcement* primitive; the
+  signals that trigger it (fraud scoring, abuse reports, billing
   delinquency) are owned by
   [fraud-and-abuse](../fraud-and-abuse/README.md),
   [billing](../billing/README.md), and future detection work
@@ -119,8 +119,8 @@ control fixes all three.
   [#536](https://github.com/datum-cloud/enhancements/issues/536)).
 - Defining the **per-resource-type pause mechanics** for compute (how a specific
   instance snapshots and suspends its memory/disk state). That is the separate
-  compute *instance snapshot & suspend/resume* work; this enhancement *depends on*
-  that primitive and defines the project-level orchestration around it. See
+  compute *instance snapshot & suspend/resume* work; project suspension *depends
+  on* that primitive and defines the project-level orchestration around it. See
   [The shared non-destructive pause primitive](#the-shared-non-destructive-pause-primitive).
 - Suspending individual **users** or **billing accounts** — those primitives
   already exist and are complementary.
@@ -157,7 +157,7 @@ The essential invariant is **reversibility**: at no point during suspension is
 customer state destroyed, so reinstatement always returns the project to a
 working condition.
 
-Suspension applies at **two scopes**. Most of this document describes a *project*
+Suspension applies at **two scopes**. Most of what follows describes a *project*
 suspension — an operator or platform policy pausing an entire project. A service
 provider can also apply the same reversible pause to just *one consumer's access
 to its own service*, without escalating to the whole project (see
@@ -292,8 +292,8 @@ telemetry.
 
 Suspension and reinstatement are significant, customer-affecting transitions, so
 both **consumers** and **service providers** must be able to see them clearly and
-in real time. Milo already has the primitives for this; this enhancement wires
-suspension into them rather than inventing a new notification path. Three
+in real time. Milo already has the primitives for this, and suspension uses them
+rather than inventing a new notification path. Three
 complementary layers of record exist, and suspension uses all three:
 
 | Layer | What it is | Primary audience | Nature |
@@ -364,8 +364,9 @@ pause/resume actions *observable*:
   which account is responsible for each project. When an account is suspended for
   delinquency, the billing system fans out over its active bindings and creates
   one suspension (`reason: Billing`, `reinstateAuthority: Consumer`) per bound
-  project — the same trigger-then-enforce split used for abuse. This enhancement
-  is what gives billing-account suspension real teeth: today a suspended account
+  project — the same trigger-then-enforce split used for abuse. Project
+  suspension is what gives billing-account suspension real teeth: today a
+  suspended account
   keeps its bindings but has no way to actually pause the projects' workloads.
   Billing owns the account-to-project mapping and does the fan-out; suspension
   does not watch billing accounts itself, so the two stay cleanly separated.
@@ -462,12 +463,12 @@ The division of responsibility is:
 
 - **The compute pause primitive** answers: *how does one instance suspend and
   later resume without losing state?*
-- **This enhancement** answers: *how is that primitive triggered for every
+- **Project suspension** answers: *how is that primitive triggered for every
   instance in a project at once, in a reversible, auditable, cross-service way,
   and how do non-compute services participate?*
 
-This enhancement therefore **depends on** the instance pause primitive for the
-compute portion of suspension and should be sequenced with it. For services that
+Project suspension therefore **depends on** the instance pause primitive for the
+compute portion and should be sequenced with it. For services that
 have no long-running execution to snapshot (e.g. DNS, published endpoints), the
 "pause" is simply ceasing to serve while retaining configuration, which needs no
 new primitive.
@@ -650,8 +651,8 @@ The service's watch loop reacts identically in both cases; only the origin and t
 authoritative record (the `Project` vs. that one `ServiceConsumer`) differ.
 
 The propagation controller and the aggregate rollup (waiting for every service to
-report paused before marking the project fully `Suspended`) are new components
-this enhancement introduces. Importantly, suspension is a **distinct signal from
+report paused before marking the project fully `Suspended`) are new components.
+Importantly, suspension is a **distinct signal from
 `Ready`** — it must not be implemented by flipping the project's `Ready`
 condition to `False`, because that path already means "not provisioned" and
 triggers the multicluster provider to *disengage and tear down* controllers for
@@ -700,7 +701,7 @@ state:
 Google Cloud solves this exact problem, and its model directly informs this
 design. The mapping:
 
-| Google Cloud | Mechanism | This enhancement |
+| Google Cloud | Mechanism | Project suspension |
 | --- | --- | --- |
 | Resource Manager project lifecycle | Declarative project state; suspension enforced *on top of* state | First-class `Suspended` condition on the Project (cleaner than GCP's implicit approach) |
 | Project suspension (abuse/ToS) | Workloads shut down, access revoked, resources **retained**; reversible via appeal | Non-destructive pause + operator-gated reinstatement + appeal path |
@@ -796,7 +797,7 @@ recovers.
 ## Alternatives
 
 - **Keep using workload deletion.** Rejected: destructive, irreversible, and
-  incomplete — the problem this enhancement exists to solve.
+  incomplete — the very problem suspension exists to solve.
 - **Extend `PlatformAccess` to project scope.** Rejected as the home for the
   state: `PlatformAccess` is user-scoped and externally enforced (auth provider);
   projects need control-plane-native enforcement (admission + services). We reuse
