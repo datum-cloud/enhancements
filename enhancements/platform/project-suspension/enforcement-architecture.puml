@@ -3,7 +3,7 @@
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
 !include ../../datum-theme.puml
 
-title Project Suspension - Enforcement Architecture\nControl plane declares intent; three data-plane layers enforce it
+title Project Suspension - Enforcement Architecture\nControl plane declares intent; two data-plane layers enforce it
 
 Person(operator, "Operator / Policy", "Trust & Safety operator, or automated fraud/billing policy")
 
@@ -19,11 +19,7 @@ System_Boundary(projectcp, "Project Control Plane") {
 
 System_Boundary(services, "Managed Service Control Planes") {
     Container(consumer_rec, "ServiceConsumer", "services.miloapis.com", "Per-consumer record that\ncarries the suspension signal")
-    Container(svcctrl, "Service Controllers", "watch / transform loop", "Layer 2: pause & retain\nrunning work (no teardown)")
-}
-
-System_Boundary(idboundary, "Identity") {
-    Container(identity, "Workload Identity", "PolicyBindings", "Layer 3: revoke project\ncredentials (reversibly)")
+    Container(svcctrl, "Service Controllers", "watch / transform loop", "Layer 2: pause & retain running work\nand revoke the per-consumer\nPolicyBinding (reversibly, no teardown)")
 }
 
 Rel_D(operator, suspension_api, "Creates / lifts", "reason + authority")
@@ -33,7 +29,6 @@ Rel(propagation, project, "Sets Suspended condition")
 Rel_D(propagation, admission, "Signal: block new work")
 Rel_D(propagation, consumer_rec, "Signal: suspend consumer")
 Rel(consumer_rec, svcctrl, "Watched by")
-Rel_D(propagation, identity, "Signal: revoke (reversibly)")
 
 Rel_U(svcctrl, propagation, "Reports paused / resumed", "status rollup")
 

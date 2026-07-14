@@ -139,8 +139,8 @@ project. When flipped **on**:
    configuration in the project. The project's control plane accepts reads but
    rejects writes.
 2. **Everything running stops — but nothing is deleted.** Compute instances are
-   paused, published endpoints stop serving, and the project's workload
-   identities can no longer authenticate. Disks, configuration, IP allocations,
+   paused, published endpoints stop serving, and the project's access to its
+   enabled services is revoked. Disks, configuration, IP allocations,
    DNS records, and enabled-service state all remain in place.
 3. **The customer is told why, and how to appeal.** Suspension records a reason
    and notifies the project's owners, with a path to request review.
@@ -149,7 +149,7 @@ When flipped **off** (reinstatement):
 
 1. **The project unfreezes** and accepts writes again.
 2. **Everything resumes** from where it left off — instances start from their
-   preserved state, endpoints serve again, and identities can authenticate.
+   preserved state, endpoints serve again, and access is restored.
 3. **The full history** of who suspended and reinstated the project, when, and
    why, is retained for audit and appeal.
 
@@ -182,7 +182,7 @@ sequenceDiagram
     CP-->>Adm: Suspension state propagates
     CP-->>Svc: Suspension signal propagates<br/>(via ServiceConsumer / project CP watch)
     Adm->>Adm: Reject new writes (admission)
-    Svc->>Svc: Pause running work (retain data)
+    Svc->>Svc: Pause running work & revoke<br/>per-consumer access (retain data)
     Svc-->>CP: Report "paused" status
     Note over CP,Svc: Project is fully suspended,<br/>no data lost
 
@@ -195,12 +195,12 @@ sequenceDiagram
 
 The operator or an automated policy records the **intent** to suspend on the
 Project. A controller derives a `Suspended` state on the Project and propagates
-it outward. Three independent enforcement layers then act on that single signal
+it outward. Two independent enforcement layers then act on that single signal
 (detailed in [Enforcement layers](#enforcement-layers)):
 
 - **Admission** blocks new writes in the project's control plane.
-- **Managed services** pause the running work they own for the project.
-- **Identity** stops the project's workloads from authenticating.
+- **Managed services** pause the running work they own for the project and revoke
+  the per-consumer access they granted it — reversibly, retaining all data.
 
 No single component has to know about all of the others. Each observes the
 project's suspension state and does its part — the same loosely-coupled,
@@ -530,16 +530,15 @@ establishes that every managed service:
   **infrastructure resources** in its own service control plane;
 - runs **cross-control-plane controllers** that *watch* consumer resources,
   *transform* them into infrastructure, and *write status back*;
-- gets **per-consumer isolation** and per-consumer credentials via Platform
-  Workload Identity, where "disable service = delete PolicyBinding = immediate
-  access loss."
+- grants **per-consumer isolation** through per-consumer `PolicyBinding`s, where
+  "disable service = delete PolicyBinding = immediate access loss."
 
 Suspension slots directly into this model:
 
 - The **watch loop** that already reconciles per-consumer resources is where the
   service observes the suspension signal.
 - The **"instant revocation" property** (deleting a PolicyBinding immediately
-  revokes access) is exactly the identity-pause behavior suspension needs — but
+  revokes access) is exactly the access-revocation behavior suspension needs — but
   suspension must do it *reversibly* (revoke while suspended, restore on
   reinstate) rather than by permanent deletion.
 - The catalog's per-consumer engagement library gains the Suspend/Resume hooks
@@ -678,7 +677,7 @@ the project, which is both coarse and semantically wrong for a reversible pause.
 
 ### Enforcement layers
 
-Suspension is enforced at three independent layers, each observing the same
+Suspension is enforced at two independent layers, each observing the same
 state:
 
 ![Project suspension enforcement architecture](enforcement-architecture.png)
@@ -689,13 +688,16 @@ state:
    plane declares intent, and a gate refuses to persist new work that violates
    it. Deny responses carry a typed reason so clients can surface "this project
    is suspended."
-2. **Managed services (pause running work).** Each service pauses execution and
-   serving for the project per the
-   [Service Integration Contract](#service-integration-contract), retaining data.
-3. **Identity (revoke live access, reversibly).** The project's workload
-   identities can no longer authenticate while suspended, and can again once
-   reinstated. This reuses the managed-service pattern's PolicyBinding-based
-   "instant revocation," made reversible.
+2. **Managed services (pause work and revoke access, reversibly).** Each service
+   pauses execution and serving for the project per the
+   [Service Integration Contract](#service-integration-contract), retaining data,
+   and revokes the per-consumer access it granted — the `PolicyBinding`s the
+   managed-service pattern already issues per consumer. Deleting a `PolicyBinding`
+   is how a service is disabled today ("delete PolicyBinding = immediate access
+   loss"); suspension reuses that instant-revocation behavior but applies it
+   *reversibly* — revoked while suspended, restored on reinstatement — never by
+   permanent deletion. The access being revoked is the per-consumer grant the
+   service already owns; there is no separate workload-identity system involved.
 
 ### Reinstatement and reversibility
 
