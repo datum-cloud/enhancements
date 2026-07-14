@@ -525,6 +525,27 @@ flow:
    hold, the consumer for a remediable billing hold — the Resume hook fires, and
    the service resumes from preserved state.
 
+The flow mirrors a project-wide suspension, but one level down and without the
+`Project` in the loop — note that the core control plane never appears:
+
+```mermaid
+sequenceDiagram
+    participant Prov as Service Provider<br/>(this service's operator / policy)
+    participant SC as ServiceConsumer<br/>(services.miloapis.com, provider's CP)
+    participant Svc as Service Controllers<br/>(engagement library: Suspend/Resume hooks)
+
+    Prov->>SC: Record suspension (reason, authority)<br/>on the one ServiceConsumer it owns
+    SC-->>Svc: Suspension signal (same field the<br/>platform stamps for a project suspension)
+    Svc->>Svc: Suspend hook: pause what it serves<br/>for this consumer (retain data)
+    Svc-->>SC: Report "paused" on status<br/>+ emit ProjectPaused activity/event
+    Note over Prov,Svc: No ProjectSuspension, Project.Suspended stays clear —<br/>admission open, every other service keeps running
+
+    Prov->>SC: Clear suspension record (per reinstateAuthority)
+    SC-->>Svc: Resume signal
+    Svc->>Svc: Resume hook: resume from preserved state
+    Svc-->>SC: Report "resumed" on status
+```
+
 A project-wide suspension and a provider's own suspension can sit on the same
 `ServiceConsumer` at once. As with multiple `ProjectSuspension`s on a `Project`,
 the relationship stays paused while *either* is present and resumes only when
