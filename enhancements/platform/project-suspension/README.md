@@ -311,10 +311,13 @@ govern.
 **Consumer perspective.** A consumer experiences suspension as a legible sequence
 of events scoped to their project:
 
-- The suspension itself appears as an activity attributed to the actor and reason.
-  Because suspension is triggered by an operator or policy *writing* a
-  `ProjectSuspension`, the audit route captures the real identity and the reason —
-  so the consumer sees *why* and *by what authority*, plus how to appeal.
+- The suspension itself appears as an activity carrying the reason *category* and
+  how to appeal — enough to know what happened and what to do, without exposing
+  internal detail. Suspension is triggered by an operator or policy *writing* a
+  `ProjectSuspension`, so the audit route still captures the full internal record —
+  the acting identity and any case notes — but that record serves operators,
+  compliance, and appeals review; it is not published verbatim to the consumer's
+  timeline.
 - As each managed service confirms it has paused the project's work, system-sourced
   activities and control-plane Events appear, giving the consumer a live picture
   of what the pause actually did — and confirmation that resources were retained,
@@ -359,6 +362,15 @@ pause/resume actions *observable*:
   [Provider-initiated suspension](#provider-initiated-suspension-one-service-one-consumer)).
   Both use the same non-destructive pause machinery. Pausing an individual
   *resource* below that is a service-level concern, not a suspension concern.
+- **Show the consumer the reason, not the internals.** The consumer-facing signal
+  is the suspension `reason` *category* (`Abuse`, `Billing`, `Compliance`,
+  `Administrative`) plus how to resolve or appeal it. The internal fields on a
+  `ProjectSuspension` — the acting operator's identity (`requestedBy`), free-text
+  operator notes (`description`), and the underlying detection signals (fraud
+  scores, abuse-report IDs) — are for operators, compliance, and appeals review.
+  They stay on the resource and in the audit log, not on the consumer's activity
+  feed. Suspension is agnostic to those signals (see [Non-Goals](#non-goals)), and
+  its consumer-facing surface stays deliberately minimal.
 - **Billing-account suspension cascades to its projects.** A billing account
   already has its own `Suspended` state, and a billing-account binding records
   which account is responsible for each project. When an account is suspended for
@@ -589,10 +601,14 @@ the derived-resource pattern used by
 
 - A **`ProjectSuspension`** resource (the intent/record) capturing:
   - `projectRef` — the suspended project;
-  - `reason` — `Abuse` | `Billing` | `Compliance` | `Administrative`;
+  - `reason` — `Abuse` | `Billing` | `Compliance` | `Administrative` (the one field
+    surfaced to the consumer, as a category);
   - `reinstateAuthority` — who may lift it (`Operator` for abuse/compliance,
     `Consumer` for billing);
-  - `requestedBy`, `description`, timestamps.
+  - `requestedBy`, `description`, timestamps — **operator-facing**: the acting
+    identity and free-text notes may reference internal case IDs or detection
+    signals, so they stay on the resource and in the audit log rather than on the
+    consumer's activity feed.
 - A derived **`Suspended` condition** (and transitional reasons `Suspending` /
   `Reinstating`) on `Project.status`, set by a controller that observes
   `ProjectSuspension` resources. This is the signal everything else keys off.
@@ -617,6 +633,8 @@ spec:
     name: acme-prod
   reason: Abuse
   reinstateAuthority: Operator
+  # operator-facing — surfaced to operators, compliance, and appeals review,
+  # not published to the consumer's activity timeline.
   requestedBy: trust-and-safety@datum.net
   description: "Confirmed phishing site; abuse report #12345"
 status:
