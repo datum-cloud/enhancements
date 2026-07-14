@@ -38,5 +38,12 @@ Rel_R(catalog, network, "Watch & pause (no teardown)")
 Rel_R(catalog, dns, "Watch & pause (no teardown)")
 Rel_R(catalog, future, "Watch & pause (no teardown)")
 
+' Stack the boxes within each boundary vertically instead of side by side
+Lay_D(fraud, billing)
+Lay_D(billing, compliance)
+Lay_D(compute, network)
+Lay_D(network, dns)
+Lay_D(dns, future)
+
 SHOW_LEGEND()
 @enduml
