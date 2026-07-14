@@ -491,32 +491,45 @@ scoped to just its own service — the provider's reversible answer to a consume
 abusing that one service, or to a per-service billing hold, that does not warrant
 suspending the consumer's whole project.
 
-This works because the `ServiceConsumer` record is already the carrier of the
-suspension signal. A project suspension is the platform stamping that signal onto
-*every* `ServiceConsumer` in the project; a provider-initiated suspension is the
-provider stamping the *same* suspended state onto the *one* `ServiceConsumer` it
-owns for that consumer. Nothing downstream changes:
+It works because the `ServiceConsumer` record is already the carrier of the
+suspension signal, and the provider already owns and reconciles that record in
+its own control plane. Suspending one relationship is therefore something the
+provider does *directly*, without involving the platform's `ProjectSuspension`
+flow:
 
-- The engagement library's **Suspend hook fires for that one relationship** — the
-  service pauses what it serves for that consumer and retains their data. Reinstatement runs the Resume hook, same as a
-  project-wide lift.
-- **The blast radius stops at this service.** The consumer's other enabled
-  services and their project stay `Active`; only this service goes dark for them.
-- **Reason and reinstatement authority carry over.** A provider suspending on its
-  own abuse signal owns the reinstatement; a per-service billing hold can be made
-  consumer-remediable.
-- **Observability is identical.** The same `ProjectPaused` / `ProjectResumed` /
-  `PauseFailed` events and activities are emitted, scoped to this service, so the
-  consumer sees "«service» suspended your access — reason X" and how to resolve
-  it.
+1. **The provider records the suspension against the `ServiceConsumer` it owns**
+   for that consumer — a suspension record carrying the same `reason`,
+   `reinstateAuthority`, `requestedBy`, and `description` a `ProjectSuspension`
+   carries, just scoped to this one relationship. It is the service-scoped mirror
+   of a `ProjectSuspension`, one level down: intent recorded on the provider's own
+   record, in the provider's own control plane, rather than against the `Project`.
+   (Whether that record is a `spec` field on the `ServiceConsumer` or a distinct
+   intent resource that points at it is a representational choice; the flow below
+   is identical either way.)
+2. **The engagement library's Suspend hook fires for that one relationship.** The
+   library already watches the `ServiceConsumer` for a suspension signal, and it
+   cannot distinguish — nor does it need to — whether the platform's propagation
+   controller stamped that signal there (project-wide) or the provider wrote it
+   directly (service-scoped). Either way the service pauses what it serves for
+   that consumer and retains their data.
+3. **The `Project` is never touched.** No `ProjectSuspension` is created and the
+   `Project`'s `Suspended` condition stays clear, so admission stays open and every
+   other enabled service keeps running. The blast radius is exactly this one
+   service — only it goes dark for this consumer.
+4. **The service reports paused on the `ServiceConsumer.status`** and emits the
+   same `ProjectPaused` / `PauseFailed` events and activities, scoped to this
+   service, so the consumer sees "«service» suspended your access — reason X" and
+   how to resolve it.
+5. **Reinstatement is symmetric.** The party named by `reinstateAuthority` clears
+   the suspension record on the `ServiceConsumer` — the provider for its own abuse
+   hold, the consumer for a remediable billing hold — the Resume hook fires, and
+   the service resumes from preserved state.
 
-The one difference from a project suspension is scope and who acts, so the
-authoritative record differs accordingly: the provider's suspension is recorded
-on (or against) the `ServiceConsumer` it owns rather than on the `Project`.
-Whether the provider expresses this as a `Suspended` state on that
-`ServiceConsumer` or via a small symmetric intent resource is a
-[Design Details](#design-details) refinement — the hooks and the consumer
-experience are the same either way.
+A project-wide suspension and a provider's own suspension can sit on the same
+`ServiceConsumer` at once. As with multiple `ProjectSuspension`s on a `Project`,
+the relationship stays paused while *either* is present and resumes only when
+*both* are cleared, each by its own authority — lifting the provider's hold does
+not resume a consumer whose whole project is still suspended.
 
 ### Integration reference: managed services and the catalog
 
