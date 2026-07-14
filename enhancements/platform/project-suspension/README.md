@@ -359,6 +359,16 @@ pause/resume actions *observable*:
   [Provider-initiated suspension](#provider-initiated-suspension-one-service-one-consumer)).
   Both use the same non-destructive pause machinery. Pausing an individual
   *resource* below that is a service-level concern, not a suspension concern.
+- **Billing-account suspension cascades to its projects.** A billing account
+  already has its own `Suspended` state, and a billing-account binding records
+  which account is responsible for each project. When an account is suspended for
+  delinquency, the billing system fans out over its active bindings and creates
+  one suspension (`reason: Billing`, `reinstateAuthority: Consumer`) per bound
+  project — the same trigger-then-enforce split used for abuse. This enhancement
+  is what gives billing-account suspension real teeth: today a suspended account
+  keeps its bindings but has no way to actually pause the projects' workloads.
+  Billing owns the account-to-project mapping and does the fan-out; suspension
+  does not watch billing accounts itself, so the two stay cleanly separated.
 - **The pause must be genuinely non-destructive.** Any service that cannot pause
   without data loss (e.g. because it lacks a snapshot/suspend capability yet)
   must degrade to the least-destructive option available and clearly report that
@@ -587,10 +597,14 @@ the derived-resource pattern used by
   `ProjectSuspension` resources. This is the signal everything else keys off.
 
 Presence of an active `ProjectSuspension` suspends the project; lifting or
-deleting it (per `reinstateAuthority`) reinstates it. The record and its history
-are retained for audit and appeal even after reinstatement — matching the
-"deactivation is never deletion" and full-audit-trail principles from
-fraud-and-abuse.
+deleting it (per `reinstateAuthority`) reinstates it. A project can carry **more
+than one** `ProjectSuspension` at once — for example a `Billing` suspension and an
+`Abuse` suspension applied by different authorities. The project stays suspended
+while *any* is active and is reinstated only when *all* are lifted, each by its
+own `reinstateAuthority`; resolving the billing hold does not lift the abuse
+suspension. The records and their history are retained for audit and appeal even
+after reinstatement — matching the "deactivation is never deletion" and
+full-audit-trail principles from fraud-and-abuse.
 
 ```yaml
 apiVersion: resourcemanager.miloapis.com/v1alpha1
@@ -761,6 +775,10 @@ recovers.
   can suspend one consumer's access to its own service using the same
   `ServiceConsumer` carrier and pause hooks, without escalating to a project-wide
   suspension.
+- 2026-07-14: Clarified the billing-account relationship — a suspended billing
+  account fans out to a per-project suspension over its bindings, and a project
+  may carry multiple concurrent suspensions that each lift by their own
+  authority.
 
 ## Drawbacks
 
