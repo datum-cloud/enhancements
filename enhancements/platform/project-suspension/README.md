@@ -24,10 +24,10 @@ Tracking issue:
 - [Service Integration Contract](#service-integration-contract)
   - [What the platform provides](#what-the-platform-provides)
   - [What a service must do](#what-a-service-must-do)
-  - [Provider-initiated suspension (one service, one consumer)](#provider-initiated-suspension-one-service-one-consumer)
-  - [Making suspension observable (activities and events)](#making-suspension-observable-activities-and-events)
   - [The shared non-destructive pause primitive](#the-shared-non-destructive-pause-primitive)
+  - [Provider-initiated suspension (one service, one consumer)](#provider-initiated-suspension-one-service-one-consumer)
   - [Integration reference: managed services and the catalog](#integration-reference-managed-services-and-the-catalog)
+  - [Making suspension observable (activities and events)](#making-suspension-observable-activities-and-events)
 - [Design Details](#design-details)
   - [Where the state lives](#where-the-state-lives)
   - [How the state propagates](#how-the-state-propagates)
@@ -157,6 +157,14 @@ The essential invariant is **reversibility**: at no point during suspension is
 customer state destroyed, so reinstatement always returns the project to a
 working condition.
 
+Suspension applies at **two scopes**. Most of this document describes a *project*
+suspension — an operator or platform policy pausing an entire project. A service
+provider can also apply the same reversible pause to just *one consumer's access
+to its own service*, without escalating to the whole project (see
+[Provider-initiated suspension](#provider-initiated-suspension-one-service-one-consumer)).
+Both scopes share the machinery described below; the project scope is the primary
+case, so the walkthrough that follows uses it.
+
 ### How suspension works
 
 Suspension follows the pattern Google Cloud pioneered and that Milo already uses
@@ -255,7 +263,16 @@ my controller pauses what I serve for that project and retains its configuration
 when it is reinstated, I resume. *Experience:* I write suspension handling once
 and it works for every project, using the same watch loop I already run.
 
-**Story 6 — Consumer sees, in plain English, what happened and what to do.**
+**Story 6 — Service provider suspends one consumer's access to its own service.**
+As the owner of a managed service, I detect abuse of *my* service by one consumer
+(or a per-service billing hold) that does not warrant suspending their whole
+project. I suspend just that consumer's access to my service; their access is
+revoked and their work on it is paused non-destructively, while the rest of their
+project keeps running. *Experience:* I can enforce at the granularity I own,
+reversibly, instead of destructively disabling the service or escalating to a
+project-wide action.
+
+**Story 7 — Consumer sees, in plain English, what happened and what to do.**
 As a project member, when my project is suspended I see an activity in my
 project's timeline — "Project acme-prod was suspended — reason: abuse. Learn how
 to appeal." — and, as each service confirms it has paused, follow-on activities
@@ -264,21 +281,12 @@ nothing was deleted. On reinstatement I see "Project acme-prod was reinstated"
 and the per-service "resumed" entries as my work comes back. *Experience:* I am
 never left guessing what state my project is in or why.
 
-**Story 7 — Service provider observes and audits its own conformance.**
+**Story 8 — Service provider observes and audits its own conformance.**
 As the owner of a managed service, I can watch the control-plane event and
 activity streams to confirm that every suspended consumer of my service actually
 got paused, spot any `PauseFailed`, and see resume progress on reinstatement.
 *Experience:* I can prove my service honored suspension without building bespoke
 telemetry.
-
-**Story 8 — Service provider suspends one consumer's access to its own service.**
-As the owner of a managed service, I detect abuse of *my* service by one consumer
-(or a per-service billing hold) that does not warrant suspending their whole
-project. I suspend just that consumer's access to my service; their access is
-revoked and their work on it is paused non-destructively, while the rest of their
-project keeps running. *Experience:* I can enforce at the granularity I own,
-reversibly, instead of destructively disabling the service or escalating to a
-project-wide action.
 
 ### The activity and control-plane event experience
 
@@ -433,10 +441,40 @@ resources but stops them from doing work.
 
 ![Service integration contract: the non-destructive suspend/resume branch versus today's destructive teardown](service-integration-contract.png)
 
+### The shared non-destructive pause primitive
+
+Project suspension does not, by itself, define how a compute instance preserves
+its in-memory and disk state while paused. That mechanism — snapshot, suspend,
+resume — is the **shared pause primitive** called out in issue #800 as being
+built once and depended on by both this enhancement (Domain F) and the compute
+*instance snapshot & suspend/resume* enhancement (Domain A).
+
+The division of responsibility is:
+
+- **The pause primitive (Domain A, compute)** answers: *how does one instance
+  suspend and later resume without losing state?*
+- **This enhancement (Domain F, platform)** answers: *how is that primitive
+  triggered for every instance in a project at once, in a reversible,
+  auditable, cross-service way, and how do non-compute services participate?*
+
+This enhancement therefore **depends on** the instance pause primitive for the
+compute portion of suspension and should be sequenced with it. For services that
+have no long-running execution to snapshot (e.g. DNS, published endpoints), the
+"pause" is simply ceasing to serve while retaining configuration, which needs no
+new primitive.
+
+> [!NOTE]
+> The compute gap-analysis documents referenced by issue #800
+> (`docs/compute/development/1.0-gap-analysis.md`,
+> `1.0-work-breakdown.md`) were not available in the workspace when this
+> document was drafted. The dependency on the Domain A instance pause primitive
+> is captured from the issue description and should be reconciled against those
+> documents when they are available.
+
 ### Provider-initiated suspension (one service, one consumer)
 
-Everything above describes how a service *honors* a project-wide suspension it did
-not start. The same machinery also lets a provider **initiate** a suspension
+The contract so far describes how a service *honors* a project-wide suspension it
+did not start. The same machinery also lets a provider **initiate** a suspension
 scoped to just its own service — the provider's reversible answer to a consumer
 abusing that one service, or to a per-service billing hold, that does not warrant
 suspending the consumer's whole project.
@@ -468,36 +506,6 @@ Whether the provider expresses this as a `Suspended` state on that
 `ServiceConsumer` or via a small symmetric intent resource is a
 [Design Details](#design-details) refinement — the hooks and the consumer
 experience are the same either way.
-
-### The shared non-destructive pause primitive
-
-Project suspension does not, by itself, define how a compute instance preserves
-its in-memory and disk state while paused. That mechanism — snapshot, suspend,
-resume — is the **shared pause primitive** called out in issue #800 as being
-built once and depended on by both this enhancement (Domain F) and the compute
-*instance snapshot & suspend/resume* enhancement (Domain A).
-
-The division of responsibility is:
-
-- **The pause primitive (Domain A, compute)** answers: *how does one instance
-  suspend and later resume without losing state?*
-- **This enhancement (Domain F, platform)** answers: *how is that primitive
-  triggered for every instance in a project at once, in a reversible,
-  auditable, cross-service way, and how do non-compute services participate?*
-
-This enhancement therefore **depends on** the instance pause primitive for the
-compute portion of suspension and should be sequenced with it. For services that
-have no long-running execution to snapshot (e.g. DNS, published endpoints), the
-"pause" is simply ceasing to serve while retaining configuration, which needs no
-new primitive.
-
-> [!NOTE]
-> The compute gap-analysis documents referenced by issue #800
-> (`docs/compute/development/1.0-gap-analysis.md`,
-> `1.0-work-breakdown.md`) were not available in the workspace when this
-> document was drafted. The dependency on the Domain A instance pause primitive
-> is captured from the issue description and should be reconciled against those
-> documents when they are available.
 
 ### Integration reference: managed services and the catalog
 
@@ -548,12 +556,12 @@ uses both inputs, split cleanly by responsibility:
   activities — the same way the service would surface activities for any of its
   other resources.
 
-Because controller-emitted Events are classified as *system*-sourced, per-service
-pause/resume entries are attributed to the controller, while the human decision to
-suspend is attributed via the audit trail on the `ProjectSuspension` write. The
-activity feed is a best-effort, derived narrative; the `ProjectSuspension`
-resource, the `Project` condition, and the audit log remain the authoritative
-record for appeals and enforcement.
+This split keeps ownership clean: the platform guarantees a legible
+suspend/reinstate story for every project with no per-service work, and each
+service adds the per-service pause/resume detail on top. Attribution (why the
+per-service entries are system-sourced while the suspension decision is
+human-attributed) and the authoritative-vs-derived distinction are covered in
+[The activity and control-plane event experience](#the-activity-and-control-plane-event-experience).
 
 ## Design Details
 
