@@ -535,6 +535,7 @@ human-attributed) and the authoritative-vs-derived distinction are covered in
 
 ## Design Details
 
+> [!NOTE]
 > This section sketches the API and mechanics at the altitude needed to validate
 > the proposal. Concrete field-level API definitions will be refined in
 > follow-up PRs as this enhancement moves toward `implementable`.
@@ -689,6 +690,7 @@ reversible.
 
 ## Production Readiness Review Questionnaire
 
+> [!NOTE]
 > To be completed as this enhancement moves toward `implementable`. Initial
 > notes below.
 
