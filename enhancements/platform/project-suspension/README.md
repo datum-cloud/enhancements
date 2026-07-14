@@ -25,7 +25,6 @@ Tracking issue:
   - [What the platform provides](#what-the-platform-provides)
   - [What a service must do](#what-a-service-must-do)
   - [The shared non-destructive pause primitive](#the-shared-non-destructive-pause-primitive)
-  - [Provider-initiated suspension (one service, one consumer)](#provider-initiated-suspension-one-service-one-consumer)
   - [Integration reference: managed services and the catalog](#integration-reference-managed-services-and-the-catalog)
   - [Making suspension observable (activities and events)](#making-suspension-observable-activities-and-events)
 - [Design Details](#design-details)
@@ -79,7 +78,6 @@ the project:
 | User | Yes | `UserDeactivation` (iam), `PlatformAccess` `Suspended` state |
 | Billing account | Yes | Account `Suspended` state, preserves project bindings |
 | Workload / instance | No (delete only) | none — deletion is destructive |
-| Service access (one service, one consumer) | No (disable *deletes*) | none — this enhancement |
 | **Project** | **No** | **none — this enhancement** |
 
 Deleting workloads to stop abuse has three unacceptable properties: it is
@@ -100,9 +98,6 @@ control fixes all three.
 - Define a **single integration contract** that every managed service uses to
   honor suspension, so behavior is uniform across compute, networking, DNS, and
   future services.
-- Let a **service provider suspend one consumer's access to its own service**
-  non-destructively, using the same pause machinery, without having to escalate
-  to a project-wide suspension.
 - Support distinct **suspension reasons** (abuse, billing, compliance,
   administrative) with the correct **reinstatement authority** for each.
 - Provide **operator controls and a runbook** for suspend and reinstate, with an
@@ -124,6 +119,13 @@ control fixes all three.
   [The shared non-destructive pause primitive](#the-shared-non-destructive-pause-primitive).
 - Suspending individual **users** or **billing accounts** — those primitives
   already exist and are complementary.
+- **Provider-initiated, service-scoped suspension** — a provider pausing one
+  consumer's access to just its own service, without touching the whole project.
+  That capability reuses the same engagement-library pause hooks this enhancement
+  defines, but it is a service-catalog concern (its intent and API live entirely
+  in `services.miloapis.com` and never touch the `Project`), so it is left to a
+  future service-catalog enhancement. This document covers *project*-scoped
+  suspension only.
 - **Throttling** or **soft-limiting** a project (a degraded-but-running state).
   Suspension is a hard, binary pause. Graduated responses are a possible future
   extension, noted in [Alternatives](#alternatives).
@@ -168,14 +170,6 @@ When flipped **off** (reinstatement):
 The essential invariant is **reversibility**: at no point during suspension is
 customer state destroyed, so reinstatement always returns the project to a
 working condition.
-
-Suspension applies at **two scopes**. Most of what follows describes a *project*
-suspension — an operator or platform policy pausing an entire project. A service
-provider can also apply the same reversible pause to just *one consumer's access
-to its own service*, without escalating to the whole project (see
-[Provider-initiated suspension](#provider-initiated-suspension-one-service-one-consumer)).
-Both scopes share the machinery described below; the project scope is the primary
-case, so the walkthrough that follows uses it.
 
 ### How suspension works
 
@@ -275,16 +269,7 @@ my controller pauses what I serve for that project and retains its configuration
 when it is reinstated, I resume. *Experience:* I write suspension handling once
 and it works for every project, using the same watch loop I already run.
 
-**Story 6 — Service provider suspends one consumer's access to its own service.**
-As the owner of a managed service, I detect abuse of *my* service by one consumer
-(or a per-service billing hold) that does not warrant suspending their whole
-project. I suspend just that consumer's access to my service; my service stops
-serving them and their work on it is paused non-destructively, while the rest of
-their project keeps running. *Experience:* I can enforce at the granularity I own,
-reversibly, instead of destructively disabling the service or escalating to a
-project-wide action.
-
-**Story 7 — Consumer sees, in plain English, what happened and what to do.**
+**Story 6 — Consumer sees, in plain English, what happened and what to do.**
 As a project member, when my project is suspended I see an activity in my
 project's timeline — "Project acme-prod was suspended — reason: abuse. Learn how
 to appeal." — and, as each service confirms it has paused, follow-on activities
@@ -293,7 +278,7 @@ nothing was deleted. On reinstatement I see "Project acme-prod was reinstated"
 and the per-service "resumed" entries as my work comes back. *Experience:* I am
 never left guessing what state my project is in or why.
 
-**Story 8 — Service provider observes and audits its own conformance.**
+**Story 7 — Service provider observes and audits its own conformance.**
 As the owner of a managed service, I can watch the control-plane event and
 activity streams to confirm that every suspended consumer of my service actually
 got paused, spot any `PauseFailed`, and see resume progress on reinstatement.
@@ -367,13 +352,12 @@ pause/resume actions *observable*:
   stop *serving*. This is intentionally different from *disabling* a service,
   which today tears the service's resources down. Suspension must **not** reuse
   the destructive disable/teardown path.
-- **Suspension comes in two scopes.** A *project* suspension is coarse by design —
-  it pauses the entire project and is triggered by an operator or platform policy.
-  A *service-scoped* suspension pauses one consumer's access to a single service
-  and is triggered by that service's provider (see
-  [Provider-initiated suspension](#provider-initiated-suspension-one-service-one-consumer)).
-  Both use the same non-destructive pause machinery. Pausing an individual
-  *resource* below that is a service-level concern, not a suspension concern.
+- **Suspension is project-scoped and coarse by design.** It pauses the entire
+  project and is triggered by an operator or platform policy. Pausing one
+  consumer's access to a single service (a provider-initiated, service-scoped
+  suspension) reuses the same pause hooks but is out of scope here — see
+  [Non-Goals](#non-goals). Pausing an individual *resource* is a service-level
+  concern, not a suspension concern.
 - **Show the consumer the reason, not the internals.** The consumer-facing signal
   is the suspension `reason` *category* (`Abuse`, `Billing`, `Compliance`,
   `Administrative`) plus how to resolve or appeal it. The internal fields on a
@@ -495,119 +479,6 @@ compute portion and should be sequenced with it. For services that
 have no long-running execution to snapshot (e.g. DNS, published endpoints), the
 "pause" is simply ceasing to serve while retaining configuration, which needs no
 new primitive.
-
-### Provider-initiated suspension (one service, one consumer)
-
-The contract so far describes how a service *honors* a project-wide suspension it
-did not start. The same machinery also lets a provider **initiate** a suspension
-scoped to just its own service — the provider's reversible answer to a consumer
-abusing that one service, or to a per-service billing hold, that does not warrant
-suspending the consumer's whole project.
-
-It works because the `ServiceConsumer` record is already the carrier of the
-suspension signal, and the provider already owns and reconciles that record in
-its own control plane. Suspending one relationship is therefore something the
-provider does *directly*, without involving the platform's `ProjectSuspension`
-flow:
-
-1. **The provider records the suspension against the `ServiceConsumer` it owns**
-   for that consumer — a suspension record carrying the same `reason`,
-   `reinstateAuthority`, `requestedBy`, and `description` a `ProjectSuspension`
-   carries, just scoped to this one relationship. It is the service-scoped mirror
-   of a `ProjectSuspension`, one level down: intent recorded on the provider's own
-   record, in the provider's own control plane, rather than against the `Project`.
-   Concretely this is a `spec.suspension` field the provider sets on the
-   `ServiceConsumer` — the same "provider writes exactly one field on a
-   controller-owned record" pattern the type already uses for `spec.approval`
-   (see [the API below](#the-service-scoped-suspension-api)).
-2. **The engagement library's Suspend hook fires for that one relationship.** The
-   library already watches the `ServiceConsumer` for a suspension signal, and it
-   cannot distinguish — nor does it need to — whether the platform's propagation
-   controller stamped that signal there (project-wide) or the provider wrote it
-   directly (service-scoped). Either way the service pauses what it serves for
-   that consumer and retains their data.
-3. **The `Project` is never touched.** No `ProjectSuspension` is created and the
-   `Project`'s `Suspended` condition stays clear, so admission stays open and every
-   other enabled service keeps running. The blast radius is exactly this one
-   service — only it goes dark for this consumer.
-4. **The service reports paused on the `ServiceConsumer.status`** and emits the
-   same `ProjectPaused` / `PauseFailed` events and activities, scoped to this
-   service, so the consumer sees "«service» suspended your access — reason X" and
-   how to resolve it.
-5. **Reinstatement is symmetric.** The party named by `reinstateAuthority` clears
-   the suspension record on the `ServiceConsumer` — the provider for its own abuse
-   hold, the consumer for a remediable billing hold — the Resume hook fires, and
-   the service resumes from preserved state.
-
-The flow mirrors a project-wide suspension, but one level down and without the
-`Project` in the loop — note that the core control plane never appears:
-
-```mermaid
-sequenceDiagram
-    participant Prov as Service Provider<br/>(this service's operator / policy)
-    participant SC as ServiceConsumer<br/>(services.miloapis.com, provider's CP)
-    participant Svc as Service Controllers<br/>(engagement library: Suspend/Resume hooks)
-
-    Prov->>SC: Set spec.suspension (reason, authority)<br/>on the one ServiceConsumer it owns
-    SC-->>Svc: Derived Suspended condition<br/>(same signal a project suspension yields)
-    Svc->>Svc: Suspend hook: pause what it serves<br/>for this consumer (retain data)
-    Svc-->>SC: Report "paused" on status<br/>+ emit ProjectPaused activity/event
-    Note over Prov,Svc: No ProjectSuspension, Project.Suspended stays clear —<br/>admission open, every other service keeps running
-
-    Prov->>SC: Clear spec.suspension (per reinstateAuthority)
-    SC-->>Svc: Resume signal
-    Svc->>Svc: Resume hook: resume from preserved state
-    Svc-->>SC: Report "resumed" on status
-```
-
-#### The service-scoped suspension API
-
-Provider-initiated suspension is a field on the `ServiceConsumer` the provider
-already owns, not a separate resource. The services controller creates one
-`ServiceConsumer` per active `ServiceEntitlement` and already lets the provider
-write exactly one field on it — `spec.approval`, its approve/deny decision.
-Suspension is another provider decision about that same relationship, so it lives
-in the same place: a `spec.suspension` field, governed by the same webhook rule
-(the provider may set only this field, never create or delete the record). Its
-shape mirrors a `ProjectSuspension`, minus the refs the `ServiceConsumer` already
-carries.
-
-```yaml
-apiVersion: services.miloapis.com/v1alpha1
-kind: ServiceConsumer          # controller-created, one per (service, consumer)
-metadata:
-  name: compute-acme-prod
-spec:
-  serviceRef:
-    name: compute.datumapis.com
-  consumerProjectRef:
-    name: acme-prod
-  approval:                     # existing provider-written field (approve / deny)
-    decision: Approved
-  # Provider-written, exactly like spec.approval. Absent = not provider-suspended.
-  suspension:
-    reason: Abuse                # Abuse | Billing | Compliance | Administrative
-    reinstateAuthority: Operator # Operator (provider lifts) | Consumer (self-serve)
-    requestedBy: abuse@compute.example
-    description: "Outbound port scanning from consumer workloads"
-status:
-  phase: Active                 # unchanged — suspension is orthogonal to entitlement
-  conditions:
-    - type: Suspended           # derived: True while spec.suspension is set, OR the
-      status: "True"            #   consumer's Project is suspended platform-wide
-      reason: Abuse
-```
-
-Unlike a project, a service relationship already has a provider-owned home for
-this decision, so — unlike `ProjectSuspension` — it does not need its own resource;
-the who/when/why of each change is retained in the audit log, the same record that
-already backs `spec.approval`. The engagement library keys the Suspend/Resume
-hooks off the single derived `Suspended` condition, so a provider's
-`spec.suspension` and a platform-wide project suspension are handled identically,
-and both can apply to the same `ServiceConsumer` at once: the relationship stays
-paused while *either* is set and resumes only when *both* are cleared, each by its
-own authority — lifting the provider's hold does not resume a consumer whose whole
-project is still suspended.
 
 ### Integration reference: managed services and the catalog
 
@@ -744,13 +615,12 @@ must reach two places:
    plane; the platform propagates a suspension indicator onto it so the service's
    existing watch loop observes it without new plumbing.
 
-Because the per-consumer `ServiceConsumer` record is the point where the signal
-lands, it has **two possible writers**: the platform's propagation controller
-stamps it on every `ServiceConsumer` in a project for a project-wide suspension,
-and the service's own provider stamps it on a single `ServiceConsumer` for a
-[service-scoped suspension](#provider-initiated-suspension-one-service-one-consumer).
-The service's watch loop reacts identically in both cases; only the origin and the
-authoritative record (the `Project` vs. that one `ServiceConsumer`) differ.
+For a project-wide suspension the platform's propagation controller stamps the
+suspension indicator on every `ServiceConsumer` in the project, and each service's
+existing watch loop reacts. Because the signal simply lands on the
+`ServiceConsumer`, the same landing point could later carry a provider-written,
+service-scoped suspension — the out-of-scope capability noted in
+[Non-Goals](#non-goals) — without changing how services react.
 
 The propagation controller and the aggregate rollup (waiting for every service to
 report paused before marking the project fully `Suspended`) are new components.
@@ -873,10 +743,11 @@ recovers.
 - 2026-07-13: Added the consumer/provider activity and control-plane event
   experience, based on a survey of the activity service (`activity.miloapis.com`),
   its `ActivityPolicy`-driven audit/event pipeline, and its per-project timeline.
-- 2026-07-14: Added provider-initiated, service-scoped suspension — a provider
-  can suspend one consumer's access to its own service using the same
-  `ServiceConsumer` carrier and pause hooks, without escalating to a project-wide
-  suspension.
+- 2026-07-14: Scoped provider-initiated, service-scoped suspension *out* of this
+  document. It reuses the same engagement-library pause hooks, but its intent and
+  API live entirely in `services.miloapis.com` and never touch the `Project`, so
+  it belongs to a future service-catalog enhancement; this document now covers
+  project-scoped suspension only.
 - 2026-07-14: Clarified the billing-account relationship — a suspended billing
   account fans out to a per-project suspension over its bindings, and a project
   may carry multiple concurrent suspensions that each lift by their own
