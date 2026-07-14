@@ -686,11 +686,9 @@ state:
 2. **Managed services (pause running work).** Each service pauses execution and
    serving for the project per the
    [Service Integration Contract](#service-integration-contract), retaining data.
-   A paused project runs no code and serves no traffic, so it can no longer act —
-   pausing the work *is* the enforcement; there is no separate project "identity"
-   or credential to revoke on top of it. (Permanently deleting a service's
-   per-consumer `PolicyBinding`s is the *destructive disable* path, which
-   suspension deliberately does not use.)
+   A paused project runs no code and serves no traffic, so it can no longer act.
+   (Permanently deleting a service's per-consumer `PolicyBinding`s is the
+   *destructive disable* path, which suspension deliberately does not use.)
 
 ### Reinstatement and reversibility
 
