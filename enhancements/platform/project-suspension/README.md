@@ -66,9 +66,9 @@ response and gives wrongly-flagged customers a clean path back.
 ## Motivation
 
 Trust, safety, and abuse prevention are launch blockers for Datum's compute
-offering (Domain F of the compute 1.0 gap analysis referenced in issue #800).
-When a project is used for abuse — cryptomining, malware or phishing hosting,
-leaked-credential exploitation — Datum needs to stop the activity *now*, while
+offering. When a project is used for abuse — cryptomining, malware or phishing
+hosting, leaked-credential exploitation — Datum needs to stop the activity *now*,
+while
 preserving the ability to fully reverse the action if the signal was wrong.
 
 The problem is that Milo has reversible-stop primitives at every layer *except*
@@ -118,9 +118,9 @@ control fixes all three.
   ([#505](https://github.com/datum-cloud/enhancements/issues/505),
   [#536](https://github.com/datum-cloud/enhancements/issues/536)).
 - Defining the **per-resource-type pause mechanics** for compute (how a specific
-  instance snapshots and suspends its memory/disk state). That is the Domain A
-  *instance snapshot & suspend/resume* work; this enhancement *depends on* that
-  primitive and defines the project-level orchestration around it. See
+  instance snapshots and suspends its memory/disk state). That is the separate
+  compute *instance snapshot & suspend/resume* work; this enhancement *depends on*
+  that primitive and defines the project-level orchestration around it. See
   [The shared non-destructive pause primitive](#the-shared-non-destructive-pause-primitive).
 - Suspending individual **users** or **billing accounts** — those primitives
   already exist and are complementary.
@@ -445,31 +445,22 @@ resources but stops them from doing work.
 
 Project suspension does not, by itself, define how a compute instance preserves
 its in-memory and disk state while paused. That mechanism — snapshot, suspend,
-resume — is the **shared pause primitive** called out in issue #800 as being
-built once and depended on by both this enhancement (Domain F) and the compute
-*instance snapshot & suspend/resume* enhancement (Domain A).
+resume — is a **shared pause primitive** built once for compute and relied on by
+project suspension.
 
 The division of responsibility is:
 
-- **The pause primitive (Domain A, compute)** answers: *how does one instance
-  suspend and later resume without losing state?*
-- **This enhancement (Domain F, platform)** answers: *how is that primitive
-  triggered for every instance in a project at once, in a reversible,
-  auditable, cross-service way, and how do non-compute services participate?*
+- **The compute pause primitive** answers: *how does one instance suspend and
+  later resume without losing state?*
+- **This enhancement** answers: *how is that primitive triggered for every
+  instance in a project at once, in a reversible, auditable, cross-service way,
+  and how do non-compute services participate?*
 
 This enhancement therefore **depends on** the instance pause primitive for the
 compute portion of suspension and should be sequenced with it. For services that
 have no long-running execution to snapshot (e.g. DNS, published endpoints), the
 "pause" is simply ceasing to serve while retaining configuration, which needs no
 new primitive.
-
-> [!NOTE]
-> The compute gap-analysis documents referenced by issue #800
-> (`docs/compute/development/1.0-gap-analysis.md`,
-> `1.0-work-breakdown.md`) were not available in the workspace when this
-> document was drafted. The dependency on the Domain A instance pause primitive
-> is captured from the issue description and should be reconciled against those
-> documents when they are available.
 
 ### Provider-initiated suspension (one service, one consumer)
 
@@ -702,7 +693,7 @@ design. The mapping:
 | **Service Control `Check`** | Every request checks consumer/billing/abuse/enablement status before executing | Admission gate blocks writes in a suspended project; services consult suspension state before serving |
 | Control-plane intent vs data-plane enforcement | State stored centrally; enforced per-request + by async reconcilers | Project declares `Suspended`; admission + services + identity enforce independently |
 | Suspension reasons (abuse vs billing) | Different triggers, different reinstate owners | `reason` + `reinstateAuthority` fields |
-| Compute suspend/stop/delete ladder | Graded reversibility; suspend retains RAM + disk | Depend on the Domain A instance pause primitive for lossless compute pause |
+| Compute suspend/stop/delete ladder | Graded reversibility; suspend retains RAM + disk | Depend on the compute instance pause primitive for lossless compute pause |
 | Deletion recovery window | 30-day `DELETE_REQUESTED` + undelete | Time-boxed retention before suspension escalates to deletion |
 
 The central lesson Datum adopts: **the control plane declares intent (the project
@@ -732,7 +723,7 @@ Key SLIs: time-to-fully-suspended (all services report paused),
 time-to-fully-reinstated, count of services failing to report paused/resumed, and
 count of `PauseFailed` events.
 
-**Dependencies.** Depends on the Domain A **instance snapshot/suspend/resume**
+**Dependencies.** Depends on the compute **instance snapshot/suspend/resume**
 primitive for lossless compute pause; on the
 [service-catalog](../service-catalog/README.md) consumer-engagement library for
 the Suspend/Resume hooks; and on the
@@ -781,7 +772,7 @@ recovers.
   path. A service that integrates incompletely creates an enforcement gap
   (abuse continues there) or a reversibility gap (it deletes instead of pauses).
   This is the main implementation cost and the main correctness risk.
-- The compute portion is blocked on the Domain A instance pause primitive, so
+- The compute portion is blocked on the compute instance pause primitive, so
   full project suspension cannot land before that primitive exists.
 
 ## Alternatives
