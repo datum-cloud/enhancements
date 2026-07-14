@@ -1,0 +1,53 @@
+@startuml service-integration-contract
+skinparam backgroundColor #FFFFFF
+skinparam roundcorner 8
+skinparam shadowing false
+
+' Datum brand palette
+skinparam activity {
+  BackgroundColor #D5E5F5
+  BorderColor #0C1D31
+  FontColor #0C1D31
+  DiamondBackgroundColor #F5F0D5
+  DiamondBorderColor #0C1D31
+  DiamondFontColor #0C1D31
+  StartColor #0C1D31
+  EndColor #0C1D31
+  BarColor #0C1D31
+}
+skinparam ArrowColor #0C1D31
+skinparam ArrowFontColor #0C1D31
+skinparam LegendBackgroundColor #F6F6F5
+skinparam LegendBorderColor #0C1D31
+
+title Service Integration Contract\nHow a managed service reconciles a consumer's state — the new non-destructive branch vs. today's teardown
+
+start
+:Service watch loop reconciles\nServiceConsumer for a project;
+
+switch (Consumer state?)
+case (Active)
+  :Serve the project\n(transform consumer resources\ninto infrastructure);<<#D5F5E0>>
+  stop
+case (Suspended  — NEW)
+  :Pause execution & serving;<<#E6F59F>>
+  :Retain all data, config,\nand projected resources;<<#E6F59F>>
+  :Revoke identity (reversibly);<<#E6F59F>>
+  :Report "paused" to platform;
+  stop
+case (Reinstated  — NEW)
+  :Resume from preserved state\n(restart instances, serve, re-enable identity);<<#E6F59F>>
+  :Report "resumed" to platform;
+  stop
+case (Disabled / Deleted)
+  :Destructive teardown:\ndelete projected resources,\ndelete PolicyBindings,\ncancel per-consumer context;<<#ECD0D0>>
+  stop
+endswitch
+
+legend right
+  <back:#E6F59F>   </back> New non-destructive branch (this enhancement) — pause & resume, no data loss
+  <back:#D5F5E0>   </back> Existing steady state — project actively served
+  <back:#ECD0D0>   </back> Existing destructive path — only for disable/delete, never for suspension
+endlegend
+
+@enduml
