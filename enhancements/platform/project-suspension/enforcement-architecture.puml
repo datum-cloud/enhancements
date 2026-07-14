@@ -7,6 +7,11 @@ title Project Suspension - Enforcement Architecture\nControl plane declares inte
 
 Person(operator, "Operator / Policy", "Trust & Safety operator, or automated fraud/billing policy")
 
+System_Boundary(services, "Managed Service Control Planes") {
+    Container(consumer_rec, "ServiceConsumer", "services.miloapis.com", "Per-consumer record that\ncarries the suspension signal")
+    Container(svcctrl, "Service Controllers", "watch / transform loop", "Layer 2: pause execution & serving,\nretain running work\n(no teardown)")
+}
+
 System_Boundary(core, "Core Control Plane") {
     Container(suspension_api, "ProjectSuspension", "resourcemanager.miloapis.com", "Intent + audit record:\nreason, reinstateAuthority, requestedBy")
     Container(propagation, "Suspension Propagation Controller", "controller", "Derives Suspended condition,\nfans the signal out,\nrolls up per-service paused status")
@@ -17,18 +22,13 @@ System_Boundary(projectcp, "Project Control Plane") {
     Container(admission, "Admission Gate", "webhook", "Layer 1: reject new writes\nwhile suspended (reads allowed)")
 }
 
-System_Boundary(services, "Managed Service Control Planes") {
-    Container(consumer_rec, "ServiceConsumer", "services.miloapis.com", "Per-consumer record that\ncarries the suspension signal")
-    Container(svcctrl, "Service Controllers", "watch / transform loop", "Layer 2: pause execution & serving,\nretain running work\n(no teardown)")
-}
-
 Rel_D(operator, suspension_api, "Creates / lifts", "reason + authority")
 Rel_D(suspension_api, propagation, "Observed by")
 Rel(propagation, project, "Sets Suspended condition")
 
-Rel_D(propagation, admission, "Signal: block new work")
-Rel_D(propagation, consumer_rec, "Signal: suspend consumer")
-Rel(consumer_rec, svcctrl, "Watched by")
+Rel_R(propagation, admission, "Signal: block new work")
+Rel_L(propagation, consumer_rec, "Signal: suspend consumer")
+Rel_D(consumer_rec, svcctrl, "Watched by")
 
 Rel_U(svcctrl, propagation, "Reports paused / resumed", "status rollup")
 
