@@ -503,10 +503,9 @@ flow:
    carries, just scoped to this one relationship. It is the service-scoped mirror
    of a `ProjectSuspension`, one level down: intent recorded on the provider's own
    record, in the provider's own control plane, rather than against the `Project`.
-   Concretely this is a `spec.suspension` field the provider sets on the
-   `ServiceConsumer` — the same "provider writes exactly one field on a
-   controller-owned record" pattern the type already uses for `spec.approval`
-   (see [the API below](#the-serviceconsumer-suspension-api)).
+   Concretely the provider creates a `ServiceConsumerSuspension` targeting the
+   `ServiceConsumer` — the service-scoped mirror of a `ProjectSuspension`
+   (see [the API below](#the-service-scoped-suspension-resource)).
 2. **The engagement library's Suspend hook fires for that one relationship.** The
    library already watches the `ServiceConsumer` for a suspension signal, and it
    cannot distinguish — nor does it need to — whether the platform's propagation
@@ -535,60 +534,65 @@ sequenceDiagram
     participant SC as ServiceConsumer<br/>(services.miloapis.com, provider's CP)
     participant Svc as Service Controllers<br/>(engagement library: Suspend/Resume hooks)
 
-    Prov->>SC: Set spec.suspension (reason, authority)<br/>on the one ServiceConsumer it owns
+    Prov->>SC: Create ServiceConsumerSuspension<br/>(reason, authority) targeting it
     SC-->>Svc: Derived Suspended condition<br/>(same signal a project suspension yields)
     Svc->>Svc: Suspend hook: pause what it serves<br/>for this consumer (retain data)
     Svc-->>SC: Report "paused" on status<br/>+ emit ProjectPaused activity/event
     Note over Prov,Svc: No ProjectSuspension, Project.Suspended stays clear —<br/>admission open, every other service keeps running
 
-    Prov->>SC: Clear spec.suspension (per reinstateAuthority)
+    Prov->>SC: Delete ServiceConsumerSuspension (per reinstateAuthority)
     SC-->>Svc: Resume signal
     Svc->>Svc: Resume hook: resume from preserved state
     Svc-->>SC: Report "resumed" on status
 ```
 
-#### The ServiceConsumer suspension API
+#### The service-scoped suspension resource
 
-The services controller already creates one `ServiceConsumer` per active
-`ServiceEntitlement` and lets the provider write exactly one field on it —
-`spec.approval`, its approve/deny decision. Provider-initiated suspension adds a
-second provider-writable field on the same record, `spec.suspension`, governed by
-the same webhook rule: the provider may set only this field, never create or
-delete the record. Its shape mirrors a `ProjectSuspension`, minus the refs the
-`ServiceConsumer` already carries.
+Provider-initiated suspension is its own resource, `ServiceConsumerSuspension`,
+in `services.miloapis.com` — the service-scoped mirror of a `ProjectSuspension`.
+Its presence derives the `Suspended` condition on the target `ServiceConsumer`
+(the single signal the engagement library's hooks watch); deleting it — per its
+`reinstateAuthority` — reinstates the relationship. A distinct resource, rather
+than a field on `ServiceConsumer`, keeps this consistent with `ProjectSuspension`:
+it is a retained audit record (who suspended, when, why, kept after lifting), and
+more than one can target the same `ServiceConsumer` (say an abuse hold and a
+billing hold), each lifted independently.
 
 ```yaml
 apiVersion: services.miloapis.com/v1alpha1
-kind: ServiceConsumer          # controller-created, one per (service, consumer)
+kind: ServiceConsumerSuspension  # distinct intent record, mirrors ProjectSuspension
 metadata:
-  name: compute-acme-prod
+  name: compute-acme-prod-abuse-2026-07-14
 spec:
-  serviceRef:
-    name: compute.datumapis.com
-  consumerProjectRef:
-    name: acme-prod
-  # Provider-written, exactly like spec.approval. Absent = not provider-suspended.
-  suspension:
-    reason: Abuse                # Abuse | Billing | Compliance | Administrative
-    reinstateAuthority: Operator # Operator (provider lifts) | Consumer (self-serve)
-    requestedBy: abuse@compute.example
-    description: "Outbound port scanning from consumer workloads"
+  consumerRef:                   # the ServiceConsumer (service + consumer) being suspended
+    name: compute-acme-prod
+  reason: Abuse                   # Abuse | Billing | Compliance | Administrative
+  reinstateAuthority: Operator    # Operator (provider lifts) | Consumer (self-serve)
+  requestedBy: abuse@compute.example
+  description: "Outbound port scanning from consumer workloads"
 status:
-  phase: Active                 # unchanged — suspension is orthogonal to entitlement
+  phase: Active                   # Active | Lifted
+```
+
+```yaml
+# The derived signal on the ServiceConsumer it targets:
+apiVersion: services.miloapis.com/v1alpha1
+kind: ServiceConsumer
+status:
+  phase: Active                   # unchanged — suspension is orthogonal to entitlement
   conditions:
-    - type: Suspended           # derived: True while spec.suspension is set, OR the
-      status: "True"            #   consumer's Project is suspended platform-wide
+    - type: Suspended             # derived: True while any ServiceConsumerSuspension
+      status: "True"              #   targets it, OR its Project is suspended platform-wide
       reason: Abuse
 ```
 
-The engagement library keys the Suspend/Resume hooks off the single derived
-`Suspended` condition, so it treats a provider's `spec.suspension` and a
-platform-wide project suspension identically. A project-wide suspension and a
-provider's own suspension can therefore sit on the same `ServiceConsumer` at
-once; as with multiple `ProjectSuspension`s on a `Project`, the relationship
-stays paused while *either* source is active and resumes only when *both* are
-cleared, each by its own authority — lifting the provider's hold does not resume
-a consumer whose whole project is still suspended.
+Because the hooks key off that one derived `Suspended` condition, a
+provider-initiated `ServiceConsumerSuspension` and a platform-wide project
+suspension are handled identically, and both can apply to the same
+`ServiceConsumer` at once. As with multiple `ProjectSuspension`s on a `Project`,
+the relationship stays paused while *any* source is active and resumes only when
+*all* are cleared, each by its own authority — lifting the provider's hold does
+not resume a consumer whose whole project is still suspended.
 
 ### Integration reference: managed services and the catalog
 
