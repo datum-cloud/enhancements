@@ -48,7 +48,7 @@ destructive action that permanently loses the customer's state and cannot be
 undone if the customer was wrongly flagged.
 
 **Project suspension** is a reversible, non-destructive control that *pauses*
-everything a project is running — instances, served traffic, and live access —
+everything a project is running — instances and served traffic —
 without deleting any data, and *resumes* it intact when the project is
 reinstated. Suspension is a first-class state on the Project
 resource. It is declared once in the control plane and honored everywhere: new
@@ -309,11 +309,11 @@ service render the human-readable timeline from them:
   derived narrative on top.
 
 For the consumer, the suspension surfaces as the **reason category and how to
-appeal** — enough to know what happened and what to do, without exposing the
-acting identity or internal case notes, which stay in the audit record for
-operators and compliance. Turning these events and audit entries into a
-plain-English, per-project timeline is the activity service's job, delivered
-through its standard mechanism; those specifics live with that service.
+appeal** — enough to know what happened and what to do (what stays internal, and
+why, is covered in [Notes](#notes-constraints-and-caveats)). Turning these events
+and audit entries into a plain-English, per-project timeline is the activity
+service's job, delivered through its standard mechanism; those specifics live
+with that service.
 
 ### Notes, Constraints, and Caveats
 
@@ -547,11 +547,10 @@ spec:
   description: "Confirmed phishing site; abuse report #12345"
 status:
   phase: Active            # Active | Lifted
-  conditions:
-    - type: Ready
-      status: "True"
-      reason: Suspended
 ```
+
+The `ProjectSuspension`'s presence is what matters; the controller derives the
+`Suspended` condition on `Project.status` from it (never by flipping `Ready`).
 
 ### How the state propagates
 
