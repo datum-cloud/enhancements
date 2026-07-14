@@ -117,11 +117,11 @@ Tenant routing and bridging states are distributed across the PoP fabric via BGP
 
 ### Instance ID Signaling
 
-The VRF ID or EVI ID is signaled as part of the BGP EVPN Route Distinguisher (RD). Per RFC 4364 §4, an RD is an 8-byte value composed of a 2-byte Type field and a 6-byte Value field. The platform uses RD Type 1 (RFC 4364 §4.2), whose 6-byte Value field consists of a 4-byte Administrator subfield (originating node's own loopback IP) and a 2-byte Assigned Number subfield carrying the Instance ID (bounded to `1–4095` to match the C-SID Argument capacity):
+The VRF ID or EVI ID is signaled as part of the BGP EVPN Route Distinguisher (RD). Per RFC 4364 §4, an RD is an 8-byte value composed of a 2-byte Type field and a 6-byte Value field. The platform uses RD Type 2 (RFC 4364 §4.3), whose 6-byte Value field consists of a 4-byte Administrator subfield (originating node's own loopback IP) and a 2-byte Assigned Number subfield carrying the Instance ID (bounded to `1–4095` to match the C-SID Argument capacity):
 
 ```
-RD (Type 1) — 8 bytes total:
-├── Type: 0x0001 (2 bytes)
+RD (Type 2) — 8 bytes total:
+├── Type: 0x0002 (2 bytes)
 └── Value (6 bytes):
      ├── Node router-ID (4 bytes)
      └── VRF / EVI ID (2 bytes, range 1-4095)
@@ -200,22 +200,7 @@ When a PoP approaches the Instance ID ceiling in either universe, the platform s
 
 ### Instance Migration Continuity
 
-When a tenant instance is migrated to a secondary block or logical partition, its RD changes because the RD encodes the egress node's identity (via the Node router-ID component) and the Instance ID within the new namespace. Route continuity during migration is maintained via a make-before-break procedure at the control plane, backed by a dual-FIB programming phase at the data plane so that neither layer's overlap window can black-hole traffic:
-
-1. **Program both keys concurrently.** Before the new RD is advertised, the egress node installs a second FIB/local-SID-table entry — `[secondary uSID Block][Node-ID]::/64` — *alongside* the existing primary entry (`[primary uSID Block][Node-ID]::/64`); the Node-ID, Function, and Instance ID encoding are unchanged, only the `/48` Locator-Block prefix differs between the two entries, and both point at the same forwarding instance. The node now accepts and forwards traffic matching either key.
-2. **Dual-advertise and wait for convergence.** The control plane advertises the tenant's routes under both the old and new RD simultaneously for a defined overlap window, allowing remote peers to install the new next-hop SID alongside the existing entry. Both the old and new SID contexts remain live in the data plane for the full window — the old context is never de-provisioned just because the new one was programmed.
-3. **Decommission only on confirmed zero hits.** The old RD is withdrawn, and the old SID's FIB entry is removed, only after traffic telemetry confirms zero packets are hitting the legacy (primary) key. This confirmation must use exact (non-sampled) FIB/interface hit counters on the legacy key, sustained at zero across a minimum observation window sized to the tenant's known long-tail flow periodicity (DNS TTLs, keepalives, cron-driven clients) — sampled telemetry (NetFlow/sFlow) can silently miss low-volume flows and produce a false zero-hit reading. Tearing down the old context on a timer or on remote-peer-convergence assumptions alone — without this telemetry confirmation — risks a partial black-hole if any remote peer has not yet reconverged onto the new next-hop SID.
-
-The migration sequence, including rollback criteria and overlap window sizing, is defined in the platform's service migration runbook.
-
-### Operational Thresholds (per Universe)
-
-| Threshold             | Action                                                                                    |
-|-----------------------|-------------------------------------------------------------------------------------------|
-| 70% (2,866 instances) | IPAM warning — begin evaluating secondary block procurement                               |
-| 80% (3,276 instances) | IPAM alert — initiate RIR PI allocation for secondary block or logical partition design   |
-| 90% (3,685 instances) | Capacity critical — freeze new allocations at this PoP until scaling path is active       |
-| 95% (3,890 instances) | Emergency — activate pre-provisioned secondary block or enforce logical partition cutover |
+When a tenant instance is migrated to a secondary block or logical partition, the platform must maintain route continuity via a make-before-break procedure: both the old and new SID contexts remain live in the data plane during the overlap window, and the old context is decommissioned only after traffic telemetry confirms zero hits on the legacy key. The migration sequence, including rollback criteria and overlap window sizing, is defined in the platform's service migration runbook.
 
 ---
 
