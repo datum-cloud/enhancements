@@ -348,7 +348,7 @@ pause/resume actions *observable*:
 
 - **Suspension is orthogonal to service enablement.** A suspended project keeps
   its enabled services (its
-  [ServiceEntitlements](../service-catalog/README.md)); those services simply
+  `ServiceEntitlement`s); those services simply
   stop *serving*. This is intentionally different from *disabling* a service,
   which today tears the service's resources down. Suspension must **not** reuse
   the destructive disable/teardown path.
@@ -400,10 +400,10 @@ the API specifics are sketched in [Design Details](#design-details).
 
 1. **A single, observable suspension signal.** The platform exposes the
    project's suspension state where each service already watches. For services
-   built on the [managed-service pattern](../managed-service-pattern/README.md),
+   built on the managed-service pattern,
    this is a suspension indicator on the per-consumer record the service already
    reconciles (the catalog's
-   [`ServiceConsumer`](../service-catalog/README.md)) and/or a condition on the
+   `ServiceConsumer`) and/or a condition on the
    project's control plane. A service does not need any new watch — the signal
    arrives on a resource it already reconciles.
 2. **Transitional states** (`Suspending` / `Reinstating`) so services have a
@@ -511,7 +511,7 @@ experience are the same either way.
 
 ### Integration reference: managed services and the catalog
 
-The [managed-service pattern](../managed-service-pattern/README.md) already
+The managed-service pattern already
 establishes that every managed service:
 
 - exposes a **consumer-facing resource** in the project control plane and real
@@ -740,9 +740,9 @@ count of `PauseFailed` events.
 
 **Dependencies.** Depends on the compute **instance snapshot/suspend/resume**
 primitive for lossless compute pause; on the
-[service-catalog](../service-catalog/README.md) consumer-engagement library for
+service-catalog consumer-engagement library for
 the Suspend/Resume hooks; and on the
-[managed-service pattern](../managed-service-pattern/README.md) watch/transform
+managed-service pattern watch/transform
 loops in each integrating service. The **activity service**
 (`activity.miloapis.com`) is a soft dependency for the human-readable timeline:
 suspend/reinstate and per-service pause/resume are surfaced through its
