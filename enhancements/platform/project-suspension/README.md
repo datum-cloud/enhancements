@@ -433,14 +433,11 @@ When the project is **reinstated**, the service must:
   serving.
 - **Report resumed** and emit a control-plane Event (`reason: ProjectResumed`).
 
-This is the *inverse* of today's behavior. Currently, when a
-consumer's entitlement becomes non-`Active`, the catalog's projection and
-engagement logic **tear the service's resources down** (delete projected
-bindings, cancel the per-consumer context, delete labeled resources). Suspension
-introduces a **non-destructive branch**: a suspended consumer keeps its projected
-resources but stops them from doing work.
+The pause is a **non-destructive branch**: a suspended consumer keeps all of its
+projected resources and simply stops doing work, never taking the destructive
+path a service *disable* uses.
 
-![Service integration contract: the non-destructive suspend/resume branch versus today's destructive teardown](service-integration-contract.png)
+![Service integration contract: the non-destructive suspend/resume branch versus the destructive teardown path](service-integration-contract.png)
 
 ### The shared non-destructive pause primitive
 
@@ -481,9 +478,8 @@ Suspension slots directly into this model:
   service observes the suspension signal.
 - The catalog's per-consumer engagement library gains the Suspend/Resume hooks
   so the transform/status loop has a defined, non-destructive path for a
-  suspended consumer — pause execution and serving, retain everything — distinct
-  from the existing destructive teardown (which deletes the consumer's projected
-  resources and `PolicyBinding`s).
+  suspended consumer — pause execution and serving, retain everything — separate
+  from the destructive teardown path used for service *disable*.
 
 ### Making suspension observable (activities and events)
 
