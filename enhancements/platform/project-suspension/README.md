@@ -24,6 +24,7 @@ Tracking issue:
 - [Service Integration Contract](#service-integration-contract)
   - [What the platform provides](#what-the-platform-provides)
   - [What a service must do](#what-a-service-must-do)
+  - [Provider-initiated suspension (one service, one consumer)](#provider-initiated-suspension-one-service-one-consumer)
   - [Making suspension observable (activities and events)](#making-suspension-observable-activities-and-events)
   - [The shared non-destructive pause primitive](#the-shared-non-destructive-pause-primitive)
   - [Integration reference: managed services and the catalog](#integration-reference-managed-services-and-the-catalog)
@@ -78,6 +79,7 @@ the project:
 | User | Yes | `UserDeactivation` (iam), `PlatformAccess` `Suspended` state |
 | Billing account | Yes | Account `Suspended` state, preserves project bindings |
 | Workload / instance | No (delete only) | none — deletion is destructive |
+| Service access (one service, one consumer) | No (disable *deletes*) | none — this enhancement |
 | **Project** | **No** | **none — this enhancement** |
 
 Deleting workloads to stop abuse has three unacceptable properties: it is
@@ -98,6 +100,9 @@ control fixes all three.
 - Define a **single integration contract** that every managed service uses to
   honor suspension, so behavior is uniform across compute, networking, DNS, and
   future services.
+- Let a **service provider suspend one consumer's access to its own service**
+  non-destructively, using the same pause machinery, without having to escalate
+  to a project-wide suspension.
 - Support distinct **suspension reasons** (abuse, billing, compliance,
   administrative) with the correct **reinstatement authority** for each.
 - Provide **operator controls and a runbook** for suspend and reinstate, with an
@@ -266,6 +271,15 @@ got paused, spot any `PauseFailed`, and see resume progress on reinstatement.
 *Experience:* I can prove my service honored suspension without building bespoke
 telemetry.
 
+**Story 8 — Service provider suspends one consumer's access to its own service.**
+As the owner of a managed service, I detect abuse of *my* service by one consumer
+(or a per-service billing hold) that does not warrant suspending their whole
+project. I suspend just that consumer's access to my service; their access is
+revoked and their work on it is paused non-destructively, while the rest of their
+project keeps running. *Experience:* I can enforce at the granularity I own,
+reversibly, instead of destructively disabling the service or escalating to a
+project-wide action.
+
 ### The activity and control-plane event experience
 
 Suspension and reinstatement are significant, customer-affecting transitions, so
@@ -330,8 +344,13 @@ pause/resume actions *observable*:
   stop *serving*. This is intentionally different from *disabling* a service,
   which today tears the service's resources down. Suspension must **not** reuse
   the destructive disable/teardown path.
-- **Suspension is coarse by design.** It pauses the *entire* project. Pausing an
-  individual resource is a service-level concern, not a project-level one.
+- **Suspension comes in two scopes.** A *project* suspension is coarse by design —
+  it pauses the entire project and is triggered by an operator or platform policy.
+  A *service-scoped* suspension pauses one consumer's access to a single service
+  and is triggered by that service's provider (see
+  [Provider-initiated suspension](#provider-initiated-suspension-one-service-one-consumer)).
+  Both use the same non-destructive pause machinery. Pausing an individual
+  *resource* below that is a service-level concern, not a suspension concern.
 - **The pause must be genuinely non-destructive.** Any service that cannot pause
   without data loss (e.g. because it lacks a snapshot/suspend capability yet)
   must degrade to the least-destructive option available and clearly report that
@@ -413,6 +432,42 @@ introduces a **non-destructive branch**: a suspended consumer keeps its projecte
 resources but stops them from doing work.
 
 ![Service integration contract: the non-destructive suspend/resume branch versus today's destructive teardown](service-integration-contract.png)
+
+### Provider-initiated suspension (one service, one consumer)
+
+Everything above describes how a service *honors* a project-wide suspension it did
+not start. The same machinery also lets a provider **initiate** a suspension
+scoped to just its own service — the provider's reversible answer to a consumer
+abusing that one service, or to a per-service billing hold, that does not warrant
+suspending the consumer's whole project.
+
+This works because the `ServiceConsumer` record is already the carrier of the
+suspension signal. A project suspension is the platform stamping that signal onto
+*every* `ServiceConsumer` in the project; a provider-initiated suspension is the
+provider stamping the *same* suspended state onto the *one* `ServiceConsumer` it
+owns for that consumer. Nothing downstream changes:
+
+- The engagement library's **Suspend hook fires for that one relationship** — the
+  service revokes the consumer's access (reversibly), pauses what it serves for
+  them, and retains their data. Reinstatement runs the Resume hook, same as a
+  project-wide lift.
+- **The blast radius stops at this service.** The consumer's other enabled
+  services and their project stay `Active`; only this service goes dark for them.
+- **Reason and reinstatement authority carry over.** A provider suspending on its
+  own abuse signal owns the reinstatement; a per-service billing hold can be made
+  consumer-remediable.
+- **Observability is identical.** The same `ProjectPaused` / `ProjectResumed` /
+  `PauseFailed` events and activities are emitted, scoped to this service, so the
+  consumer sees "«service» suspended your access — reason X" and how to resolve
+  it.
+
+The one difference from a project suspension is scope and who acts, so the
+authoritative record differs accordingly: the provider's suspension is recorded
+on (or against) the `ServiceConsumer` it owns rather than on the `Project`.
+Whether the provider expresses this as a `Suspended` state on that
+`ServiceConsumer` or via a small symmetric intent resource is a
+[Design Details](#design-details) refinement — the hooks and the consumer
+experience are the same either way.
 
 ### The shared non-destructive pause primitive
 
@@ -573,6 +628,14 @@ must reach two places:
    plane; the platform propagates a suspension indicator onto it so the service's
    existing watch loop observes it without new plumbing.
 
+Because the per-consumer `ServiceConsumer` record is the point where the signal
+lands, it has **two possible writers**: the platform's propagation controller
+stamps it on every `ServiceConsumer` in a project for a project-wide suspension,
+and the service's own provider stamps it on a single `ServiceConsumer` for a
+[service-scoped suspension](#provider-initiated-suspension-one-service-one-consumer).
+The service's watch loop reacts identically in both cases; only the origin and the
+authoritative record (the `Project` vs. that one `ServiceConsumer`) differ.
+
 The propagation controller and the aggregate rollup (waiting for every service to
 report paused before marking the project fully `Suspended`) are new components
 this enhancement introduces. Importantly, suspension is a **distinct signal from
@@ -695,6 +758,10 @@ recovers.
 - 2026-07-13: Added the consumer/provider activity and control-plane event
   experience, based on a survey of the activity service (`activity.miloapis.com`),
   its `ActivityPolicy`-driven audit/event pipeline, and its per-project timeline.
+- 2026-07-14: Added provider-initiated, service-scoped suspension — a provider
+  can suspend one consumer's access to its own service using the same
+  `ServiceConsumer` carrier and pause hooks, without escalating to a project-wide
+  suspension.
 
 ## Drawbacks
 
