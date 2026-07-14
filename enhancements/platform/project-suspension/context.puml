@@ -26,24 +26,19 @@ System_Boundary(services, "Managed services (honor suspension via the one catalo
 
 System(project, "Consumer Project", "The suspended target — all data and config retained")
 
-Rel_D(operator, suspension, "Suspends a project (abuse / ToS)")
-Rel_R(fraud, suspension, "Auto-suspends on fraud score")
-Rel_R(billing, suspension, "Cascades from a suspended billing account")
-Rel_R(compliance, suspension, "Suspends for a compliance hold")
+Rel_R(operator, suspension, "Suspends a project (abuse / ToS)")
 
-Rel_D(suspension, project, "Derives the Suspended state on")
-Rel_R(suspension, catalog, "Publishes the Suspended signal per consumer")
-Rel_R(catalog, compute, "Watch & pause (no teardown)")
-Rel_R(catalog, network, "Watch & pause (no teardown)")
-Rel_R(catalog, dns, "Watch & pause (no teardown)")
-Rel_R(catalog, future, "Watch & pause (no teardown)")
+Rel(fraud, suspension, "Auto-suspends on fraud score")
+Rel(billing, suspension, "Cascades from a suspended billing account")
+Rel(compliance, suspension, "Suspends for a compliance hold")
 
-' Stack the boxes within each boundary vertically instead of side by side
-Lay_D(fraud, billing)
-Lay_D(billing, compliance)
-Lay_D(compute, network)
-Lay_D(network, dns)
-Lay_D(dns, future)
+Rel_R(suspension, project, "Derives the Suspended state on")
+
+Rel(suspension, catalog, "Publishes the Suspended signal per consumer")
+Rel(catalog, compute, "Watch & pause (no teardown)")
+Rel(catalog, network, "Watch & pause (no teardown)")
+Rel(catalog, dns, "Watch & pause (no teardown)")
+Rel(catalog, future, "Watch & pause (no teardown)")
 
 SHOW_LEGEND()
 @enduml
