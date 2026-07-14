@@ -294,61 +294,26 @@ telemetry.
 ### The activity and control-plane event experience
 
 Suspension and reinstatement are significant, customer-affecting transitions, so
-both **consumers** and **service providers** must be able to see them clearly and
-in real time. Milo already has the primitives for this, and suspension uses them
-rather than inventing a new notification path. Three
-complementary layers of record exist, and suspension uses all three:
+both consumers and providers must be able to see them. Suspension does not invent
+a notification path; it makes two guarantees and lets Milo's existing activity
+service render the human-readable timeline from them:
 
-| Layer | What it is | Primary audience | Nature |
-| --- | --- | --- | --- |
-| **Activity feed** (`activity.miloapis.com`) | Plain-English, per-project timeline derived from audit + Kubernetes Events via `ActivityPolicy` rules | Consumers and providers (portal, `kubectl activity`, MCP) | Human-readable, project-scoped via `tenant`, best-effort, ~30–60 day retention |
-| **Control-plane Events** (Kubernetes Events, queried via `EventQuery`) | Machine-readable `reason`s emitted by controllers as they act (`Suspended`, `Reinstated`, per-service `ProjectPaused`/`ProjectResumed`/`PauseFailed`) | Providers, automation | Short-lived, exact, drives the activity feed |
-| **Audit log** (`AuditLogQuery`) | Authoritative record of the API writes that drove suspension (who created/lifted the `ProjectSuspension`) | Compliance, security, appeals | System of record, unlimited/tiered retention |
+- **Standardized control-plane Events.** Controllers emit Kubernetes Events with
+  defined `reason`s as they act — `Suspended` / `Reinstated` on the project, and
+  per-service `ProjectPaused` / `ProjectResumed` / `PauseFailed` — giving providers
+  and automation an exact, machine-readable signal.
+- **An authoritative audit record.** Every `ProjectSuspension` write — who
+  suspended or lifted it, and why — is captured in the audit log, the system of
+  record for appeals and compliance. The `ProjectSuspension` resource and the
+  `Project` `Suspended` condition remain the source of truth; any timeline is a
+  derived narrative on top.
 
-The **authoritative** signals remain the `ProjectSuspension` resource, the
-`Project` `Suspended` condition, and per-service status — the activity feed is a
-derived, best-effort *narrative* layered on top, not the source of truth. That
-distinction matters for appeals and enforcement, where the resource and audit log
-govern.
-
-**Consumer perspective.** A consumer experiences suspension as a legible sequence
-of events scoped to their project:
-
-- The suspension itself appears as an activity carrying the reason *category* and
-  how to appeal — enough to know what happened and what to do, without exposing
-  internal detail. Suspension is triggered by an operator or policy *writing* a
-  `ProjectSuspension`, so the audit route still captures the full internal record —
-  the acting identity and any case notes — but that record serves operators,
-  compliance, and appeals review; it is not published verbatim to the consumer's
-  timeline.
-- As each managed service confirms it has paused the project's work, system-sourced
-  activities and control-plane Events appear, giving the consumer a live picture
-  of what the pause actually did — and confirmation that resources were retained,
-  not deleted.
-- Reinstatement produces the mirror sequence: a "reinstated" activity followed by
-  per-service "resumed" entries as work comes back online.
-- Consumers reach all of this through the tools they already use: the live
-  **watch feed** for real time, historical **`ActivityQuery`** (filter by
-  resource, actor, `changeSource`, or time range; full-text search), and the raw
-  control-plane Events and authoritative audit trail when a machine-readable or
-  compliance-grade view is needed (e.g. supporting an appeal).
-
-**Service provider perspective.** A provider integrating a managed service needs
-both to *know* which consumer projects are suspended and to make its own
-pause/resume actions *observable*:
-
-- The suspension signal arrives on the `ServiceConsumer` record the provider
-  already reconciles (see [Service Integration Contract](#service-integration-contract)) —
-  no new watch is required to learn a consumer is suspended.
-- As the provider's controllers pause and resume, they emit Kubernetes Events on
-  those records with standardized `reason`s. These become queryable control-plane
-  Events immediately and, via an `ActivityPolicy`, plain-English activities — so
-  the provider's part of the story is visible to the consumer and auditable by the
-  provider without bespoke telemetry.
-- **Attribution note:** controller-emitted Events render as *system*-sourced with
-  a controller actor, which is correct for automated pause/resume mechanics. Human
-  attribution for the suspension *decision* flows through the audit route on the
-  `ProjectSuspension` write, not through the per-service Events.
+For the consumer, the suspension surfaces as the **reason category and how to
+appeal** — enough to know what happened and what to do, without exposing the
+acting identity or internal case notes, which stay in the audit record for
+operators and compliance. Turning these events and audit entries into a
+plain-English, per-project timeline is the activity service's job, delivered
+through its standard mechanism; those specifics live with that service.
 
 ### Notes, Constraints, and Caveats
 
@@ -429,12 +394,12 @@ the API specifics are sketched in [Design Details](#design-details).
    service-catalog) gains **Suspend/Resume hooks** alongside its existing
    Teardown hook — so honoring suspension is a small, well-defined addition to
    an integration services already have.
-5. **A first-party activity story for the state change.** The platform ships the
-   `ActivityPolicy` that turns `ProjectSuspension` writes and the `Project`
-   `Suspended`/`Reinstated` transitions into plain-English activities, so
-   suspend/reinstate read cleanly for every project with no per-service work. The
-   platform also defines the standardized event `reason`s services use (see
-   below), so activities and automation can match them reliably.
+5. **Standardized events and an audit record for the state change.** The platform
+   emits the project-level `Suspended` / `Reinstated` control-plane Events, records
+   each `ProjectSuspension` write in the audit log, and defines the standardized
+   event `reason`s services use (see below) so activities and automation can match
+   them reliably. Rendering these into a plain-English timeline is the activity
+   service's job.
 
 ### What a service must do
 
@@ -509,33 +474,15 @@ Suspension slots directly into this model:
 
 ### Making suspension observable (activities and events)
 
-Honoring suspension includes making it *visible*, and the mechanism is the same
-one every Milo feature uses for its timeline (see
-[The activity and control-plane event experience](#the-activity-and-control-plane-event-experience)).
-Milo's activity service does not accept emitted activities directly — it derives
-plain-English activities from two inputs (the kube-apiserver audit stream and
-Kubernetes Events) by matching them against `ActivityPolicy` rules. Suspension
-uses both inputs, split cleanly by responsibility:
-
-- **The platform owns the project-level story.** It ships a first-party
-  `ActivityPolicy` for `ProjectSuspension` (audit route — captures the human
-  operator or the policy that acted, and the reason) and for the `Project`
-  `Suspended`/`Reinstated` transitions. Every project gets legible suspend and
-  reinstate activities for free.
-- **Each service owns its own pause/resume story.** As a service pauses or
-  resumes a consumer, its controller emits Kubernetes Events on the record it
-  reconciles, using the standardized `reason`s (`ProjectPaused`,
-  `ProjectResumed`, `PauseFailed`). Those Events are immediately queryable as
-  control-plane Events (`EventQuery`), and the service contributes an
-  `ActivityPolicy` (or event rules) so they also render as plain-English
-  activities — the same way the service would surface activities for any of its
-  other resources.
-
-This split keeps ownership clean: the platform guarantees a legible
-suspend/reinstate story for every project with no per-service work, and each
-service adds the per-service pause/resume detail on top. Attribution (why the
-per-service entries are system-sourced while the suspension decision is
-human-attributed) and the authoritative-vs-derived distinction are covered in
+Honoring suspension includes making it *visible*. A service does this the same
+way it surfaces any of its other work: as it pauses or resumes a consumer, its
+controller emits Kubernetes Events with the standardized `reason`s
+(`ProjectPaused`, `ProjectResumed`, `PauseFailed`) on the record it reconciles.
+Those Events are immediately available as machine-readable control-plane Events,
+and the activity service renders them into the per-project timeline through its
+standard mechanism — no bespoke telemetry and no new notification path. The
+platform guarantees the project-level suspend/reinstate story; each service adds
+its own pause/resume detail on top. See
 [The activity and control-plane event experience](#the-activity-and-control-plane-event-experience).
 
 ## Design Details
@@ -723,8 +670,8 @@ the Suspend/Resume hooks; and on the
 managed-service pattern watch/transform
 loops in each integrating service. The **activity service**
 (`activity.miloapis.com`) is a soft dependency for the human-readable timeline:
-suspend/reinstate and per-service pause/resume are surfaced through its
-`ActivityPolicy` mechanism, but because the activity feed is a derived,
+suspend/reinstate and per-service pause/resume are surfaced by the activity
+service, but because that timeline is a derived,
 best-effort layer, its unavailability degrades visibility only — it never affects
 enforcement, which is governed by the `ProjectSuspension` resource, the `Project`
 condition, and the audit log.
@@ -760,6 +707,11 @@ recovers.
   suspensions, but delinquency detection and the cascade over billing-account
   bindings are billing-side logic. A project may carry multiple concurrent
   suspensions that each lift by their own authority.
+- 2026-07-14: Trimmed observability to the contract suspension owns —
+  standardized control-plane Event `reason`s, an audit record, and the
+  consumer-sees-reason-not-internals rule. The activity-service mechanics
+  (`ActivityPolicy` authoring, feed derivation, query surfaces, retention) are
+  deferred to the activity service.
 
 ## Drawbacks
 
@@ -800,7 +752,8 @@ recovers.
   and Suspend/Resume hooks to the existing service-catalog consumer-engagement
   library. Each integrating managed service extends its existing controllers with
   a non-destructive pause/resume path.
-- A first-party `ActivityPolicy` (on `activity.miloapis.com`) for
-  `ProjectSuspension` and the `Project` suspend/reinstate transitions, shipped
-  with the platform; each managed service contributes an `ActivityPolicy` (or
-  event rules) for its own `ProjectPaused`/`ProjectResumed`/`PauseFailed` Events.
+- Standardized control-plane Events and audit records for `ProjectSuspension` and
+  the `Project` suspend/reinstate transitions, plus per-service
+  `ProjectPaused`/`ProjectResumed`/`PauseFailed` Events. Rendering these into the
+  human-readable timeline (authoring the `ActivityPolicy` rules on
+  `activity.miloapis.com`) is activity-service work, tracked with that service.
