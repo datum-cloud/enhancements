@@ -7,7 +7,7 @@ latest-milestone: "v0.1"
 # Project Suspension & Lifecycle Controls
 
 Tracking issue:
-[datum-cloud/enhancements#800](https://github.com/datum-cloud/enhancements/issues/800)
+[Project suspension & lifecycle controls (#800)](https://github.com/datum-cloud/enhancements/issues/800)
 
 - [Summary](#summary)
 - [Motivation](#motivation)
@@ -109,14 +109,12 @@ control fixes all three.
 - **Detecting** abuse. Suspension is the *enforcement* primitive; the
   signals that trigger it (fraud scoring, abuse reports, billing
   delinquency) are owned by
-  [fraud-and-abuse](../fraud-and-abuse/README.md),
-  [billing](../billing/README.md), and future detection work
-  ([#505](https://github.com/datum-cloud/enhancements/issues/505),
-  [#536](https://github.com/datum-cloud/enhancements/issues/536)).
+  [fraud-and-abuse](../fraud-and-abuse/README.md) and
+  [billing](../billing/README.md).
 - Defining the **per-resource-type pause mechanics** for compute (how a specific
   instance snapshots and suspends its memory/disk state). That is the separate
   compute *instance snapshot & suspend/resume* work, tracked in
-  [datum-cloud/compute#182](https://github.com/datum-cloud/compute/issues/182);
+  [Handle project suspension in the compute service](https://github.com/datum-cloud/compute/issues/182);
   project suspension *depends on* that primitive and defines the project-level
   orchestration around it. See
   [The shared non-destructive pause primitive](#the-shared-non-destructive-pause-primitive).
@@ -699,8 +697,8 @@ recovers.
 
 ## Implementation History
 
-- 2026-07-13: Initial draft (`provisional`) created from issue
-  [#800](https://github.com/datum-cloud/enhancements/issues/800), incorporating a
+- 2026-07-13: Initial draft (`provisional`) created from the
+  [project suspension tracking issue](https://github.com/datum-cloud/enhancements/issues/800), incorporating a
   survey of Milo's Project/PlatformAccess/UserDeactivation primitives, the
   service-catalog enablement and engagement model, the managed-service pattern,
   and Google Cloud's service-infrastructure/resource-manager suspension model.
