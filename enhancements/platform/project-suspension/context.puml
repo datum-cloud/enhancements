@@ -8,7 +8,8 @@ title Project Suspension - System Context\nOne reversible stop: many triggers de
 Person(operator, "Trust & Safety Operator", "Responds to abuse / ToS violations")
 
 System_Boundary(triggers, "Suspension triggers (declare intent, own no enforcement)") {
-    System(fraud, "Fraud & Abuse", "Automated fraud scoring and abuse reports")
+    System(fraud, "Fraud Detection", "Automated fraud scoring")
+    System(abuse, "Abuse Reports", "Trust & safety review of reported abuse / ToS violations")
     System(billing, "Billing", "A suspended billing account cascades to its projects")
     System(compliance, "Compliance", "Regulatory / legal holds")
 }
@@ -26,9 +27,10 @@ System_Boundary(services, "Managed services (honor suspension via the one catalo
 
 System(project, "Consumer Project", "The suspended target — all data and config retained")
 
-Rel_R(operator, suspension, "Suspends a project (abuse / ToS)")
+Rel_R(operator, abuse, "Reviews and confirms reported abuse / ToS violations")
 
 Rel(fraud, suspension, "Auto-suspends on fraud score")
+Rel(abuse, suspension, "Suspends on a confirmed abuse report")
 Rel(billing, suspension, "Cascades from a suspended billing account")
 Rel(compliance, suspension, "Suspends for a compliance hold")
 

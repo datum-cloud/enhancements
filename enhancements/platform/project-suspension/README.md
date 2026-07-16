@@ -101,7 +101,7 @@ control fixes all three.
   only service integrating for this enhancement's launch**; the contract is
   designed so other services (networking, DNS, and beyond) adopt it later without
   bespoke work.
-- Support distinct **suspension reasons** (abuse, billing, compliance,
+- Support distinct **suspension reasons** (fraud, abuse, billing, compliance,
   administrative) with the correct **reinstatement authority** for each.
 - Provide **operator controls and a runbook** for suspend and reinstate, with an
   appeal path for wrongly-flagged customers.
@@ -257,17 +257,20 @@ auditable.
 
 **Story 1 — Trust & safety operator stops active abuse.**
 As a trust-and-safety operator, I receive a confirmed abuse report that a project
-is hosting a phishing site. I suspend the project. Within seconds its served
-endpoints stop responding and its compute instances are paused, halting the
-abuse. No customer data is deleted. *Experience:* one action stops the harm and
-is fully reversible if the report turns out to be mistaken.
+is hosting a phishing site. I suspend the project with reason `Abuse`. Within
+seconds its served endpoints stop responding and its compute instances are
+paused, halting the abuse. No customer data is deleted. *Experience:* one action
+stops the harm and is fully reversible if the report turns out to be mistaken.
 
 **Story 2 — Automated policy suspends on a high fraud score.**
-As the fraud-and-abuse system, when a project crosses an enforcement threshold in
-`AUTO` mode, I create a project suspension automatically — the project-level
-analog of the `UserDeactivation` I already create for users. *Experience:*
-enforcement is automatic, proportionate, and consistent with how user-level
-enforcement already works.
+As the fraud detection system, when a project crosses an enforcement threshold in
+`AUTO` mode, I create a project suspension automatically with reason `Fraud` —
+the project-level analog of the `UserDeactivation` I already create for users.
+This is a distinct signal from a human-reviewed abuse report: it can fire before
+any operator has looked at the project, and trust & safety may separately layer
+an `Abuse` suspension on top once they confirm it. *Experience:* enforcement is
+automatic, proportionate, and consistent with how user-level enforcement already
+works.
 
 **Story 3 — Wrongly-flagged customer is reinstated intact.**
 As a customer whose project was suspended in error, I appeal. After review, an
@@ -355,7 +358,7 @@ entries into that plain-English, per-project timeline; the
   [Non-Goals](#non-goals). Pausing an individual *resource* is a service-level
   concern, not a suspension concern.
 - **Show the consumer the reason, not the internals.** The consumer-facing signal
-  is the suspension `reason` *category* (`Abuse`, `Billing`, `Compliance`,
+  is the suspension `reason` *category* (`Fraud`, `Abuse`, `Billing`, `Compliance`,
   `Administrative`) plus how to resolve or appeal it. The internal fields on a
   `ProjectSuspension` — the acting operator's identity (`requestedBy`), free-text
   operator notes (`description`), and the underlying detection signals (fraud
@@ -388,7 +391,7 @@ entries into that plain-English, per-project timeline; the
 | --- | --- | --- |
 | A service honors suspension by **deleting** instead of pausing | Customer data lost; reversibility broken | The integration contract mandates non-destructive pause; conformance is tested (suspend → reinstate → verify state preserved); services that cannot pause must report non-conformance, not delete. |
 | Suspension signal **fails to propagate** to a service | Abuse continues on that service | Each service reports a per-service paused status back to the Project; the project is not marked fully `Suspended` until all report paused; unreported services raise an operator alert. |
-| **Wrongful suspension** of a legitimate project | Customer outage | Reversibility invariant + appeal path + full audit trail; billing suspensions are customer-remediable; abuse suspensions require explicit operator reinstatement (no premature auto-reinstate, matching the fraud-and-abuse asymmetric-reinstatement principle). |
+| **Wrongful suspension** of a legitimate project | Customer outage | Reversibility invariant + appeal path + full audit trail; billing suspensions are customer-remediable; fraud and abuse suspensions require explicit operator reinstatement (no premature auto-reinstate, matching the fraud-and-abuse asymmetric-reinstatement principle). |
 | Suspension **overloads** the existing `Ready` condition | Coarse, ambiguous behavior; accidental teardown | Suspension is a **distinct, explicit** signal, not a `Ready=False` flip, so it does not collide with provisioning/readiness semantics or the multicluster disengage-and-teardown path. |
 | Reinstatement **partially fails** (some services resume, some don't) | Project in an inconsistent state | `Reinstating` is transitional and gates on all-services-resumed; partial resume is surfaced to operators and is retried, not treated as complete. |
 | Indefinite suspension **hoards resources** | Cost, capacity | Time-boxed retention window with escalation to deletion, clearly communicated and auditable. |
@@ -530,9 +533,9 @@ the derived-resource pattern used by
 
 - A **`ProjectSuspension`** resource (the intent/record) capturing:
   - `projectRef` — the suspended project;
-  - `reason` — `Abuse` | `Billing` | `Compliance` | `Administrative` (the one field
-    surfaced to the consumer, as a category);
-  - `reinstateAuthority` — who may lift it (`Operator` for abuse/compliance,
+  - `reason` — `Fraud` | `Abuse` | `Billing` | `Compliance` | `Administrative` (the
+    one field surfaced to the consumer, as a category);
+  - `reinstateAuthority` — who may lift it (`Operator` for fraud/abuse/compliance,
     `Consumer` for billing);
   - `requestedBy`, `description`, timestamps — **operator-facing**: the acting
     identity and free-text notes may reference internal case IDs or detection
@@ -544,13 +547,15 @@ the derived-resource pattern used by
 
 Presence of an active `ProjectSuspension` suspends the project; lifting or
 deleting it (per `reinstateAuthority`) reinstates it. A project can carry **more
-than one** `ProjectSuspension` at once — for example a `Billing` suspension and an
-`Abuse` suspension applied by different authorities. The project stays suspended
-while *any* is active and is reinstated only when *all* are lifted, each by its
-own `reinstateAuthority`; resolving the billing hold does not lift the abuse
-suspension. The records and their history are retained for audit and appeal even
-after reinstatement — matching the "deactivation is never deletion" and
-full-audit-trail principles from fraud-and-abuse.
+than one** `ProjectSuspension` at once — for example a `Fraud` suspension raised
+automatically on a high fraud score, later joined by an `Abuse` suspension once
+trust & safety confirms the report, or a `Billing` suspension applied by a third,
+independent authority. The project stays suspended while *any* is active and is
+reinstated only when *all* are lifted, each by its own `reinstateAuthority`;
+resolving the billing hold does not lift the fraud or abuse suspension. The
+records and their history are retained for audit and appeal even after
+reinstatement — matching the "deactivation is never deletion" and full-audit-trail
+principles from fraud-and-abuse.
 
 ```yaml
 apiVersion: resourcemanager.miloapis.com/v1alpha1
@@ -628,8 +633,8 @@ state:
 - **Reversibility is the core invariant.** Suspension only ever flips control
   state and pauses execution; it never deletes customer data. Every enforcement
   layer must have a symmetric resume.
-- **Reinstatement authority depends on reason.** Abuse and compliance suspensions
-  are **operator-gated** — a human must review and lift them, and an improving
+- **Reinstatement authority depends on reason.** Fraud, abuse, and compliance
+  suspensions are **operator-gated** — a human must review and lift them, and an improving
   signal never auto-reinstates (matching
   [fraud-and-abuse](../fraud-and-abuse/README.md)'s asymmetric
   reinstatement, which avoids prematurely un-suspending a bad actor). Billing
@@ -652,7 +657,7 @@ design. The mapping:
 | Project suspension (abuse/ToS) | Workloads shut down, access revoked, resources **retained**; reversible via appeal | Non-destructive pause + operator-gated reinstatement + appeal path |
 | [**Service Control `Check`**](https://cloud.google.com/service-infrastructure/docs/service-control/getting-started) | Every request checks consumer/billing/abuse/enablement status before executing | Admission gate blocks writes in a suspended project; services consult suspension state before serving |
 | Control-plane intent vs data-plane enforcement | State stored centrally; enforced per-request + by async reconcilers | Project declares `Suspended`; admission and services enforce independently |
-| Suspension reasons (abuse vs billing) | Different triggers, different reinstate owners | `reason` + `reinstateAuthority` fields |
+| Suspension reasons (fraud vs abuse vs billing) | Different triggers, different reinstate owners | `reason` + `reinstateAuthority` fields |
 | Compute suspend/stop/delete ladder | Graded reversibility; suspend retains RAM + disk | Depend on the compute instance pause primitive for lossless compute pause |
 | Deletion recovery window | 30-day `DELETE_REQUESTED` + undelete | Time-boxed retention before suspension escalates to deletion |
 
