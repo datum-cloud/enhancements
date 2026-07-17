@@ -58,12 +58,14 @@ The initial set of user-facing convergence paths and their thresholds:
 
 | Convergence path | Signal that it converged | Reasonable-expectation threshold (proposed) |
 |---|---|---|
-| Custom hostname resolves | authoritative answer for the hostname | TBD |
-| TLS certificate issues | certificate ready and serving on the listener | TBD |
-| HTTPRoute programs and serves | route accepted and traffic served | TBD |
-| DNS record reaps on hostname removal | authoritative answer gone, no SERVFAIL | TBD |
+| Custom hostname resolves | authoritative answer for the hostname | 60s |
+| TLS certificate issues | certificate ready and serving on the listener | 120s (provisional) |
+| HTTPRoute programs and serves | route accepted and traffic served | 30s |
+| DNS record reaps on hostname removal | authoritative answer gone, no SERVFAIL | 60s |
 
-Budgets are left `TBD` pending calibration against observed healthy latency per path. The table is the artifact this enhancement delivers.
+The thresholds are derived from reasonable expectation, not from observation. Observed healthy convergence suggests a calibration; each number is then ratified by judging whether the wait is one a customer could reasonably expect. Where observed latency sits above what is reasonable to expect, the threshold holds and the gap is a defect to fix, not headroom to grant.
+
+The proposed numbers are seed calibrations from observed healthy convergence (single-run maxima, not yet percentiles across a sample); each should be validated against latency percentiles over more runs before enforcement, so the gate bounds expectation without introducing flake. The TLS threshold is provisional — the issuance path has no healthy measurement yet. A composite journey (hostname created through resolving and serving traffic) is bounded by the sum of its component thresholds. The table is the artifact this enhancement delivers.
 
 Enforcement surfaces are owned by the deployment's infrastructure repository:
 
