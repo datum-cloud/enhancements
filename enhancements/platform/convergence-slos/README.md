@@ -58,14 +58,21 @@ The initial set of user-facing convergence paths and their thresholds:
 
 | Convergence path | Signal that it converged | Reasonable-expectation threshold (proposed) |
 |---|---|---|
+| Project creates and becomes ready | project control plane accepts requests | 30s |
+| Organization onboarding completes | organization ready for use | 60s |
+| IAM policy binding takes effect | granted access is enforced | 30s |
+| Gateway programs | gateway Programmed with address assigned | 30s |
 | Custom hostname resolves | authoritative answer for the hostname | 60s |
+| Managed DNS zone and record sets program | record served by the authoritative nameservers | 60s |
 | TLS certificate issues | certificate ready and serving on the listener | 120s (provisional) |
 | HTTPRoute programs and serves | route accepted and traffic served | 30s |
+| Workload deploys and serves | workload available in each target location | 300s (provisional) |
+| Custom domain verifies, verification record in place | domain marked verified once the verification record is answerable | 300s |
 | DNS record reaps on hostname removal | authoritative answer gone, no SERVFAIL | 60s |
 
 The thresholds are derived from reasonable expectation, not from observation. Observed healthy convergence suggests a calibration; each number is then ratified by judging whether the wait is one a customer could reasonably expect. Where observed latency sits above what is reasonable to expect, the threshold holds and the gap is a defect to fix, not headroom to grant.
 
-The proposed numbers are seed calibrations from observed healthy convergence (single-run maxima, not yet percentiles across a sample); each should be validated against latency percentiles over more runs before enforcement, so the gate bounds expectation without introducing flake. The TLS threshold is provisional — the issuance path has no healthy measurement yet. A composite journey (hostname created through resolving and serving traffic) is bounded by the sum of its component thresholds. The table is the artifact this enhancement delivers.
+The proposed numbers are seed calibrations from observed healthy convergence and existing per-path budgets; each should be validated against latency percentiles over more runs before enforcement, so the gate bounds expectation without introducing flake. Rows marked provisional have no healthy measurement yet and are set from the reasonable-expectation judgment alone. Where a path's observed latency today sits above its threshold — for example, domain verification rechecks that back off to hours — the threshold holds and the gap is a defect to fix. A composite journey (hostname created through resolving and serving traffic) is bounded by the sum of its component thresholds. The table is the artifact this enhancement delivers.
 
 Enforcement surfaces are owned by the deployment's infrastructure repository:
 
