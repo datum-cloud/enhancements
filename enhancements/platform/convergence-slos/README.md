@@ -58,9 +58,9 @@ The initial set of user-facing convergence paths and their thresholds:
 
 | Convergence path | Signal that it converged | Reasonable-expectation threshold (proposed) |
 |---|---|---|
-| Project creates and becomes ready | project control plane accepts requests | 30s |
+| Project creates and becomes ready | project control plane accepts requests | 15s |
 | Organization onboarding completes | organization ready for use | 60s |
-| IAM policy binding takes effect | granted access is enforced | 30s |
+| IAM policy binding takes effect | granted access is enforced | 15s |
 | Gateway programs | gateway Programmed with address assigned | 30s |
 | Custom hostname resolves | authoritative answer for the hostname | 60s |
 | Managed DNS zone and record sets program | record served by the authoritative nameservers | 60s |
@@ -70,7 +70,9 @@ The initial set of user-facing convergence paths and their thresholds:
 | Custom domain verifies, verification record in place | domain marked verified once the verification record is answerable | 300s |
 | DNS record reaps on hostname removal | authoritative answer gone, no SERVFAIL | 60s |
 
-The thresholds are derived from reasonable expectation, not from observation. Observed healthy convergence suggests a calibration; each number is then ratified by judging whether the wait is one a customer could reasonably expect. Where observed latency sits above what is reasonable to expect, the threshold holds and the gap is a defect to fix, not headroom to grant.
+The thresholds are derived from reasonable expectation, not from observation. Observed healthy convergence suggests a calibration; each number is then ratified by judging whether the wait is one a customer could reasonably expect. Where observed latency sits above what is reasonable to expect, the threshold holds and the gap is a defect to fix, not headroom to grant. The same judgment runs in the other direction: a ceiling sitting far above healthy latency is re-judged against what a customer would expect — interactive flows tighten toward seconds — rather than kept as slack.
+
+The contract is enforced at a stated percentile: alerts and dashboards gate on sustained p95 against the threshold, end-to-end tests on per-run convergence. Tail percentiles above the threshold are tracked as defects, not absorbed into a looser ceiling.
 
 The proposed numbers are seed calibrations from observed healthy convergence and existing per-path budgets; each should be validated against latency percentiles over more runs before enforcement, so the gate bounds expectation without introducing flake. Rows marked provisional have no healthy measurement yet and are set from the reasonable-expectation judgment alone. Where a path's observed latency today sits above its threshold — for example, domain verification rechecks that back off to hours — the threshold holds and the gap is a defect to fix. A composite journey (hostname created through resolving and serving traffic) is bounded by the sum of its component thresholds. The table is the artifact this enhancement delivers.
 
