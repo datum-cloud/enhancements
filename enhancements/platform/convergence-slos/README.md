@@ -28,7 +28,7 @@ Concrete case: a DNS-reap end-to-end test sat at a 16-minute timeout and passed 
 
 ### Non-Goals
 
-- Datum's own enforcement wiring — the end-to-end timeout pass, alert rules, and dashboards. This is owned in Datum's infrastructure repository.
+- Enforcement wiring — the end-to-end timeout pass, alert rules, and dashboards. This is owned by the deployment's infrastructure repository.
 - Race conditions that a wall-clock budget cannot detect. A defect whose outcome is eventually correct but which a single missed step could strand is not distinguishable by any timeout; that belongs in unit tests.
 - Controller reconcile or requeue behavior. This is owned by the component repositories (for example, network-services-operator).
 
@@ -65,7 +65,7 @@ The initial set of user-facing convergence paths and their thresholds:
 
 Budgets are left `TBD` pending calibration against observed healthy latency per path. The table is the artifact this enhancement delivers.
 
-Enforcement surfaces in Datum's deployment are owned by Datum's infrastructure repository:
+Enforcement surfaces are owned by the deployment's infrastructure repository:
 
 - End-to-end timeouts bounded to the threshold.
 - Alert rules and dashboards keyed to the threshold — these build on the telemetry system (see [telemetry](../../telemetry/)) for the underlying metrics.
@@ -84,7 +84,7 @@ Each path exposes a convergence-latency metric — the duration from request to 
 ## Implementation History
 
 - Tracking issue opened in datum-cloud/enhancements.
-- Datum-side implementation tracked separately in Datum's infrastructure repository.
+- Deployment-side implementation tracked separately in the deployment's infrastructure repository.
 
 ## Alternatives
 
