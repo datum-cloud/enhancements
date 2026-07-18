@@ -86,12 +86,14 @@ token. No long-lived credentials are shared or stored.
 - Replacing user authentication (human users continue using existing auth)
 - Replacing [Platform Workload Identity][platform-workload-identity] for
   internal service-to-service authentication
-- Organization-level identity pools (project-scoped only for v1)
+- Organization-level sharing of project-owned custom issuers and rules
+  (project-scoped only for v1; platform-level TrustedIssuer already covers
+  cross-project sharing of vetted issuers)
 - Non-OIDC federation protocols (SAML, X.509)
 
 ## Proposal
 
-Workload Identity Federation introduces one platform-level resource and three
+Workload Identity Federation introduces one platform-level resource and two
 project-level resources. Trust in an external OIDC issuer and the conditions
 under which a token from that issuer is accepted are configured separately,
 so a single issuer registration can back many different access levels without
@@ -101,15 +103,12 @@ duplicating issuer configuration:
   (issuer URL and JWKS source) as safe to federate against, cluster-wide.
   Managed by platform administrators. v1 ships TrustedIssuers for the
   platforms in [Supported Platforms](#supported-platforms).
-- **WorkloadIdentityPool** *(project-level, optional)*: Groups related issuers
-  and rules for bulk enable/disable. Projects that don't need grouping can
-  omit it; ungrouped resources are placed in an implicit `default` pool so the
-  principal URI shape never changes.
 - **WorkloadIdentityIssuer** *(project-level)*: Enables a TrustedIssuer for
-  use within a project's pool, or registers a project-owned custom OIDC
-  issuer directly (its own issuer URL and JWKS source) for identity providers
-  the platform hasn't pre-vetted — a private Kubernetes cluster, SPIRE, Okta,
-  or any other standards-compliant issuer.
+  use within a project, or registers a project-owned custom OIDC issuer
+  directly (its own issuer URL and JWKS source) for identity providers the
+  platform hasn't pre-vetted — a private Kubernetes cluster, SPIRE, Okta, or
+  any other standards-compliant issuer. Also the unit of emergency
+  disable — disabling an issuer immediately rejects every rule under it.
 - **WorkloadIdentityRule** *(project-level)*: Matches tokens from a
   specific issuer against audience, claim, and CEL attribute conditions, and
   maps matching tokens to a principal URI.
@@ -126,8 +125,7 @@ resources.
 1. Platform administrator registers a TrustedIssuer (already done for
    supported platforms in v1)
 2. Project owner creates a WorkloadIdentityIssuer enabling that
-   TrustedIssuer within the project (optionally within a named
-   WorkloadIdentityPool)
+   TrustedIssuer within the project
 3. Project owner creates one or more WorkloadIdentityRules specifying
    audience, claim, and attribute conditions
 4. Project owner creates a PolicyBinding granting the resulting principal
@@ -160,16 +158,20 @@ jobs:
     permissions:
       id-token: write  # Request OIDC token
     steps:
-      - uses: datum-cloud/auth-action@v1
+      - name: Setup datumctl
+        uses: datum-cloud/setup-datumctl@v1
         with:
           project: my-project
-          pool: ci-cd-pool
+          issuer: github-actions
           rule: github-actions-main
       - run: datumctl apply -f manifests/
 ```
 
-The workflow authenticates using its native GitHub OIDC token. No secrets
-configuration required.
+**Setup datumctl** installs the `datumctl` CLI and configures it to
+authenticate via Workload Identity Federation in one step: it requests the
+GitHub Actions OIDC token, exchanges it against the given project/issuer/rule,
+and leaves `datumctl` ready to use for the rest of the job — no separate auth
+step, and no secrets configuration required.
 
 #### Restrict Access by Branch
 
@@ -237,7 +239,7 @@ As a compliance officer, I want to see which CI/CD workflows accessed my project
 and what actions they performed.
 
 **Experience:** View the Activity timeline filtered by principal. Each action
-shows the principal URI, which encodes the pool and rule. Cross-reference with
+shows the principal URI, which encodes the issuer and rule. Cross-reference with
 CI/CD logs to identify specific workflow runs. For authentication attempts
 that never resulted in an action — including failed ones — see the rule's
 Authentication History (see
@@ -295,8 +297,10 @@ Access can be revoked through multiple mechanisms:
 | Delete PolicyBinding | Authorization denied | Immediate |
 | Disable rule | Authentication rejected | Immediate |
 | Delete rule | Authentication rejected | Immediate |
-| Disable issuer | Authentication rejected for all rules on that issuer | Immediate |
-| Disable pool | All issuers and rules in pool rejected | Immediate |
+| Disable issuer | Authentication rejected for every rule on that issuer | Immediate |
+
+Disabling an issuer is the emergency kill switch: it's the coarsest-grained
+control available and takes effect without touching individual rules.
 
 Unlike long-lived credentials, there's no need to rotate secrets or wait for
 expiration.
@@ -305,21 +309,11 @@ expiration.
 
 #### Project Control Plane Scope
 
-WorkloadIdentityPool, WorkloadIdentityIssuer, and WorkloadIdentityRule
-are cluster-scoped within a project's control plane. Since projects are
-dedicated control planes in Milo, these resources are naturally project-scoped
-without requiring namespaces. TrustedIssuer is the one exception: it is a
-platform-level resource managed outside any project's control plane.
-
-#### Pools Are Optional
-
-WorkloadIdentityPool exists purely for grouping and bulk enable/disable.
-WorkloadIdentityIssuer and WorkloadIdentityRule may omit `poolRef`
-entirely, in which case they're placed in an implicit `default` pool scoped to
-the project. This keeps the principal URI shape
-(`principal://.../pools/{pool}/rules/{rule}`) stable whether or not a project
-ever creates an explicit pool, and avoids requiring pool creation for the
-common single-issuer, single-rule case.
+WorkloadIdentityIssuer and WorkloadIdentityRule are cluster-scoped within a
+project's control plane. Since projects are dedicated control planes in Milo,
+these resources are naturally project-scoped without requiring namespaces.
+TrustedIssuer is the one exception: it is a platform-level resource managed
+outside any project's control plane.
 
 #### Custom Issuers Go Through the Same Verification Path
 
@@ -399,40 +393,25 @@ status:
       lastVerifiedTime: "2026-07-10T12:00:00Z"
 ```
 
+`issuerUri` is validated unique across all TrustedIssuer objects at admission
+time — two platform-level registrations for the same real-world issuer would
+just be confusing, with no legitimate reason to have both. This constraint is
+platform-level only; project-owned custom issuers on WorkloadIdentityIssuer
+are not deduplicated, since redundant project-scoped registrations are the
+project's own resources to manage.
+
 Separating issuer trust from match conditions means one TrustedIssuer backs
 every project's WorkloadIdentityRules for that platform — JWKS
 configuration is fetched, verified, and rotated once, centrally, instead of
 once per project per attribute condition.
 
-#### WorkloadIdentityPool *(optional)*
-
-Groups related issuers and rules within a project and provides a common point
-of control (e.g., emergency disable). Omit `poolRef` on
-WorkloadIdentityIssuer or WorkloadIdentityRule to use the project's
-implicit `default` pool instead of creating one explicitly.
-
-```yaml
-apiVersion: iam.miloapis.com/v1alpha1
-kind: WorkloadIdentityPool
-metadata:
-  name: ci-cd-pool
-spec:
-  displayName: "CI/CD Workload Pool"
-  description: "Pool for CI/CD pipeline authentications"
-  disabled: false  # Emergency disable switch
-status:
-  issuerCount: 1
-  ruleCount: 2
-  conditions:
-    - type: Ready
-      status: "True"
-```
-
 #### WorkloadIdentityIssuer
 
-Either enables a TrustedIssuer for use within a project's pool, or registers a
+Either enables a TrustedIssuer for use within a project, or registers a
 project-owned custom OIDC issuer directly. `spec` accepts exactly one of
-`trustedIssuerRef` or `oidc` — never both:
+`trustedIssuerRef` or `oidc` — never both. It's also the unit of emergency
+disable: `spec.disabled` immediately rejects authentication for every rule
+that references this issuer, with no separate grouping resource required.
 
 ```yaml
 # Enable a platform-managed TrustedIssuer
@@ -441,11 +420,11 @@ kind: WorkloadIdentityIssuer
 metadata:
   name: github-actions
 spec:
-  poolRef:
-    name: ci-cd-pool  # optional; omitted uses the project's default pool
   trustedIssuerRef:
     name: github-actions
+  disabled: false  # emergency disable switch
 status:
+  ruleCount: 2
   conditions:
     - type: Ready
       status: "True"
@@ -458,13 +437,12 @@ kind: WorkloadIdentityIssuer
 metadata:
   name: internal-spire
 spec:
-  poolRef:
-    name: ci-cd-pool
   oidc:
     issuerUri: "https://spire.internal.acme-corp.com"
     jwks:
       source: inline  # discovery | explicitUrl | inline
       inline: "<JWKS document, base64-encoded>"
+  disabled: false
 status:
   conditions:
     - type: Verified      # set by the Verify issuer dry-run
@@ -479,6 +457,15 @@ and Verify-issuer dry-run applied to TrustedIssuer, is what makes opening this
 up to project owners safe from v1 rather than deferring it. See [Custom
 Issuers Go Through the Same Verification
 Path](#custom-issuers-go-through-the-same-verification-path).
+
+There's no separate pool resource grouping multiple issuers together. GCP's
+own workload identity pools support that, but its own best-practice guidance
+is one provider per pool to avoid subject collisions across providers — in
+practice, pools end up scoped to a single issuer anyway. Anthropic's
+federation has no pool concept at all. Given neither reference
+implementation's real usage supports a genuine need for cross-issuer
+grouping, disabling the issuer directly is the kill switch, and one resource
+kind is one fewer thing to reconcile.
 
 #### WorkloadIdentityRule
 
@@ -516,7 +503,7 @@ spec:
     attribute.ref == "refs/heads/main"
 
 status:
-  principalIdentifier: "principal://iam.miloapis.com/projects/my-project/pools/ci-cd-pool/rules/github-actions-main"
+  principalIdentifier: "principal://iam.miloapis.com/projects/my-project/issuers/github-actions/rules/github-actions-main"
   conditions:
     - type: Ready
       status: "True"
@@ -580,7 +567,7 @@ pre-flight checks and one ongoing view:
 |---|---|---|
 | **Verify issuer** | Dry-run: fetches and parses the JWKS from the configured source, without creating or modifying anything. Available on WorkloadIdentityIssuer and, for platform admins, on TrustedIssuer. | `Verified` condition in `status.conditions` |
 | **Test rule** | Opens a 15-minute live window on a WorkloadIdentityRule. Trigger a real exchange (a CI run, a manual `datumctl` federated login) within the window and the console reports success or the specific failure reason (signature invalid, audience mismatch, condition not satisfied) in real time. Re-runnable anytime from the rule's detail page if the window elapses unused. | `status.testWindow.expiresAt`, `Verified` condition |
-| **Authentication history** | Per-rule (and per-issuer, per-pool) log of every authentication *attempt*, success or failure — distinct from the Activity timeline ([Audit CI/CD Activity](#audit-cicd-activity)), which only records actions by an *already-authenticated* principal and so never sees a failed exchange. Lets a project owner tell "never tried" from "tried and was rejected," and spot a rule under sustained failed attempts (key rotation, claim drift, or misuse). | Rule detail page, `status.lastAuthenticationTime` |
+| **Authentication history** | Per-rule (and per-issuer) log of every authentication *attempt*, success or failure — distinct from the Activity timeline ([Audit CI/CD Activity](#audit-cicd-activity)), which only records actions by an *already-authenticated* principal and so never sees a failed exchange. Lets a project owner tell "never tried" from "tried and was rejected," and spot a rule under sustained failed attempts (key rotation, claim drift, or misuse). | Rule detail page, `status.lastAuthenticationTime` |
 
 ### Authentication Flow
 
@@ -634,19 +621,20 @@ spec:
     name: project-editor
   subjects:
     - kind: Principal
-      name: "principal://iam.miloapis.com/projects/my-project/pools/ci-cd-pool/rules/github-actions-main"
+      name: "principal://iam.miloapis.com/projects/my-project/issuers/github-actions/rules/github-actions-main"
   resourceSelector:
     resourceKind:
       apiGroup: resourcemanager.miloapis.com
       kind: Project
 ```
 
-The principal URI format follows GCP's proven pattern, with `rules` in place
-of GCP's `providers` since issuer trust and match conditions are separate
-resources here:
+The principal URI format follows GCP's proven pattern, with `issuers/rules`
+in place of GCP's `providers` since issuer trust and match conditions are
+separate resources here, and with no `pools` segment since there's no pool
+resource to encode:
 
 ```
-principal://iam.miloapis.com/projects/{project}/pools/{pool}/rules/{rule}
+principal://iam.miloapis.com/projects/{project}/issuers/{issuer}/rules/{rule}
 ```
 
 Including the project in the URI ensures principals are globally unique across
@@ -679,12 +667,15 @@ expand based on customer feedback:
 - Requires OpenFGA integration design
 - Enables different permissions based on attributes without multiple rules
 
-**Organization-level pools:**
+**Organization-level sharing of project-owned issuers and rules:**
 
-- Shared pools across projects within an organization
-- Centralized trust management for platform teams
-- Partially addressed by TrustedIssuer, which already shares issuer trust
-  platform-wide; this item is about sharing pools/rules, not just issuers
+- Let a custom issuer or rule defined in one project be referenced by others
+  within the same organization, for platform teams that want centralized
+  trust management without waiting on a platform administrator to promote it
+  to a TrustedIssuer
+- Partially addressed already: TrustedIssuer covers sharing a *vetted* issuer
+  platform-wide; this item is about sharing a project's own custom
+  issuers/rules directly
 
 **Additional platforms:**
 
@@ -694,7 +685,7 @@ expand based on customer feedback:
 **Enhanced matching:**
 
 - `principalSet://` URIs for attribute-based principal matching (GCP pattern)
-- Wildcard pool matching
+- Wildcard issuer matching
 
 ## Dependencies
 
@@ -769,6 +760,27 @@ surface as a static API key.
   access to a single Project
 - Gains nothing authorization-wise: both a service account and a principal
   URI are just subjects a `PolicyBinding` can reference
+
+### Standalone Pool Resource Grouping Multiple Issuers
+
+Introduce a `WorkloadIdentityPool` resource that issuers and rules optionally
+join via `poolRef`, providing an emergency-disable kill switch spanning
+multiple issuers (mirroring GCP's `WorkloadIdentityPool` →
+`WorkloadIdentityPoolProvider` hierarchy).
+
+**Rejected because:**
+
+- GCP's own best-practice guidance is one provider per pool, specifically to
+  avoid subject collisions across providers sharing a pool — the platform
+  that supports multi-issuer pools recommends against using them that way
+- Anthropic's federation has no pool concept at all, and doesn't seem worse
+  for it
+- An open `poolRef` (any issuer can join any pool) has no natural
+  authorization boundary — gating it would require a new permission-checked
+  "attach" admission path with no clear precedent motivating the complexity
+- Disabling a `WorkloadIdentityIssuer` directly already covers the only
+  concretely motivated kill-switch case (rejecting every rule under one
+  issuer); cross-issuer grouping was speculative, not drawn from a real story
 
 ### Service Mesh / SPIFFE
 
