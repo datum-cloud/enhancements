@@ -35,7 +35,7 @@ Workload Identity Federation enables external platforms (GitHub Actions, GCP,
 AWS, Azure) to authenticate to Milo using their native OIDC tokens instead of
 long-lived credentials. Platform administrators register trusted OIDC issuers
 once, centrally. Project owners enable one of those issuers within their
-project and define WorkloadIdentityPoolRules that match specific tokens —
+project and define WorkloadIdentityRules that match specific tokens —
 by audience, claims, or CEL attribute conditions — to a federated identity.
 Federated identities become subjects in PolicyBindings using principal URI
 strings.
@@ -88,7 +88,6 @@ token. No long-lived credentials are shared or stored.
   internal service-to-service authentication
 - Organization-level identity pools (project-scoped only for v1)
 - Non-OIDC federation protocols (SAML, X.509)
-- Custom OIDC providers with arbitrary issuers (security risk)
 
 ## Proposal
 
@@ -99,17 +98,19 @@ so a single issuer registration can back many different access levels without
 duplicating issuer configuration:
 
 - **TrustedIssuer** *(platform-level)*: Registers an OIDC issuer's identity
-  (issuer URL and JWKS source) as safe to federate against. Managed by
-  platform administrators. v1 ships TrustedIssuers for the platforms in
-  [Supported Platforms](#supported-platforms); project-defined custom issuers
-  are [Future Work](#future-work).
+  (issuer URL and JWKS source) as safe to federate against, cluster-wide.
+  Managed by platform administrators. v1 ships TrustedIssuers for the
+  platforms in [Supported Platforms](#supported-platforms).
 - **WorkloadIdentityPool** *(project-level, optional)*: Groups related issuers
   and rules for bulk enable/disable. Projects that don't need grouping can
   omit it; ungrouped resources are placed in an implicit `default` pool so the
   principal URI shape never changes.
-- **WorkloadIdentityPoolIssuer** *(project-level)*: Enables a TrustedIssuer
-  for use within a project's pool.
-- **WorkloadIdentityPoolRule** *(project-level)*: Matches tokens from a
+- **WorkloadIdentityIssuer** *(project-level)*: Enables a TrustedIssuer for
+  use within a project's pool, or registers a project-owned custom OIDC
+  issuer directly (its own issuer URL and JWKS source) for identity providers
+  the platform hasn't pre-vetted — a private Kubernetes cluster, SPIRE, Okta,
+  or any other standards-compliant issuer.
+- **WorkloadIdentityRule** *(project-level)*: Matches tokens from a
   specific issuer against audience, claim, and CEL attribute conditions, and
   maps matching tokens to a principal URI.
 
@@ -124,10 +125,10 @@ resources.
 
 1. Platform administrator registers a TrustedIssuer (already done for
    supported platforms in v1)
-2. Project owner creates a WorkloadIdentityPoolIssuer enabling that
+2. Project owner creates a WorkloadIdentityIssuer enabling that
    TrustedIssuer within the project (optionally within a named
    WorkloadIdentityPool)
-3. Project owner creates one or more WorkloadIdentityPoolRules specifying
+3. Project owner creates one or more WorkloadIdentityRules specifying
    audience, claim, and attribute conditions
 4. Project owner creates a PolicyBinding granting the resulting principal
    access to resources
@@ -175,8 +176,8 @@ configuration required.
 As a team lead, I want to grant deploy access only to workflows running on the
 main branch, while allowing any branch to run read-only operations.
 
-**Experience:** Create one WorkloadIdentityPoolIssuer for GitHub Actions, then
-two WorkloadIdentityPoolRules against it with different attribute conditions:
+**Experience:** Create one WorkloadIdentityIssuer for GitHub Actions, then
+two WorkloadIdentityRules against it with different attribute conditions:
 
 - `github-actions-main`: Condition requires `attribute.ref ==
   "refs/heads/main"` → bound to deployer role
@@ -188,7 +189,7 @@ deploy.
 
 #### Verify a New Rule Before Relying On It
 
-As a developer, I want to confirm my WorkloadIdentityPoolRule is configured
+As a developer, I want to confirm my WorkloadIdentityRule is configured
 correctly before I point a real CI/CD pipeline at it.
 
 **Experience:** After creating the issuer and rule, select **Test rule** in
@@ -204,9 +205,22 @@ the rule persists and the test can be re-run from the rule's detail page.
 As a developer, I want my GCP Cloud Function to call Milo APIs using its service
 identity without embedding credentials in code.
 
-**Experience:** Create a WorkloadIdentityPoolIssuer referencing the GCP
+**Experience:** Create a WorkloadIdentityIssuer referencing the GCP
 TrustedIssuer, then a rule with a condition matching the service account
 email. The Cloud Function authenticates using its native identity token.
+
+#### Authenticate from a Private Kubernetes Cluster
+
+As a platform engineer, I want workloads in our on-prem Kubernetes cluster to
+authenticate using projected service account tokens, even though our cluster
+isn't reachable from the public internet and isn't one of Milo's pre-vetted
+platforms.
+
+**Experience:** Create a WorkloadIdentityIssuer with a custom `oidc` block —
+issuer URL and an `inline` JWKS document, since the cluster's discovery
+endpoint isn't publicly reachable — instead of a `trustedIssuerRef`. Run
+**Verify issuer** to confirm the JWKS parses correctly, then create a rule
+scoped to the cluster's service account subjects, same as any other issuer.
 
 #### Revoke Access Immediately
 
@@ -214,7 +228,7 @@ As a security engineer, I want to immediately revoke access for a compromised
 workflow without waiting for credential expiration.
 
 **Experience:** Delete the PolicyBinding or disable the
-WorkloadIdentityPoolRule. Access is denied immediately on the next request,
+WorkloadIdentityRule. Access is denied immediately on the next request,
 even though the OIDC token may still be valid.
 
 #### Audit CI/CD Activity
@@ -243,16 +257,20 @@ pre-registered as a platform-level TrustedIssuer:
 
 These platforms automatically provide OIDC tokens to workloads without
 additional configuration. Project owners reference the corresponding
-TrustedIssuer from a WorkloadIdentityPoolIssuer; they do not configure issuer
-URLs or JWKS sources directly in v1.
+TrustedIssuer from a WorkloadIdentityIssuer and skip issuer/JWKS
+configuration entirely. Any other standards-compliant OIDC issuer — a private
+Kubernetes cluster, SPIRE, Okta, or a self-hosted IdP — is supported from v1
+by registering it directly on a WorkloadIdentityIssuer instead of referencing
+a TrustedIssuer.
 
 ### Security
 
 #### Trust Model
 
 - **Token validation**: Signature verified using JWKS from issuer
-- **Issuer validation**: Token's `iss` claim must match the TrustedIssuer's
-  configured issuer
+- **Issuer validation**: Token's `iss` claim must match the issuer configured
+  on the WorkloadIdentityIssuer — whether that's a referenced TrustedIssuer or
+  a project-owned custom issuer
 - **Audience validation**: Token's `aud` claim must match configured audiences
 - **Expiration**: Tokens older than 1 hour are rejected
 - **Attribute conditions**: CEL expressions evaluated before authentication
@@ -287,7 +305,7 @@ expiration.
 
 #### Project Control Plane Scope
 
-WorkloadIdentityPool, WorkloadIdentityPoolIssuer, and WorkloadIdentityPoolRule
+WorkloadIdentityPool, WorkloadIdentityIssuer, and WorkloadIdentityRule
 are cluster-scoped within a project's control plane. Since projects are
 dedicated control planes in Milo, these resources are naturally project-scoped
 without requiring namespaces. TrustedIssuer is the one exception: it is a
@@ -296,16 +314,28 @@ platform-level resource managed outside any project's control plane.
 #### Pools Are Optional
 
 WorkloadIdentityPool exists purely for grouping and bulk enable/disable.
-WorkloadIdentityPoolIssuer and WorkloadIdentityPoolRule may omit `poolRef`
+WorkloadIdentityIssuer and WorkloadIdentityRule may omit `poolRef`
 entirely, in which case they're placed in an implicit `default` pool scoped to
 the project. This keeps the principal URI shape
 (`principal://.../pools/{pool}/rules/{rule}`) stable whether or not a project
 ever creates an explicit pool, and avoids requiring pool creation for the
 common single-issuer, single-rule case.
 
+#### Custom Issuers Go Through the Same Verification Path
+
+A project-owned custom issuer on WorkloadIdentityIssuer carries its own
+`issuerUri` and `jwks` source (`discovery`, `explicitUrl`, or `inline`, same
+options as TrustedIssuer), and is subject to the same constraints: `https`,
+port 443, and a public DNS hostname resolving to public IPs — no IP literals
+— for anything Milo fetches directly. `explicitUrl` and `inline` modes exist
+for issuers unreachable from the public internet (a private Kubernetes
+cluster, for example), where `issuerUri` is compared as a string rather than
+fetched. Custom issuers go through the same **Verify issuer** dry-run as a
+TrustedIssuer before they can back a rule.
+
 #### Audiences Are a Rule-Level Match Condition
 
-Allowed audiences are configured per WorkloadIdentityPoolRule, not on the
+Allowed audiences are configured per WorkloadIdentityRule, not on the
 issuer. This lets two rules against the same issuer require different
 audiences (for example, a stricter audience for a deployer rule than for a
 read-only rule) without duplicating issuer configuration, and keeps audience
@@ -336,7 +366,8 @@ ensuring key rotation is handled gracefully.
 | **Overly permissive conditions** | Unintended access granted | Conditions are required; validation rejects empty conditions |
 | **JWKS endpoint unavailable** | New tokens cannot validate | Cache last-known-good JWKS; tokens cached during outage |
 | **Token replay** | Same token reused maliciously | Short token lifetime (1 hour max); `exp` claim enforced |
-| **Issuer spoofing** | Fake tokens accepted | JWKS fetched only from configured issuer over HTTPS; v1 issuers are limited to platform-vetted TrustedIssuers |
+| **Issuer spoofing** | Fake tokens accepted | JWKS fetched only from the configured issuer over HTTPS; the same `https`/port-443/public-DNS constraints and `Verify issuer` dry-run apply whether the issuer is a platform TrustedIssuer or a project-owned custom issuer |
+| **Malicious or typo'd custom issuer URL** | Project registers an issuer that resolves somewhere unintended, or never resolves | `Verify issuer` dry-run required before a custom issuer can back a rule; URL constraints reject IP literals and non-HTTPS/443 endpoints; a custom issuer is scoped to the project that registered it and cannot be referenced by other projects |
 | **Misconfigured rule** | Authentication failures | Status conditions surface configuration errors; `Test rule` verifies end to end before relying on it |
 | **Silent misconfiguration reaches production unnoticed** | Access unexpectedly denied (or, for overly broad conditions, granted) at runtime | Verify issuer dry-run and live rule test catch mistakes before a real workflow depends on them |
 
@@ -369,7 +400,7 @@ status:
 ```
 
 Separating issuer trust from match conditions means one TrustedIssuer backs
-every project's WorkloadIdentityPoolRules for that platform — JWKS
+every project's WorkloadIdentityRules for that platform — JWKS
 configuration is fetched, verified, and rotated once, centrally, instead of
 once per project per attribute condition.
 
@@ -377,7 +408,7 @@ once per project per attribute condition.
 
 Groups related issuers and rules within a project and provides a common point
 of control (e.g., emergency disable). Omit `poolRef` on
-WorkloadIdentityPoolIssuer or WorkloadIdentityPoolRule to use the project's
+WorkloadIdentityIssuer or WorkloadIdentityRule to use the project's
 implicit `default` pool instead of creating one explicitly.
 
 ```yaml
@@ -397,18 +428,16 @@ status:
       status: "True"
 ```
 
-#### WorkloadIdentityPoolIssuer
+#### WorkloadIdentityIssuer
 
-Enables a TrustedIssuer for use within a project's pool. Holds no trust
-configuration of its own in v1 — issuer identity and JWKS come entirely from
-the referenced TrustedIssuer. This indirection is what lets a project
-participate in a platform-level issuer without redeclaring its configuration,
-and leaves room for project-scoped custom issuers (see [Future
-Work](#future-work)) to slot into the same shape later.
+Either enables a TrustedIssuer for use within a project's pool, or registers a
+project-owned custom OIDC issuer directly. `spec` accepts exactly one of
+`trustedIssuerRef` or `oidc` — never both:
 
 ```yaml
+# Enable a platform-managed TrustedIssuer
 apiVersion: iam.miloapis.com/v1alpha1
-kind: WorkloadIdentityPoolIssuer
+kind: WorkloadIdentityIssuer
 metadata:
   name: github-actions
 spec:
@@ -422,9 +451,38 @@ status:
       status: "True"
 ```
 
-#### WorkloadIdentityPoolRule
+```yaml
+# Register a project-owned custom issuer instead
+apiVersion: iam.miloapis.com/v1alpha1
+kind: WorkloadIdentityIssuer
+metadata:
+  name: internal-spire
+spec:
+  poolRef:
+    name: ci-cd-pool
+  oidc:
+    issuerUri: "https://spire.internal.acme-corp.com"
+    jwks:
+      source: inline  # discovery | explicitUrl | inline
+      inline: "<JWKS document, base64-encoded>"
+status:
+  conditions:
+    - type: Verified      # set by the Verify issuer dry-run
+      status: "True"
+    - type: Ready
+      status: "True"
+```
 
-Matches tokens from a WorkloadIdentityPoolIssuer against audience, claim, and
+A custom issuer is scoped to the project that registers it and cannot be
+referenced from other projects — that scoping, plus the same URL constraints
+and Verify-issuer dry-run applied to TrustedIssuer, is what makes opening this
+up to project owners safe from v1 rather than deferring it. See [Custom
+Issuers Go Through the Same Verification
+Path](#custom-issuers-go-through-the-same-verification-path).
+
+#### WorkloadIdentityRule
+
+Matches tokens from a WorkloadIdentityIssuer against audience, claim, and
 attribute conditions, and defines the resulting principal's attribute mapping.
 Multiple rules can reference the same issuer, each with independent match
 conditions and audiences — this is how the [Restrict Access by
@@ -433,7 +491,7 @@ configuration per branch policy.
 
 ```yaml
 apiVersion: iam.miloapis.com/v1alpha1
-kind: WorkloadIdentityPoolRule
+kind: WorkloadIdentityRule
 metadata:
   name: github-actions-main
 spec:
@@ -472,7 +530,7 @@ status:
 
 Hand-typing a principal URI into a PolicyBinding's `subjects` list is
 error-prone — a typo silently produces a binding that never matches. Instead,
-`PolicyBinding` accepts a typed reference to a `WorkloadIdentityPoolRule` as
+`PolicyBinding` accepts a typed reference to a `WorkloadIdentityRule` as
 sugar for the URI:
 
 ```yaml
@@ -484,7 +542,7 @@ spec:
   roleRef:
     name: project-editor
   subjects:
-    - kind: WorkloadIdentityPoolRule
+    - kind: WorkloadIdentityRule
       name: github-actions-main
   resourceSelector:
     resourceKind:
@@ -494,7 +552,7 @@ spec:
 
 This is not new coupling: `PolicyBinding` already resolves typed subject
 references for `User` and `ServiceAccount` into the identifier stored as the
-OpenFGA subject tuple. Adding `WorkloadIdentityPoolRule` is one more entry in
+OpenFGA subject tuple. Adding `WorkloadIdentityRule` is one more entry in
 that existing resolution path, not a new mechanism.
 
 Resolution is a compiled registry (`GroupKind` → subject template), not a
@@ -513,15 +571,15 @@ Observability](#verification-and-observability) exists as a separate check.
 
 ### Verification and Observability
 
-A WorkloadIdentityPoolIssuer or WorkloadIdentityPoolRule can be syntactically
+A WorkloadIdentityIssuer or WorkloadIdentityRule can be syntactically
 valid yet never match a real token (wrong audience, a typo in an attribute
 condition, an unreachable JWKS endpoint). The console gives project owners two
 pre-flight checks and one ongoing view:
 
 | Feature | What it does | Where it surfaces |
 |---|---|---|
-| **Verify issuer** | Dry-run: fetches and parses the JWKS from the configured source, without creating or modifying anything. Available on WorkloadIdentityPoolIssuer and, for platform admins, on TrustedIssuer. | `Verified` condition in `status.conditions` |
-| **Test rule** | Opens a 15-minute live window on a WorkloadIdentityPoolRule. Trigger a real exchange (a CI run, a manual `datumctl` federated login) within the window and the console reports success or the specific failure reason (signature invalid, audience mismatch, condition not satisfied) in real time. Re-runnable anytime from the rule's detail page if the window elapses unused. | `status.testWindow.expiresAt`, `Verified` condition |
+| **Verify issuer** | Dry-run: fetches and parses the JWKS from the configured source, without creating or modifying anything. Available on WorkloadIdentityIssuer and, for platform admins, on TrustedIssuer. | `Verified` condition in `status.conditions` |
+| **Test rule** | Opens a 15-minute live window on a WorkloadIdentityRule. Trigger a real exchange (a CI run, a manual `datumctl` federated login) within the window and the console reports success or the specific failure reason (signature invalid, audience mismatch, condition not satisfied) in real time. Re-runnable anytime from the rule's detail page if the window elapses unused. | `status.testWindow.expiresAt`, `Verified` condition |
 | **Authentication history** | Per-rule (and per-issuer, per-pool) log of every authentication *attempt*, success or failure — distinct from the Activity timeline ([Audit CI/CD Activity](#audit-cicd-activity)), which only records actions by an *already-authenticated* principal and so never sees a failed exchange. Lets a project owner tell "never tried" from "tried and was rejected," and spot a rule under sustained failed attempts (key rotation, claim drift, or misuse). | Rule detail page, `status.lastAuthenticationTime` |
 
 ### Authentication Flow
@@ -562,7 +620,7 @@ pre-flight checks and one ongoing view:
 ### Authorization Integration
 
 Federated identities become subjects in PolicyBindings, either as a typed
-`WorkloadIdentityPoolRule` reference (see [Subject
+`WorkloadIdentityRule` reference (see [Subject
 Resolution](#subject-resolution), the recommended form) or as the raw
 principal URI string it resolves to:
 
@@ -621,14 +679,6 @@ expand based on customer feedback:
 - Requires OpenFGA integration design
 - Enables different permissions based on attributes without multiple rules
 
-**Project-defined custom issuers:**
-
-- Let project owners register a WorkloadIdentityPoolIssuer with its own
-  `issuerUri`/JWKS instead of only referencing a platform TrustedIssuer
-- Lifts the v1 restriction to platform-vetted issuers; requires the security
-  guardrails called out in the original Non-Goals (audience/subject
-  constraints, reachability requirements) before it's safe to open up
-
 **Organization-level pools:**
 
 - Shared pools across projects within an organization
@@ -651,7 +701,7 @@ expand based on customer feedback:
 Workload Identity Federation builds on existing platform services:
 
 - **IAM**: PolicyBindings grant permissions to federated identities, and
-  resolve `WorkloadIdentityPoolRule` subject references via the [subject
+  resolve `WorkloadIdentityRule` subject references via the [subject
   resolver registry](#subject-resolution)
 - **Activity**: Successful authentication events appear in the audit timeline,
   attributed to the resulting principal
