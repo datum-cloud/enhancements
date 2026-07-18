@@ -33,10 +33,12 @@ latest-milestone: "v0.1"
 
 Workload Identity Federation enables external platforms (GitHub Actions, GCP,
 AWS, Azure) to authenticate to Milo using their native OIDC tokens instead of
-long-lived credentials. Platform administrators register trusted OIDC issuers,
-and project owners configure trust relationships through WorkloadIdentityPool,
-WorkloadIdentityPoolIssuer, and WorkloadIdentityPoolRule resources. Federated
-identities become subjects in PolicyBindings using principal URI strings.
+long-lived credentials. Platform administrators register trusted OIDC issuers
+once, centrally. Project owners enable one of those issuers within their
+project and define WorkloadIdentityPoolRules that match specific tokens —
+by audience, claims, or CEL attribute conditions — to a federated identity.
+Federated identities become subjects in PolicyBindings using principal URI
+strings.
 
 This approach eliminates credential management burden, removes the need to store
 secrets in CI/CD systems, and provides automatic token expiration with clear
