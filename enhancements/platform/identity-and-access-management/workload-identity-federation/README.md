@@ -20,6 +20,8 @@ latest-milestone: "v0.1"
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
   - [Resource Model](#resource-model)
+  - [Subject Resolution](#subject-resolution)
+  - [Verification and Observability](#verification-and-observability)
   - [Authentication Flow](#authentication-flow)
   - [Authorization Integration](#authorization-integration)
   - [Attribute-Based Access Control](#attribute-based-access-control)
@@ -31,8 +33,9 @@ latest-milestone: "v0.1"
 
 Workload Identity Federation enables external platforms (GitHub Actions, GCP,
 AWS, Azure) to authenticate to Milo using their native OIDC tokens instead of
-long-lived credentials. Project owners configure trust relationships through
-WorkloadIdentityPool and WorkloadIdentityPoolProvider resources, and federated
+long-lived credentials. Platform administrators register trusted OIDC issuers,
+and project owners configure trust relationships through WorkloadIdentityPool,
+WorkloadIdentityPoolIssuer, and WorkloadIdentityPoolRule resources. Federated
 identities become subjects in PolicyBindings using principal URI strings.
 
 This approach eliminates credential management burden, removes the need to store
@@ -87,15 +90,29 @@ token. No long-lived credentials are shared or stored.
 
 ## Proposal
 
-Workload Identity Federation introduces two resources that project owners use to
-configure trust relationships with external identity providers:
+Workload Identity Federation introduces one platform-level resource and three
+project-level resources. Trust in an external OIDC issuer and the conditions
+under which a token from that issuer is accepted are configured separately,
+so a single issuer registration can back many different access levels without
+duplicating issuer configuration:
 
-- **WorkloadIdentityPool**: Groups related external identity providers
-- **WorkloadIdentityPoolProvider**: Configures a specific OIDC issuer with
-  attribute conditions
+- **TrustedIssuer** *(platform-level)*: Registers an OIDC issuer's identity
+  (issuer URL and JWKS source) as safe to federate against. Managed by
+  platform administrators. v1 ships TrustedIssuers for the platforms in
+  [Supported Platforms](#supported-platforms); project-defined custom issuers
+  are [Future Work](#future-work).
+- **WorkloadIdentityPool** *(project-level, optional)*: Groups related issuers
+  and rules for bulk enable/disable. Projects that don't need grouping can
+  omit it; ungrouped resources are placed in an implicit `default` pool so the
+  principal URI shape never changes.
+- **WorkloadIdentityPoolIssuer** *(project-level)*: Enables a TrustedIssuer
+  for use within a project's pool.
+- **WorkloadIdentityPoolRule** *(project-level)*: Matches tokens from a
+  specific issuer against audience, claim, and CEL attribute conditions, and
+  maps matching tokens to a principal URI.
 
 When an external workload presents an OIDC token, Milo validates it against
-matching providers and constructs a principal URI. This principal URI becomes a
+matching rules and constructs a principal URI. This principal URI becomes a
 subject in PolicyBindings, granting the federated identity access to project
 resources.
 
@@ -103,18 +120,24 @@ resources.
 
 **Setup (one-time):**
 
-1. Project owner creates a WorkloadIdentityPool to group related providers
-2. Project owner creates a WorkloadIdentityPoolProvider specifying the OIDC
-   issuer and attribute conditions
-3. Project owner creates a PolicyBinding granting the principal access to
-   resources
+1. Platform administrator registers a TrustedIssuer (already done for
+   supported platforms in v1)
+2. Project owner creates a WorkloadIdentityPoolIssuer enabling that
+   TrustedIssuer within the project (optionally within a named
+   WorkloadIdentityPool)
+3. Project owner creates one or more WorkloadIdentityPoolRules specifying
+   audience, claim, and attribute conditions
+4. Project owner creates a PolicyBinding granting the resulting principal
+   access to resources
+5. Project owner optionally verifies the setup end-to-end (see
+   [Verification and Observability](#verification-and-observability))
 
 **Runtime (every request):**
 
 1. External workload requests OIDC token from its platform (automatic in GitHub
    Actions)
 2. Workload calls Milo API with token in Authorization header
-3. Milo validates token against matching provider
+3. Milo validates token against matching rules for the token's issuer
 4. Milo constructs principal URI and checks PolicyBinding authorization
 5. Request proceeds with federated identity context
 
@@ -138,7 +161,7 @@ jobs:
         with:
           project: my-project
           pool: ci-cd-pool
-          provider: github-actions-main
+          rule: github-actions-main
       - run: datumctl apply -f manifests/
 ```
 
@@ -150,22 +173,38 @@ configuration required.
 As a team lead, I want to grant deploy access only to workflows running on the
 main branch, while allowing any branch to run read-only operations.
 
-**Experience:** Create two providers with different attribute conditions:
+**Experience:** Create one WorkloadIdentityPoolIssuer for GitHub Actions, then
+two WorkloadIdentityPoolRules against it with different attribute conditions:
 
 - `github-actions-main`: Condition requires `attribute.ref ==
   "refs/heads/main"` → bound to deployer role
 - `github-actions-all`: No branch restriction → bound to viewer role
 
-Workflows on feature branches can view resources but cannot deploy.
+Both rules reuse the same issuer registration — no duplicate issuer or JWKS
+configuration. Workflows on feature branches can view resources but cannot
+deploy.
+
+#### Verify a New Rule Before Relying On It
+
+As a developer, I want to confirm my WorkloadIdentityPoolRule is configured
+correctly before I point a real CI/CD pipeline at it.
+
+**Experience:** After creating the issuer and rule, select **Test rule** in
+the console. Milo listens for a live token exchange matching that rule for 15
+minutes. Trigger a workflow run (or a manual `datumctl` federated login) within
+that window; the console shows the exchange succeeding or failing in real
+time, including the specific reason for a failure (signature invalid, audience
+mismatch, condition not satisfied). If the window elapses without an attempt,
+the rule persists and the test can be re-run from the rule's detail page.
 
 #### Authenticate from GCP Cloud Functions
 
 As a developer, I want my GCP Cloud Function to call Milo APIs using its service
 identity without embedding credentials in code.
 
-**Experience:** Create a provider for the GCP issuer with a condition matching
-the service account email. The Cloud Function authenticates using its native
-identity token.
+**Experience:** Create a WorkloadIdentityPoolIssuer referencing the GCP
+TrustedIssuer, then a rule with a condition matching the service account
+email. The Cloud Function authenticates using its native identity token.
 
 #### Revoke Access Immediately
 
@@ -173,7 +212,7 @@ As a security engineer, I want to immediately revoke access for a compromised
 workflow without waiting for credential expiration.
 
 **Experience:** Delete the PolicyBinding or disable the
-WorkloadIdentityPoolProvider. Access is denied immediately on the next request,
+WorkloadIdentityPoolRule. Access is denied immediately on the next request,
 even though the OIDC token may still be valid.
 
 #### Audit CI/CD Activity
@@ -182,12 +221,16 @@ As a compliance officer, I want to see which CI/CD workflows accessed my project
 and what actions they performed.
 
 **Experience:** View the Activity timeline filtered by principal. Each action
-shows the principal URI, which encodes the pool and provider. Cross-reference
-with CI/CD logs to identify specific workflow runs.
+shows the principal URI, which encodes the pool and rule. Cross-reference with
+CI/CD logs to identify specific workflow runs. For authentication attempts
+that never resulted in an action — including failed ones — see the rule's
+Authentication History (see
+[Verification and Observability](#verification-and-observability)).
 
 ### Supported Platforms
 
-Initial support targets platforms with mature OIDC token support:
+Initial support targets platforms with mature OIDC token support. Each is
+pre-registered as a platform-level TrustedIssuer:
 
 | Platform | Issuer | Key Claims |
 |----------|--------|------------|
@@ -197,15 +240,17 @@ Initial support targets platforms with mature OIDC token support:
 | **Azure AD** | `https://login.microsoftonline.com/{tenant}/v2.0` | `sub`, `oid`, `appid` |
 
 These platforms automatically provide OIDC tokens to workloads without
-additional configuration.
+additional configuration. Project owners reference the corresponding
+TrustedIssuer from a WorkloadIdentityPoolIssuer; they do not configure issuer
+URLs or JWKS sources directly in v1.
 
 ### Security
 
 #### Trust Model
 
 - **Token validation**: Signature verified using JWKS from issuer
-- **Issuer validation**: Token's `iss` claim must match provider's configured
-  issuer
+- **Issuer validation**: Token's `iss` claim must match the TrustedIssuer's
+  configured issuer
 - **Audience validation**: Token's `aud` claim must match configured audiences
 - **Expiration**: Tokens older than 1 hour are rejected
 - **Attribute conditions**: CEL expressions evaluated before authentication
@@ -228,9 +273,10 @@ Access can be revoked through multiple mechanisms:
 | Mechanism | Effect | Latency |
 |-----------|--------|---------|
 | Delete PolicyBinding | Authorization denied | Immediate |
-| Disable provider | Authentication rejected | Immediate |
-| Delete provider | Authentication rejected | Immediate |
-| Disable pool | All providers in pool rejected | Immediate |
+| Disable rule | Authentication rejected | Immediate |
+| Delete rule | Authentication rejected | Immediate |
+| Disable issuer | Authentication rejected for all rules on that issuer | Immediate |
+| Disable pool | All issuers and rules in pool rejected | Immediate |
 
 Unlike long-lived credentials, there's no need to rotate secrets or wait for
 expiration.
@@ -239,18 +285,39 @@ expiration.
 
 #### Project Control Plane Scope
 
-WorkloadIdentityPool and WorkloadIdentityPoolProvider are cluster-scoped within
-a project's control plane. Since projects are dedicated control planes in Milo,
-these resources are naturally project-scoped without requiring namespaces.
+WorkloadIdentityPool, WorkloadIdentityPoolIssuer, and WorkloadIdentityPoolRule
+are cluster-scoped within a project's control plane. Since projects are
+dedicated control planes in Milo, these resources are naturally project-scoped
+without requiring namespaces. TrustedIssuer is the one exception: it is a
+platform-level resource managed outside any project's control plane.
+
+#### Pools Are Optional
+
+WorkloadIdentityPool exists purely for grouping and bulk enable/disable.
+WorkloadIdentityPoolIssuer and WorkloadIdentityPoolRule may omit `poolRef`
+entirely, in which case they're placed in an implicit `default` pool scoped to
+the project. This keeps the principal URI shape
+(`principal://.../pools/{pool}/rules/{rule}`) stable whether or not a project
+ever creates an explicit pool, and avoids requiring pool creation for the
+common single-issuer, single-rule case.
+
+#### Audiences Are a Rule-Level Match Condition
+
+Allowed audiences are configured per WorkloadIdentityPoolRule, not on the
+issuer. This lets two rules against the same issuer require different
+audiences (for example, a stricter audience for a deployer rule than for a
+read-only rule) without duplicating issuer configuration, and keeps audience
+validation grouped with the rest of the rule's match logic (`claims`,
+`attributeCondition`).
 
 #### Attribute Conditions at Authentication Time
 
 Attribute conditions (CEL expressions) are evaluated during authentication, not
 authorization. This means:
 
-- All tokens from a provider share the same principal URI
+- All tokens matching a rule share the same principal URI
 - To grant different permissions based on attributes (e.g., branch), create
-  separate providers
+  separate rules against the same issuer
 
 Future work may add binding-level conditions for finer-grained control.
 
@@ -267,17 +334,49 @@ ensuring key rotation is handled gracefully.
 | **Overly permissive conditions** | Unintended access granted | Conditions are required; validation rejects empty conditions |
 | **JWKS endpoint unavailable** | New tokens cannot validate | Cache last-known-good JWKS; tokens cached during outage |
 | **Token replay** | Same token reused maliciously | Short token lifetime (1 hour max); `exp` claim enforced |
-| **Issuer spoofing** | Fake tokens accepted | JWKS fetched only from configured issuer over HTTPS |
-| **Misconfigured provider** | Authentication failures | Status conditions surface configuration errors |
+| **Issuer spoofing** | Fake tokens accepted | JWKS fetched only from configured issuer over HTTPS; v1 issuers are limited to platform-vetted TrustedIssuers |
+| **Misconfigured rule** | Authentication failures | Status conditions surface configuration errors; `Test rule` verifies end to end before relying on it |
+| **Silent misconfiguration reaches production unnoticed** | Access unexpectedly denied (or, for overly broad conditions, granted) at runtime | Verify issuer dry-run and live rule test catch mistakes before a real workflow depends on them |
 
 ## Design Details
 
 ### Resource Model
 
-#### WorkloadIdentityPool
+#### TrustedIssuer *(platform-level)*
 
-Groups related identity providers and provides a common point of control (e.g.,
-emergency disable).
+Registers an OIDC issuer's identity as safe to federate against, cluster-wide.
+Managed by platform administrators, not project owners. v1 ships a
+TrustedIssuer for each platform in [Supported Platforms](#supported-platforms).
+
+```yaml
+apiVersion: iam.miloapis.com/v1alpha1
+kind: TrustedIssuer
+metadata:
+  name: github-actions
+spec:
+  displayName: "GitHub Actions"
+  issuerUri: "https://token.actions.githubusercontent.com"
+  jwks:
+    source: discovery  # discovery | explicitUrl | inline
+status:
+  resolvedJwksUri: "https://token.actions.githubusercontent.com/.well-known/jwks"
+  conditions:
+    - type: Verified
+      status: "True"
+      lastVerifiedTime: "2026-07-10T12:00:00Z"
+```
+
+Separating issuer trust from match conditions means one TrustedIssuer backs
+every project's WorkloadIdentityPoolRules for that platform — JWKS
+configuration is fetched, verified, and rotated once, centrally, instead of
+once per project per attribute condition.
+
+#### WorkloadIdentityPool *(optional)*
+
+Groups related issuers and rules within a project and provides a common point
+of control (e.g., emergency disable). Omit `poolRef` on
+WorkloadIdentityPoolIssuer or WorkloadIdentityPoolRule to use the project's
+implicit `default` pool instead of creating one explicitly.
 
 ```yaml
 apiVersion: iam.miloapis.com/v1alpha1
@@ -289,32 +388,60 @@ spec:
   description: "Pool for CI/CD pipeline authentications"
   disabled: false  # Emergency disable switch
 status:
-  providerCount: 2
+  issuerCount: 1
+  ruleCount: 2
   conditions:
     - type: Ready
       status: "True"
 ```
 
-#### WorkloadIdentityPoolProvider
+#### WorkloadIdentityPoolIssuer
 
-Configures trust for a specific OIDC issuer with attribute mapping and
-conditions.
+Enables a TrustedIssuer for use within a project's pool. Holds no trust
+configuration of its own in v1 — issuer identity and JWKS come entirely from
+the referenced TrustedIssuer. This indirection is what lets a project
+participate in a platform-level issuer without redeclaring its configuration,
+and leaves room for project-scoped custom issuers (see [Future
+Work](#future-work)) to slot into the same shape later.
 
 ```yaml
 apiVersion: iam.miloapis.com/v1alpha1
-kind: WorkloadIdentityPoolProvider
+kind: WorkloadIdentityPoolIssuer
+metadata:
+  name: github-actions
+spec:
+  poolRef:
+    name: ci-cd-pool  # optional; omitted uses the project's default pool
+  trustedIssuerRef:
+    name: github-actions
+status:
+  conditions:
+    - type: Ready
+      status: "True"
+```
+
+#### WorkloadIdentityPoolRule
+
+Matches tokens from a WorkloadIdentityPoolIssuer against audience, claim, and
+attribute conditions, and defines the resulting principal's attribute mapping.
+Multiple rules can reference the same issuer, each with independent match
+conditions and audiences — this is how the [Restrict Access by
+Branch](#restrict-access-by-branch) story avoids duplicating issuer
+configuration per branch policy.
+
+```yaml
+apiVersion: iam.miloapis.com/v1alpha1
+kind: WorkloadIdentityPoolRule
 metadata:
   name: github-actions-main
 spec:
-  poolRef:
-    name: ci-cd-pool
+  issuerRef:
+    name: github-actions
 
   displayName: "GitHub Actions - Main Branch"
 
-  oidc:
-    issuerUri: "https://token.actions.githubusercontent.com"
-    allowedAudiences:
-      - "https://api.miloapis.com"
+  allowedAudiences:
+    - "https://api.miloapis.com"
 
   # Map token claims to attributes
   attributeMapping:
@@ -329,12 +456,71 @@ spec:
     attribute.ref == "refs/heads/main"
 
 status:
-  principalIdentifier: "principal://iam.miloapis.com/projects/my-project/pools/ci-cd-pool/providers/github-actions-main"
-  resolvedJwksUri: "https://token.actions.githubusercontent.com/.well-known/jwks"
+  principalIdentifier: "principal://iam.miloapis.com/projects/my-project/pools/ci-cd-pool/rules/github-actions-main"
   conditions:
     - type: Ready
       status: "True"
+    - type: Verified          # flips to "True" once a live test exchange succeeds
+      status: "True"
+      reason: TestExchangeSucceeded
+      lastAuthenticationTime: "2026-07-15T09:04:22Z"
 ```
+
+### Subject Resolution
+
+Hand-typing a principal URI into a PolicyBinding's `subjects` list is
+error-prone — a typo silently produces a binding that never matches. Instead,
+`PolicyBinding` accepts a typed reference to a `WorkloadIdentityPoolRule` as
+sugar for the URI:
+
+```yaml
+apiVersion: iam.miloapis.com/v1alpha1
+kind: PolicyBinding
+metadata:
+  name: github-deployer
+spec:
+  roleRef:
+    name: project-editor
+  subjects:
+    - kind: WorkloadIdentityPoolRule
+      name: github-actions-main
+  resourceSelector:
+    resourceKind:
+      apiGroup: resourcemanager.miloapis.com
+      kind: Project
+```
+
+This is not new coupling: `PolicyBinding` already resolves typed subject
+references for `User` and `ServiceAccount` into the identifier stored as the
+OpenFGA subject tuple. Adding `WorkloadIdentityPoolRule` is one more entry in
+that existing resolution path, not a new mechanism.
+
+Resolution is a compiled registry (`GroupKind` → subject template), not a
+runtime-editable policy: a misresolved subject fails *open* — it grants the
+binding to the wrong identity — where a misconfigured `attributeCondition`
+only fails *closed*, so this mapping stays code-reviewed rather than
+cluster-admin-configurable. The resolved string is also written to the
+referenced rule's `status.principalIdentifier`, so it's computed once and
+discoverable from the rule itself, whether a PolicyBinding references the rule
+directly or a user copies the URI by hand.
+
+A resolved reference validates only that the rule *exists*, not that any
+workload will ever present a token matching it — that gap is inherent to
+federated identity and is why [Verification and
+Observability](#verification-and-observability) exists as a separate check.
+
+### Verification and Observability
+
+A WorkloadIdentityPoolIssuer or WorkloadIdentityPoolRule can be syntactically
+valid yet never match a real token (wrong audience, a typo in an attribute
+condition, an unreachable JWKS endpoint). The console gives project owners two
+pre-flight checks and one ongoing view:
+
+| Feature | What it does | Where it surfaces |
+|---|---|---|
+| **Verify issuer** | Dry-run: fetches and parses the JWKS from the configured source, without creating or modifying anything. Available on WorkloadIdentityPoolIssuer and, for platform admins, on TrustedIssuer. | `Verified` condition in `status.conditions` |
+| **Test rule** | Opens a 15-minute live window on a WorkloadIdentityPoolRule. Trigger a real exchange (a CI run, a manual `datumctl` federated login) within the window and the console reports success or the specific failure reason (signature invalid, audience mismatch, condition not satisfied) in real time. Re-runnable anytime from the rule's detail page if the window elapses unused. | `status.testWindow.expiresAt`, `Verified` condition |
+| **Authentication history** | Per-rule (and per-issuer, per-pool) log of every authentication *attempt*, success or failure — distinct from the Activity timeline ([Audit CI/CD Activity](#audit-cicd-activity)), which only records actions by an *already-authenticated* principal and so never sees a failed exchange. Lets a project owner tell "never tried" from "tried and was rejected," and spot a rule under sustained failed attempts (key rotation, claim drift, or misuse). | Rule detail page, `status.lastAuthenticationTime` |
 
 ### Authentication Flow
 
@@ -354,23 +540,29 @@ status:
        │     Authorization: Bearer <jwt>  │                                     │
        │─────────────────────────────────>│                                     │
        │                                  │                                     │
-       │                                  │  4. Fetch JWKS (cached)             │
+       │                                  │  4. Fetch JWKS (cached from TrustedIssuer) │
        │                                  │────────────────────────────────────>│
        │                                  │                                     │
-       │                                  │  5. Validate signature, claims      │
-       │                                  │  6. Extract attributes              │
-       │                                  │  7. Evaluate CEL condition          │
-       │                                  │  8. Construct principal URI         │
-       │                                  │  9. Check PolicyBinding (OpenFGA)   │
+       │                                  │  5. Find rules for matching issuer  │
+       │                                  │  6. Validate signature, claims,     │
+       │                                  │     audience against each rule      │
+       │                                  │  7. Extract attributes              │
+       │                                  │  8. Evaluate CEL condition          │
+       │                                  │  9. Construct principal URI         │
+       │                                  │ 10. Check PolicyBinding (OpenFGA)   │
+       │                                  │ 11. Record authentication attempt   │
+       │                                  │     (Authentication History)        │
        │                                  │                                     │
-       │  10. API response                │                                     │
+       │  12. API response                │                                     │
        │<─────────────────────────────────│                                     │
 ```
 
 ### Authorization Integration
 
-Federated identities become subjects in PolicyBindings using principal URI
-strings:
+Federated identities become subjects in PolicyBindings, either as a typed
+`WorkloadIdentityPoolRule` reference (see [Subject
+Resolution](#subject-resolution), the recommended form) or as the raw
+principal URI string it resolves to:
 
 ```yaml
 apiVersion: iam.miloapis.com/v1alpha1
@@ -382,17 +574,19 @@ spec:
     name: project-editor
   subjects:
     - kind: Principal
-      name: "principal://iam.miloapis.com/projects/my-project/pools/ci-cd-pool/providers/github-actions-main"
+      name: "principal://iam.miloapis.com/projects/my-project/pools/ci-cd-pool/rules/github-actions-main"
   resourceSelector:
     resourceKind:
       apiGroup: resourcemanager.miloapis.com
       kind: Project
 ```
 
-The principal URI format follows GCP's proven pattern:
+The principal URI format follows GCP's proven pattern, with `rules` in place
+of GCP's `providers` since issuer trust and match conditions are separate
+resources here:
 
 ```
-principal://iam.miloapis.com/projects/{project}/pools/{pool}/providers/{provider}
+principal://iam.miloapis.com/projects/{project}/pools/{pool}/rules/{rule}
 ```
 
 Including the project in the URI ensures principals are globally unique across
@@ -411,7 +605,7 @@ authentication time:
 - **Specific actor**: `attribute.actor == "deploy-bot"`
 - **Combined**: `attribute.repository == "acme-corp/app" && attribute.ref == "refs/heads/main"`
 
-Conditions are required—providers without conditions are rejected during
+Conditions are required—rules without conditions are rejected during
 validation.
 
 ## Future Work
@@ -423,16 +617,25 @@ expand based on customer feedback:
 
 - CEL conditions on PolicyBinding subjects for finer-grained authorization
 - Requires OpenFGA integration design
-- Enables different permissions based on attributes without multiple providers
+- Enables different permissions based on attributes without multiple rules
+
+**Project-defined custom issuers:**
+
+- Let project owners register a WorkloadIdentityPoolIssuer with its own
+  `issuerUri`/JWKS instead of only referencing a platform TrustedIssuer
+- Lifts the v1 restriction to platform-vetted issuers; requires the security
+  guardrails called out in the original Non-Goals (audience/subject
+  constraints, reachability requirements) before it's safe to open up
 
 **Organization-level pools:**
 
 - Shared pools across projects within an organization
 - Centralized trust management for platform teams
+- Partially addressed by TrustedIssuer, which already shares issuer trust
+  platform-wide; this item is about sharing pools/rules, not just issuers
 
 **Additional platforms:**
 
-- Custom OIDC providers (user-defined issuers with security guardrails)
 - Grafana and other SaaS provider integrations
 - SAML and X.509 provider types
 
@@ -445,8 +648,15 @@ expand based on customer feedback:
 
 Workload Identity Federation builds on existing platform services:
 
-- **IAM**: PolicyBindings grant permissions to federated identities
-- **Activity**: Authentication events appear in audit timeline
+- **IAM**: PolicyBindings grant permissions to federated identities, and
+  resolve `WorkloadIdentityPoolRule` subject references via the [subject
+  resolver registry](#subject-resolution)
+- **Activity**: Successful authentication events appear in the audit timeline,
+  attributed to the resulting principal
+- **Authentication history**: Records every authentication *attempt* — including
+  failures, which never produce a principal and so never reach Activity — for
+  the console's [Verification and Observability](#verification-and-observability)
+  views
 - **OpenFGA**: Authorization checks use principal URIs as subjects
 
 External dependencies:
@@ -476,6 +686,37 @@ External platforms obtain tokens via OAuth client credentials flow.
 - Still requires managing client secrets
 - More complex than native OIDC token support
 - Platforms already provide OIDC tokens automatically
+
+### Coupled Issuer and Match Conditions (Single Provider Resource)
+
+Fold issuer trust (issuer URL, JWKS) and match conditions (audience, claims,
+attribute condition) into one resource per rule, as GCP's
+`WorkloadIdentityPoolProvider` does.
+
+**Rejected because:**
+
+- Two access levels against one issuer (e.g., [Restrict Access by
+  Branch](#restrict-access-by-branch)) require two full resources, each
+  redeclaring the same issuer URL and JWKS source
+- Rotating an issuer's JWKS means updating every resource that uses it,
+  instead of once
+- Anthropic's WIF ships the decoupled alternative in production: one
+  `Federation Issuer` backs many independent `Federation Rules`
+
+### Federation Rule Targets a Service Account (Anthropic Pattern)
+
+Anthropic's federation rules target a pre-provisioned service account; the
+minted token carries that account's workspace role, the same authorization
+surface as a static API key.
+
+**Rejected because:**
+
+- Requires an account object per access level, reintroducing the
+  per-consumer credential proliferation this enhancement exists to avoid
+- Coarser-grained than `PolicyBinding` + principal URI, which already scopes
+  access to a single Project
+- Gains nothing authorization-wise: both a service account and a principal
+  URI are just subjects a `PolicyBinding` can reference
 
 ### Service Mesh / SPIFFE
 
