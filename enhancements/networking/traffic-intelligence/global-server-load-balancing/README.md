@@ -286,22 +286,100 @@ materially compressing available headroom — before a traffic spike finds it.
 
 ## Design Details
 
-### Component inventory
+### The request path, concern by concern
 
-| Concern | Status | Approach |
+The scope of this work is easiest to see by following a request from client to
+origin. It passes through nine distinct concerns, each of which must be solved
+somewhere. Walking them in order shows that six are already solved or nearly
+free with what is deployed, and that the new work is exactly three — all of
+them control plane.
+
+Only free and open-source options are named. The network services operator is
+AGPL-3.0, so component licensing is a real selection constraint, noted where it
+bites.
+
+**1. Getting packets to the right PoP.** *Solved.* Anycast delivers a client to
+a topologically near PoP, and the FRR-based underlay carries traffic between
+them. The BGP announcer (Cilium today) is expected to change without affecting
+the layers above. The known cost is that anycast selects on topology rather
+than latency and can reset in-flight TCP on route flap; Google's "stabilized
+anycast" mitigates both but has no off-the-shelf FOSS implementation. *FOSS:
+FRRouting, BIRD, GoBGP for BGP; Cilium, Katran, MetalLB for packet-level
+balancing.*
+
+**2. Terminating the connection and selecting an origin.** *Solved.* Envoy runs
+at each edge over xDS. It already provides priority levels with an
+overprovisioning factor (spill to the next tier), locality-weighted balancing
+(proximity within a tier), outlier detection, circuit breaking, and retry
+budgets. The gap is not Envoy's capability — nothing computes the priorities
+and weights it consumes, which is concerns 3 through 6.
+
+**3. Knowing what is healthy.** *Nearly free.* Envoy active health checking runs
+per PoP, which is correct by construction: an origin reachable from Frankfurt
+but not Singapore is a condition no single global prober can see. Outlier
+detection ejects on observed errors without a probe. The remaining work is
+aggregating per-PoP health into a cell-wide view; see [Health](#health). *FOSS:
+Envoy native checks, Prometheus Blackbox Exporter for vantage points outside the
+proxy path.*
+
+**4. Knowing what is busy.** ***New.*** Health is binary; capacity is not, and a
+healthy origin with no headroom is still the wrong answer. This is the signal
+that separates capacity-aware routing from geo-DNS, and the one nothing provides
+today. ORCA carries load from origins and LRS streams it from Envoy back to the
+control plane; see [Capacity](#capacity). *FOSS: ORCA, LRS, Envoy client-side
+weighted round robin, or Prometheus with prometheus-adapter.*
+
+**5. Assembling and distributing the global view.** ***New.*** Health and
+capacity are observed per PoP, but spillover needs a view across PoPs. The
+distribution channel exists — the xDS server — but the assembly does not.
+Concretely: drive EDS from live aggregated state rather than static config,
+scoped per cell; see [Eligibility assembly](#eligibility-assembly) and
+[Cell scoping](#cell-scoping). *FOSS: `envoyproxy/go-control-plane`, likely
+already a dependency.*
+
+**6. Describing an origin.** ***New.*** Everything above needs a stable,
+producer-independent answer to "what may be routed to?" This is the
+load-bearing API decision — the equivalent of GCP's Network Endpoint Group; see
+[The origin abstraction](#the-origin-abstraction). *FOSS precedent worth
+studying rather than reinventing: Gateway API's `BackendRef` and `Backend`, and
+`gateway-api-inference-extension`, whose endpoint selection on model-server load
+is close to the accelerator scenario.*
+
+**7. Reacting when nothing has headroom.** *Available, with coupling
+requirements.* Routing can only choose among what exists; when nothing has
+capacity, autoscaling or shedding has to give. Both must be driven by
+routing-layer observation rather than raw instance metrics — otherwise zombie
+instances drag the average down and shedding hides the inversion in concern 4 —
+per [Risks and Mitigations](#risks-and-mitigations). *FOSS: KEDA, HPA with
+prometheus-adapter, Envoy overload manager and adaptive concurrency.*
+
+**8. Seeing what happened.** *Available, needs one addition.* Generic metrics
+are native to Envoy; the missing piece is per-origin eligibility *with a
+reason* — unhealthy, at capacity, drained, excluded by policy, or load not
+observable. It is the item most likely to be deferred and most needed during an
+incident; see [Interfaces](#interfaces). *FOSS: Prometheus, OpenTelemetry,
+Grafana.*
+
+**9. Name resolution.** *Solved, with a smaller role than expected.* DNS maps a
+name to a stable anycast VIP with a long TTL, precisely because the VIP does not
+move; see [What DNS is still for](#what-dns-is-still-for). Steering at this layer
+would reintroduce a geo-database licensing constraint — MaxMind GeoLite2 and its
+peers are not permissive FOSS — that anycast avoids entirely.
+
+| # | Concern | Status |
 |---|---|---|
-| Anycast ingress | Exists | VIP announced from PoPs |
-| Inter-PoP transport | Exists | FRR-based underlay |
-| L7 termination, per-request selection | Exists | Envoy at each PoP |
-| Routing state distribution | Exists | xDS via network services operator |
-| Configuration propagation | Exists | Federation stack |
-| Health probing | Near-free | Envoy active health checks, outlier detection |
-| Spillover on saturation | Near-free | Envoy priority levels, overprovisioning |
-| Capacity reporting | **New** | ORCA from origins, LRS from Envoy |
-| Origin abstraction | **New** | This document |
-| Eligibility assembly to EDS | **New** | This document |
+| 1 | Getting packets to the right PoP | Solved — anycast, FRR underlay |
+| 2 | Terminating and selecting an origin | Solved — Envoy, xDS |
+| 3 | Knowing what is healthy | Nearly free — Envoy native |
+| 4 | Knowing what is busy | **New** — ORCA, LRS |
+| 5 | Assembling and distributing the view | **New** — per-cell assembler to EDS |
+| 6 | Describing an origin | **New** — the load-bearing API decision |
+| 7 | Reacting when nothing has headroom | Available — KEDA, Envoy overload manager |
+| 8 | Seeing what happened | Available — needs eligibility reasons |
+| 9 | Name resolution | Solved — name to stable VIP, long TTL |
 
-Three of the new items are control plane. The data plane changes very little.
+Six of nine are solved or nearly free with what is already deployed. The new
+work is concerns 4, 5, and 6 — and all three are control plane, not data plane.
 
 ### The origin abstraction
 
