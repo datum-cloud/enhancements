@@ -3,6 +3,17 @@
 **Product area:** Deliver — Edge Delivery / Load Balancing / Fraud & Traffic Mgmt  
 **Status:** Early definition
 
+> **Note:** The GSLB project in this theme has been superseded by
+> [Global Server Load Balancing](global-server-load-balancing/README.md),
+> which reasons from the requirements in
+> [#833](https://github.com/datum-cloud/enhancements/issues/833) rather than
+> from an assumed DNS-and-PowerDNS implementation. The Total Load Balancing
+> thesis below — that routing signals should be available wherever decisions
+> are made, and that policy constraints are evaluated before performance
+> scoring — is retained. Specific mechanism claims are annotated inline where
+> they are under reconsideration. The remaining projects in this theme have not
+> yet been reviewed against that design.
+
 ---
 
 ## The Concept
@@ -43,11 +54,11 @@ Datum uses a three-layer load balancing architecture. Every layer consumes Total
 
 | Layer | Technology | Customer-Configurable | Scope |
 |---|---|---|---|
-| **DNS / GSLB** | [Jamie Tartt / PowerDNS](gslb-jamie-tartt.md) | Via `GeoSteeringPolicy` | Outermost steering layer — operates before any connection is established; routes users to the right PoP based on geography, health, and DDoS state |
+| **DNS / GSLB** | [Global Server Load Balancing](global-server-load-balancing/README.md) | Per-service routing configuration | Origin selection across PoPs based on proximity, health, capacity, and policy. Note that PoP-level proximity is already determined by anycast; see the design for why this layer does not re-decide it |
 | **L4 (transport)** | [Dani Rojas / Cilium](l4-load-balancing-dani-rojas.md) | For compute targets | Routes TCP/UDP traffic to Compute instances and other customer compute; platform-managed in front of Envoy |
 | **L7 (application)** | [Zava / Envoy](envoy-routing-zava.md) | Via delivery policies | HTTP/HTTPS routing, TLS termination, WAF (Coraza), origin selection, header manipulation |
 
-See [Jamie Tartt](gslb-jamie-tartt.md) for the GSLB design, PowerDNS GeoIP backend, and health-aware failover. See [Dani Rojas](l4-load-balancing-dani-rojas.md) for the Cilium design and customer configuration model. See [Zava](envoy-routing-zava.md) for the full Envoy routing feature map and integration details.
+See [Global Server Load Balancing](global-server-load-balancing/README.md) for the GSLB design, including the origin abstraction, capacity signalling, and cell-scoped control plane. See [Dani Rojas](l4-load-balancing-dani-rojas.md) for the Cilium design and customer configuration model. See [Zava](envoy-routing-zava.md) for the full Envoy routing feature map and integration details.
 
 ---
 
@@ -64,11 +75,11 @@ Total Load Balancing is built from a growing set of signals, introduced across p
 | **RTT** | TBD | Round-trip time to candidate edge locations — first real latency signal |
 | **Packet Loss** | TBD | Loss rate on candidate paths — distinguishes congestion from distance |
 | **Congestion** | TBD | Link utilization at candidate PoPs and upstream |
-| **Sovereignty** | TBD | Data residency and legal jurisdiction rules — hard constraints on path selection |
+| **Sovereignty** | [GSLB](global-server-load-balancing/README.md) (consumption) | Data residency and legal jurisdiction rules — hard constraints on path selection. GSLB defines how these constraints are expressed and enforced at routing time; sourcing jurisdiction data for each location remains unowned |
 | **Risk** | TBD | Reputation score of source IP/ASN — feeds fraud and bot decisions |
 | **DDoS / Attack State** | [Beard](ddos-scrubbing-beard.md) | Active attack state per PoP and per customer prefix — steers traffic away from PoPs under attack |
 | **Model Locality** | TBD | Where the required inference model is currently loaded |
-| **Compute Availability** | TBD | Utilization and capacity of GPU, CPU, and DPU resources at candidate compute nodes |
+| **Compute Availability** | [GSLB](global-server-load-balancing/README.md) | Utilization and capacity of GPU, CPU, and DPU resources at candidate compute nodes. Carried as ORCA load reports; workload-specific measures ride in the open `named_metrics` map |
 
 ---
 
@@ -86,7 +97,7 @@ The end state is a layered decision hierarchy applied to every traffic flow:
 
 | Project | Signals / Scope | Status |
 |---|---|---|
-| [Jamie Tartt](gslb-jamie-tartt.md) | GSLB / DNS — geo + health-aware PoP steering | Early definition |
+| [Global Server Load Balancing](global-server-load-balancing/README.md) | Origin selection — proximity, health, capacity, and policy | Provisional — tracked by [#833](https://github.com/datum-cloud/enhancements/issues/833) |
 | [Dani Rojas](l4-load-balancing-dani-rojas.md) | L4 load balancing — Cilium, customer-configurable for compute targets | Early definition |
 | [Zava](envoy-routing-zava.md) | L7 routing — geo, health, WAF (Coraza), policy, protocol | Early definition |
 | [The Roy Kent Project](ip-geo-roy-kent.md) | Geography, ASN, IP Type | In progress |
@@ -105,6 +116,19 @@ Signals are distributed platform-wide using **Higgins Bus** — a QUIC-native pu
 
 The choice of MOQT reflects where the internet is heading. Rather than building a proprietary signaling protocol, Datum applies an internet-scale, standards-based distribution protocol to network intelligence — the same way the media industry uses it for content delivery. The relay infrastructure, authentication model, object delivery semantics, and interoperability work that the media industry has invested in all carry over directly.
 
+<<[UNRESOLVED signal-scope ]>>
+The claim that *all* routing intelligence rides one fabric is under
+reconsideration. The
+[GSLB design](global-server-load-balancing/README.md) splits signals by scope:
+platform-wide reference data such as geo databases and per-PoP attack state is
+broadcast-shaped and suits a pub/sub fabric, but per-customer routing state is
+cell-scoped and is carried on xDS instead. Fanning tenant-specific eligibility
+to every PoP would distribute state across cell boundaries and make the
+distribution layer a fleet-wide dependency, which is the blast radius the
+[cell-based architecture](../../datum/federation/README.md) exists to prevent.
+The paragraph below should be read as applying to platform-wide signals.
+<<[/UNRESOLVED]>>
+
 The result is a shared stream of operational truth. Every component that makes a routing decision — DNS, L4, L7, WAF, AI gateway — subscribes to the same signals and operates from the same current view of health, geography, latency, capacity, policy, and cost. A PoP health event is not a local secret known only to the layer that detected it; it becomes an immediate input to every routing decision across the platform. Total Load Balancing is only possible because Higgins Bus makes the intelligence available everywhere at once.
 
 Each Total Load Balancing project extends the track namespace:
@@ -115,7 +139,7 @@ Each Total Load Balancing project extends the track namespace:
 | Health | `platform/health/pop/{pop-id}`, `platform/health/endpoint/{endpoint-id}`, `org/{id}/health/{check-id}` | [Nate](health-checks-nate.md) |
 | RTT, Packet Loss, Congestion | TBD | TBD |
 | Sovereignty, Risk | TBD | TBD |
-| Model Locality, Compute Availability | TBD | TBD |
+| Model Locality, Compute Availability | Not applicable — carried on xDS/ORCA per the GSLB design, not on the bus | [GSLB](global-server-load-balancing/README.md) |
 | DDoS / Attack State | `platform/ddos/pop/{pop-id}`, `org/{org-id}/ddos/{prefix}` | [Beard](ddos-scrubbing-beard.md) |
 | Inference and Agent Coordination | See [Higgins Bus](signal-distribution-higgins-bus.md) — Inference and Agent Workloads namespace | TBD |
 
