@@ -193,9 +193,11 @@ PoP and observes where load moved.
 
 #### An automated rollout
 
-A platform team derates one origin to ten percent from CI, observes error
-rates, and either proceeds or restores — without a browser, and without
-needing to know Kubernetes is involved.
+A platform team ships a new version of a service and wants only a small slice
+of traffic on it before committing. This is a canary rollout: from CI, they
+derate the new origin to ten percent, watch its error rate, and then either
+ramp it up or set it back to zero. The whole loop runs through the API —
+without a browser, and without needing to know Kubernetes is involved.
 
 ### Notes/Constraints/Caveats
 
