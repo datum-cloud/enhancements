@@ -13,6 +13,7 @@ Tracking issue:
 - [Motivation](#motivation)
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
+  - [Prior Art: Two Proven Architectures](#prior-art-two-proven-architectures)
 - [Proposal](#proposal)
   - [User Stories](#user-stories)
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
@@ -73,6 +74,46 @@ restated here. This document addresses how to satisfy them.
   database; selecting and distributing one is separate work.
 - Defining how individual workloads produce a capacity signal. This design
   establishes how such signals are consumed.
+
+### Prior art: two proven architectures
+
+Routing a client to the right origin is a solved problem with two divergent
+industry answers. They disagree on one thing: *where the decision lives.*
+
+**AWS puts the decision in DNS.** Route 53 latency-based routing infers the
+client's location from the resolver's IP, consults a measured-latency database,
+and returns the region expected to be fastest. Health checks are a bolt-on that
+removes a failed region; they are binary, and weighted-routing weights are
+static. The decision is made once, at resolution time, and encoded in an answer
+the client caches.
+
+That model's ceiling is visible in AWS's own catalog. Because Route 53 controls
+only the *initial* resolution — packets then cross the public internet on their
+own — AWS sells a second product, Global Accelerator, that advertises static
+anycast addresses from every edge and steers in-path. DNS alone stopped being
+enough once the requirement grew past picking a region.
+
+**GCP puts the decision in the path, on an anycast substrate, and rejects DNS
+load balancing explicitly** — because it depends on clients correctly expiring
+cached records, which they do not reliably do. A single anycast VIP lets DNS
+TTLs be *raised* rather than lowered, and a control plane behind that VIP
+decides capacity twice: a frontend with headroom, then a backend with headroom.
+Where Google does not operate an endpoint and cannot observe its load, that
+endpoint degrades to health-only routing rather than being excluded.[^managing-load]
+
+The divergence is the instructive part. AWS began at DNS and added an in-path
+anycast product; GCP began on the far side of the same boundary. Both converged
+on the same line: DNS is enough to pick a region, and not enough to make a
+fresh, load-aware decision that stays correct after the client has cached an
+answer.
+
+**Datum's infrastructure already is the GCP-shaped substrate.** The anycast VIP
+is live, Envoy runs at every PoP, and xDS is the deployed channel into it.
+Choosing the in-path answer is therefore not the more ambitious of two bets; it
+adopts the architecture the platform is already most of the way toward, and
+declines to build the DNS-steering layer that AWS itself treats as only half the
+answer. [Alternatives](#alternatives) returns to the DNS-steered design in
+detail.
 
 ## Proposal
 
@@ -679,10 +720,11 @@ available only to workloads that opt in.
 ### DNS-steered GSLB
 
 Return different addresses per client based on resolver location and origin
-health, implemented with PowerDNS's GeoIP backend. This was the previous
-design in this directory, and it remains a widely deployed approach: Route 53
-identifies the user from the resolver IP, consults a measured latency
-database, and removes failed endpoints via health checks.
+health, implemented with PowerDNS's GeoIP backend. This was the previous design
+in this directory, and it is the AWS-shaped answer from
+[Prior art](#prior-art-two-proven-architectures) — Route 53 is its production
+instance: identify the user from the resolver IP, consult a measured-latency
+database, remove failed endpoints via health checks.
 
 Not adopted, for four reasons in descending weight.
 
