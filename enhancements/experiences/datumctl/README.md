@@ -10,6 +10,9 @@ grows alongside the platform.
 
 ## Enhancements
 
+- [`api-proxy/`](./api-proxy) — a local front door to the Datum Cloud API: one
+  command gives every tool on your machine authenticated access, with
+  credentials attached automatically and kept fresh in the background.
 - [`plugin-marketplace/`](./plugin-marketplace) — open the plugin ecosystem so
   community authors and enterprise platform teams can publish their own catalogs
   of `datumctl` plugins, and users can register, search, browse, and install
