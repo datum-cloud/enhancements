@@ -327,9 +327,10 @@ proxy path.*
 **4. Knowing what is busy.** ***New.*** Health is binary; capacity is not, and a
 healthy origin with no headroom is still the wrong answer. This is the signal
 that separates capacity-aware routing from geo-DNS, and the one nothing provides
-today. ORCA carries load from origins and LRS streams it from Envoy back to the
-control plane; see [Capacity](#capacity). *FOSS: ORCA, LRS, Envoy client-side
-weighted round robin, or Prometheus with prometheus-adapter.*
+today. ORCA carries load from origins to both the local Envoy and the assembler;
+LRS streams proxy-observed stats from Envoy to the assembler as a cross-check;
+see [Capacity](#capacity). *FOSS: ORCA, LRS, Envoy client-side weighted round
+robin, or Prometheus with prometheus-adapter.*
 
 **5. Assembling and distributing the global view.** ***New.*** Health and
 capacity are observed per PoP, but spillover needs a view across PoPs. The
@@ -448,6 +449,15 @@ reporting, carrying CPU utilization, memory utilization, application
 utilization, QPS, EPS, request cost, and an open `named_metrics` map, reported
 either in response trailers or over a periodic out-of-band stream.
 
+The assembler subscribes to ORCA directly from origins alongside consuming
+LRS from Envoys. Two channels, not one: ORCA carries the origin's
+self-reported utilization and workload-specific metrics; LRS carries the
+proxy-observed request rate, error rate, and latency per cluster and per
+locality. The local Envoy uses ORCA for client-side weighted round robin; the
+assembler uses ORCA for global capacity and cross-references it with LRS to
+detect divergence, with proxy-observed signal winning per the inversion
+mitigation below.
+
 That open map resolves the tension between a generic vocabulary and
 workload-specific signals. Well-known fields stay comparable across all
 origins; a workload with an unusual definition of "full" — accelerator queue
@@ -481,6 +491,14 @@ overprovisioning factor handles spillover among the tiers the assembler
 defines, which means **the assembler decides what may spill where, and Envoy
 decides when.** That split keeps per-request decisions local and fast while
 keeping policy decisions central and auditable.
+
+The tier assignment is the two-tier capacity decision from the GCLB model.
+Same-PoP origins are placed in priority 0; cross-PoP origins in the same cell
+are in priority 1. Envoy's locality-weighted load balancing keeps traffic local
+by default, so the backbone cost of reaching a foreign PoP is only paid when
+the local tier has no headroom. This is the meaning of "capacity twice": the
+first tier expresses PoP-level capacity, the second expresses origin-level
+capacity across PoPs.
 
 **Spillover fails closed at policy boundaries.** Origins excluded by policy
 are not placed in a lower priority tier; they are absent from the candidate
@@ -535,10 +553,10 @@ The **slow path** carries intent: origin definitions, policy constraints,
 balancing configuration. It flows through the API server hierarchy and the
 federation stack. Seconds to minutes is acceptable.
 
-The **fast path** carries observation: ORCA from origins into Envoy, LRS from
-Envoy to the assembler, EDS from the assembler to Envoy. Sub-second to
-seconds, over long-lived gRPC streams, **bypassing the federation stack
-entirely.**
+The **fast path** carries observation: ORCA from origins into Envoy and into
+the assembler, LRS from Envoy to the assembler, EDS from the assembler to
+Envoy. Sub-second to seconds, over long-lived gRPC streams, **bypassing the
+federation stack entirely.**
 
 Capacity data cannot traverse federation workspaces and propagation policies
 and remain useful. Stating this as a rule now prevents an appealing but fatal
