@@ -10,6 +10,7 @@ Tracking issue:
 [#833](https://github.com/datum-cloud/enhancements/issues/833)
 
 - [Summary](#summary)
+- [Terminology](#terminology)
 - [Motivation](#motivation)
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
@@ -42,6 +43,34 @@ This document supersedes the earlier GSLB design in this directory, which
 proposed DNS-layer PoP steering via PowerDNS. The
 [Alternatives](#alternatives) section explains why that approach is not
 adopted.
+
+## Terminology
+
+This design assumes familiarity with the Envoy/xDS ecosystem and edge
+networking. Acronyms used throughout this document:
+
+| Term | Expansion | What it is here |
+|---|---|---|
+| **AGPL** | GNU Affero General Public License | License of the network services operator; constrains component selection |
+| **BGP** | Border Gateway Protocol | Internet's inter-domain routing protocol; underlies anycast PoP selection |
+| **DDoS** | Distributed Denial-of-Service | Attack class whose steering signal is consumed but not produced here |
+| **EDS** | Endpoint Discovery Service | xDS service carrying endpoints with locality, weight, priority, health |
+| **EDNS** | Extension Mechanisms for DNS | DNS extension carrying Client Subnet (ECS) |
+| **ECS** | EDNS Client Subnet | Option letting a resolver forward the client subnet for geo lookup |
+| **EPS** | Errors per Second | ORCA field; incorporated explicitly to detect capacity inversion |
+| **FOSS** | Free and Open-Source Software | Licensing constraint on selectable components |
+| **FRR** | FRRouting (Free Range Routing) | FOSS BGP suite; Datum's inter-PoP underlay |
+| **GA** | General Availability | Maturity stage at which a feature is publicly supported |
+| **HPA** | Horizontal Pod Autoscaler | Kubernetes autoscaler; an alternative capacity reaction mechanism |
+| **KEDA** | Kubernetes Event-Driven Autoscaling | Autoscaler driven by event/metric sources rather than raw CPU |
+| **LRS** | Load Reporting Service | xDS service streaming load statistics from Envoy back to control plane |
+| **ORCA** | Open Request Cost Agent | xDS-ecosystem standard for origin load reporting |
+| **PoP** | Point of Presence | Datum edge site terminating client connections |
+| **QPS** | Queries per Second | ORCA field; a load measure for request-driven workloads |
+| **RTT** | Round-Trip Time | Measured latency; Phase 2 proximity signal |
+| **SNI** | Server Name Indication | TLS extension carrying the requested hostname; the Phase 1 cell demux key |
+| **VIP** | Virtual IP | Stable anycast address a service name resolves to |
+| **xDS** | (Aggregate of) Discovery Services | Streaming gRPC protocol by which Envoy receives configuration |
 
 ## Motivation
 
