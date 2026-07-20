@@ -187,16 +187,140 @@ load balancing already implements proximity preference within a tier.
 Envoy is not the gap. Nothing currently computes what to put in those
 messages.
 
-### Therefore
+### Three components, and how they connect
 
-Three things are needed:
+Three components, and a data flow that connects them.
 
-1. An **origin** resource describing what may be routed to.
-2. A **health and capacity pipeline** that observes origins.
-3. An **eligibility assembler** that combines those with policy and emits EDS.
+```
+                          SLOW PATH (seconds-minutes)
+  +-------------+         +-------------+
+  | Origin      |  watch  | Cell API    |
+  | producers   |-------->| server      |
+  | (Compute    |         |             |
+  |  controllers|         |             |
+  |  etc.)      |         |             |
+  +-------------+         +------+------+
+                                 | watch (federation-blind)
+                                 v
+                          +---------------------+
+                          | Eligibility         |   <-- HA: 2-3 replicas
+                          | assembler           |       per cell, leader
+                          | (per cell)          |       election
+                          +----+----------+----+
+                               |          |
+                EDS push       |          |  LRS stream
+                (fast path)    |          |  (fast path)
+                               v          |
+                          +--------+      |
+                          | Envoy  |------+
+                          | (PoP A)|
+                          +---+----+
+                              |  ORCA (origin -> Envoy, in-band)
+                              v
+                          +--------+
+                          | Origins|
+                          | (PoP A)|
+                          +--------+
+```
 
-The rest of this document is a consequence of getting those three right under
-Datum's specific constraints.
+**1. The origin resource.** A new resource — user-facing name TBD, internally
+an `Origin` — describing what may be routed to: an endpoint set, a protocol, a
+health check definition, locality, an optional capacity signal source, and a
+balancing target with a manual derate control. Producers populate it; the
+routing layer reads only it and never reaches into producer-specific types.
+This is the load-bearing API decision, and the equivalent of GCP's Network
+Endpoint Group. See [The origin abstraction](#the-origin-abstraction).
+
+Two properties matter beyond the field list. An origin is inherently
+**plural** — it names a set of endpoints, not one address, so distributing
+across them is part of this problem. And the capacity fields are **optional,
+and their absence is meaningful**: an origin whose load cannot be observed is
+routed on health alone, not excluded. Health is universal across origin types;
+capacity is a property of origins the platform can observe.
+
+**2. The health and capacity pipeline.** Mostly already exists; no new
+transport is built.
+
+*Health* comes from two Envoy mechanisms, both already deployed: active health
+checks run from each PoP (correct by construction — an origin reachable from
+Frankfurt but not Singapore is a real condition no global prober can see), and
+outlier detection ejects origins locally on observed error rates. Both are
+per-PoP. The work is aggregating them into a cell-wide view, not producing
+them. See [Health](#health).
+
+*Capacity* flows through the xDS ecosystem's existing load-reporting channel.
+Origins report load via **ORCA** — well-known fields (RPS, CPU, memory, app
+utilization, EPS) stay comparable across origin types, and workload-specific
+"fullness" signals (accelerator queue depth, KV-cache occupancy) ride in the
+open `named_metrics` map. Envoy aggregates ORCA per cluster and per locality,
+then streams it to the assembler via **LRS**. The assembler subscribes to
+ORCA directly from origins alongside consuming LRS from Envoys: ORCA carries
+the origin's self-reported utilization, LRS carries the proxy-observed request
+rate, error rate, and latency. Proxy-observed signal wins where the two
+diverge — the inversion mitigation below depends on it. See [Capacity](#capacity).
+
+**3. The eligibility assembler.** A new controller, one logical instance per
+cell, running as a workload in the control plane. It is the component the
+platform currently lacks. See [Eligibility assembly](#eligibility-assembly)
+and [Cell scoping](#cell-scoping).
+
+*Inputs (two paths, different latency budgets):* the **slow path** carries
+intent — `Origin` resources and policy constraints, watched from the cell's
+API server, seconds to minutes, over the federation stack. The **fast path**
+carries observation — ORCA from origins, LRS from Envoy, EDS from the
+assembler to Envoy — sub-second to seconds, over long-lived gRPC streams,
+*bypassing the federation stack entirely.* Capacity data cannot traverse
+federation workspaces and propagation policies and remain useful; stating
+this as a rule now prevents an appealing but fatal simplification later.
+
+*What it computes:* (1) a **policy filter** removes origins the client's
+constraints exclude — this happens first, as a filter on candidates, not a
+weighted input, so spillover fails closed at a policy boundary instead of
+crossing it under saturation; (2) **priority tiers** among eligible origins
+ordered by proximity — same-PoP origins in priority 0, cross-PoP origins in
+the same cell in priority 1, so the backbone cost of reaching a foreign PoP is
+only paid when the local tier has no headroom; (3) **locality weights within
+tiers** by capacity headroom; (4) Envoy's **overprovisioning factor** handles
+spillover among the tiers the assembler defines.
+
+*The split that keeps the assembler off the hot path:* the assembler decides
+**what may spill where** (tier membership, coarse weights); Envoy decides
+**when** (per-request, using live local ORCA observations and the
+overprovisioning factor). The assembler pushes EDS when tier membership or
+coarse weights change — on the order of seconds. Within those constraints,
+Envoy balances per-request using its own local ORCA observations, which react
+in sub-second time. "Reacts in seconds" is therefore a property of Envoy, not
+the assembler; the assembler is not a hot-path SPOF.
+
+*Per-PoP outlier detection is additive, not overridden.* Each PoP's Envoy
+ejects origins locally. The assembler consumes each PoP's ejection state via
+LRS. If an origin is ejected in a majority of PoPs, the assembler marks it
+unhealthy cell-wide and removes it from EDS for all PoPs. If ejected in only
+one PoP, that PoP's local ejection stands; other PoPs still route to it. The
+assembler's EDS reflects cell-wide eligibility; local ejection is an
+additional safety net.
+
+*Placement:* the assembler runs as **2–3 replicas per cell, across 2–3
+control-plane PoPs, with leader election.** This is the standard pattern for
+xDS control planes at scale (Istio's istiod, for example). It gets most of
+the simplicity of a single instance — one writer, trivial consistency —
+while surviving single-instance failure. On leader loss, a follower takes
+over, re-establishes xDS streams, and Envoy fails open on stale state during
+the switch, bounded by the staleness SLO. A per-PoP deployment survives
+partition better but at the cost of a distributed-state problem out of
+proportion to the risk it mitigates; an HA cluster in control-plane PoPs is
+the middle ground.
+
+*Cell scoping and the spillover invariant:* one assembler per cell. A project
+lives in one cell, so all of its origins live in that cell's slices across
+PoPs. **Routing never crosses cell boundaries.** If a customer's origins are
+saturated within their cell, that is capacity exhaustion, not spillover into
+another cell. Crossing cells would recreate the coupling cells exist to
+prevent. Cell sizing determines whether customers can spill at all, making
+per-cell headroom a staff-portal concern rather than an implementation
+detail. Failure behavior is **fail-open**: a PoP that loses contact with its
+cell's assembler retains its last known EDS state and continues serving;
+staleness is measured and alertable rather than silent.
 
 ### User Stories
 
@@ -564,15 +688,26 @@ assembler retains its last known routing table and continues serving. Stale
 state beats no state; the mitigation is that staleness is measured and
 alertable rather than silent.
 
-<<[UNRESOLVED assembler-placement ]>>
-Where the assembler runs. A cell spans PoPs, so it is not naturally a per-PoP
-workload. Candidates: a single instance per cell in a control-plane location,
-serving long-lived xDS streams to every PoP in that cell; or a per-PoP
-instance with a cell-wide state channel between them. The first is simpler and
-has an obvious consistency story but adds WAN dependency to config delivery.
-The second survives partition better at the cost of a distributed state
-problem.
-<<[/UNRESOLVED]>>
+**Placement.** The assembler runs as 2–3 replicas per cell, spread across
+2–3 control-plane PoPs, with leader election. Only the leader emits EDS;
+followers maintain state and take over on leader loss. This is the standard
+pattern for xDS control planes at scale — Istio's istiod runs the same model
+— and it is the middle ground between the two options the design considered:
+
+- A single instance per cell is simpler and has an obvious consistency
+  story, but the leader is a per-cell SPOF and every EDS push pays a WAN
+  round-trip from the control-plane location to each PoP.
+- A per-PoP instance with a cell-wide state channel survives partition
+  better, but moves a distributed-consensus problem into the critical path
+  of routing updates, out of proportion to the risk it mitigates.
+
+An HA cluster in control-plane PoPs keeps the single-writer consistency model
+while bounding the SPOF window to a leader election. On leader loss, a
+follower re-establishes xDS streams and Envoy fails open on stale state
+during the switch, bounded by the staleness SLO. The partition case this
+does *not* survive — a PoP cut off from all control-plane PoPs — is already
+handled by fail-open: that PoP serves on its last known EDS state and
+reports staleness.
 
 ### Fast path and slow path
 
