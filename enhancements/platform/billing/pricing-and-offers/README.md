@@ -22,6 +22,7 @@ latest-milestone: "v0.x"
     - [Use Case 5: An invoice run produces a non-zero subtotal across all charge types](#use-case-5-an-invoice-run-produces-a-non-zero-subtotal-across-all-charge-types)
   - [Real-world example: Compute](#real-world-example-compute)
   - [Real-world example: AI Assistant](#real-world-example-ai-assistant)
+  - [Real-world example: Data Transfer](#real-world-example-data-transfer)
   - [Real-world example: Default Pay As You Go Offer](#real-world-example-default-pay-as-you-go-offer)
   - [How Offers relate to charge types](#how-offers-relate-to-charge-types)
   - [Composition with quota](#composition-with-quota)
@@ -66,7 +67,9 @@ Concrete blockers today:
 - **New organizations have no pricing context.** Even after we build the
   invoice-run controller, there is nothing for it to bill.
 - **There is no platform-defined way to roll out a tier change** (for example,
-  "Pro now includes egress") without hand-editing every billing account.
+  "Pro now includes egress" — see
+  [Real-world example: Data Transfer](#real-world-example-data-transfer))
+  without hand-editing every billing account.
 - **Quota gating and pricing are unconnected.** `ServiceEntitlement` (per
   project, in service-catalog) drives quota grants but does not connect to
   pricing, even though the umbrella explicitly says the two should be linked.
@@ -74,9 +77,9 @@ Concrete blockers today:
 ### Goals
 
 - **Per-meter pricing on `ServiceConfiguration`.** A `pricing` block on each
-  `spec.metrics[]` entry: currency, pricing unit, and rates (flat or tiered),
-  with per-dimension match support so rates can vary by `MeterDefinition`
-  dimension value.
+  `spec.metrics[]` entry: currency, pricing unit, and rates (flat or tiered,
+  including graduated volume bands via `tiered`), with per-dimension match
+  support so rates can vary by `MeterDefinition` dimension value.
 - **Fan-out to `ServicePricing` resources**, one per priced metric, emitted by
   a new `PricingFanOut` sibling to the existing `QuotaFanOut`.
 - **`Offer` resource** that bundles service pricings into a named, versioned
@@ -550,17 +553,170 @@ per message:
 | AI Assistant Access Fee (monthly) | 1 | $10.00 | $10.00 |
 | **Total** | | | **~$26.50/mo** |
 
+### Real-world example: Data Transfer
+
+Product framing: *Ingress is free. First 200 GB/month of egress is free.
+Internal traffic stays cheap.*
+
+Data Transfer uses **three separate meters** so each rate shape stays readable
+and maps 1:1 to Amberflo line items:
+
+| Meter | Rate shape | Dimension (derived at metering time) |
+|---|---|---|
+| `networking.datumapis.com/transfer/egress-internet` | Graduated volume tiers by destination geo | `destination_region_group` (`us-eu`, `rest-of-world`) |
+| `networking.datumapis.com/transfer/internal` | Flat by path class | `path` (`same-region`, `cross-region-na-eu`, `us-to-row`) |
+| `networking.datumapis.com/transfer/ingress` | Flat zero | _(none)_ |
+
+Metric names are illustrative (`networking.datumapis.com/...`); a service owner
+may place equivalent meters under another API group. Classification into
+`destination_region_group` and `path` is a **metering / label-enrichment**
+contract — pricing never matches on raw source+destination region pairs.
+Multi-dimension `match` stays deferred; compound keys are emitted as a single
+derived dimension. Snapshot storage data-transfer is not metered for transfer
+charges.
+
+`pricingUnit` is `gib`. Product copy uses GB/TB; the example maps the published
+bands to `200` / `10240` (10 × 1024) / `153600` (150 × 1024) GiB. Confirm the
+exact unit boundary with product before production rates ship.
+
+#### datum-cloud/service-catalog — ServiceConfiguration (Data Transfer)
+
+```yaml
+spec:
+  # Data Transfer example uses OrganizationDefault quota gating unless the
+  # owning service opts into BillingEntitlement separately.
+  metrics:
+    - name: networking.datumapis.com/transfer/egress-internet
+      pricing:
+        chargeType: Usage
+        currency: USD
+        pricingUnit: gib
+        rates:
+          - match: { dimension: destination_region_group, value: us-eu }
+            tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.05"
+              - upTo: "153600"
+                rate: "0.03"
+              - rate: "0.01"
+          - match: { dimension: destination_region_group, value: rest-of-world }
+            tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.15"
+              - upTo: "153600"
+                rate: "0.12"
+              - rate: "0.09"
+          # Default: treat unknown geo as Rest of World
+          - tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.15"
+              - upTo: "153600"
+                rate: "0.12"
+              - rate: "0.09"
+
+    - name: networking.datumapis.com/transfer/internal
+      pricing:
+        chargeType: Usage
+        currency: USD
+        pricingUnit: gib
+        rates:
+          - match: { dimension: path, value: same-region }
+            flat: "0"
+          - match: { dimension: path, value: cross-region-na-eu }
+            flat: "0.01"
+          - match: { dimension: path, value: us-to-row }
+            flat: "0.05"
+          # Default: most expensive internal path
+          - flat: "0.05"
+
+    - name: networking.datumapis.com/transfer/ingress
+      pricing:
+        chargeType: Usage
+        currency: USD
+        pricingUnit: gib
+        rates:
+          - flat: "0"
+```
+
+#### datum-cloud/service-catalog — ServicePricing fan-out
+
+`PricingFanOut` emits three `ServicePricing` resources:
+
+- `networking-datumapis-com--transfer-egress-internet`
+- `networking-datumapis-com--transfer-internal`
+- `networking-datumapis-com--transfer-ingress`
+
+#### datum-cloud/service-catalog — Offer
+
+A standalone Offer bundles the three transfer pricings (also referenced from
+Default PAYG below):
+
+```yaml
+apiVersion: billing.miloapis.com/v1alpha1
+kind: Offer
+metadata:
+  name: data-transfer-pay-as-you-go-v1
+  annotations:
+    kubernetes.io/display-name: "Data Transfer (Pay As You Go)"
+spec:
+  chargeTypes: [Usage]
+  launchStage: Draft
+  servicePricingRefs:
+    - name: networking-datumapis-com--transfer-egress-internet
+    - name: networking-datumapis-com--transfer-internal
+    - name: networking-datumapis-com--transfer-ingress
+```
+
+#### datum-cloud/amberflo-provider
+
+No new reconcilers. The existing `Offer → Product Plan` reconciler maps each
+`tiered` rate entry to Amberflo graduated LeafNode / TieredPriceGroup tiers
+(`startAfterUnit` from prior `upTo`, `pricePerBatch` = `rate`, `batchSize: 1`,
+`allowPartialBatch: true`) and attaches dimension filters for
+`destination_region_group` / `path` as it does for flat match entries today.
+Volume/retroactive tier modes are not expressed in v1.
+
+#### What this produces in Amberflo
+
+Assumptions for one billing-account month (usage aggregated monthly at
+billing-account scope for tier breaks):
+
+- 500 GiB internet egress to US/EU → 200 free + 300 × $0.05
+- 100 GiB internal same-region → $0
+- 50 GiB internal cross-region within NA/EU → 50 × $0.01
+- 20 GiB internal US → Rest of World → 20 × $0.05
+- 1 TiB ingress → $0
+
+| Line item | Volume | Rate band(s) | Subtotal |
+|---|---|---|---|
+| `transfer/egress-internet` (`us-eu`) | 500 GiB | 200 @ $0 + 300 @ $0.05/GiB | $15.00 |
+| `transfer/internal` (`same-region`) | 100 GiB | $0/GiB | $0.00 |
+| `transfer/internal` (`cross-region-na-eu`) | 50 GiB | $0.01/GiB | $0.50 |
+| `transfer/internal` (`us-to-row`) | 20 GiB | $0.05/GiB | $1.00 |
+| `transfer/ingress` | 1024 GiB | $0/GiB | $0.00 |
+| **Total** | | | **$16.50** |
+
 ### Real-world example: Default Pay As You Go Offer
 
-This shows how a single default Offer bundles both Compute and AI Assistant
-into the Offer every new billing account lands on automatically.
+This shows how a single default Offer bundles Compute, AI Assistant, and Data
+Transfer into the Offer every new billing account lands on automatically.
 
 #### datum-cloud/service-catalog — Offer
 
 The `default-pay-as-you-go-v1` Offer references `ServicePricing` resources
-from both services. Compute uses the consumption model (`cpu-seconds`,
-`memory-seconds`, `uptime-seconds`); AI Assistant includes all token meters
-plus the monthly access fee.
+from Compute, AI Assistant, and Data Transfer. Compute uses the consumption
+model (`cpu-seconds`, `memory-seconds`, `uptime-seconds`); AI Assistant
+includes all token meters plus the monthly access fee; Data Transfer includes
+internet egress, internal transfer, and the explicit zero-rate ingress meter
+so “ingress is free” appears on invoices. Offers may later omit transfer meters
+(for example a Pro tier that includes egress differently) without changing the
+`ServiceConfiguration` rate schema.
 
 ```yaml
 apiVersion: billing.miloapis.com/v1alpha1
@@ -582,6 +738,9 @@ spec:
     - name: assistant-miloapis-com--conversation-cache-write-tokens
     - name: assistant-miloapis-com--conversation-messages
     - name: assistant-miloapis-com--access-fee
+    - name: networking-datumapis-com--transfer-egress-internet
+    - name: networking-datumapis-com--transfer-internal
+    - name: networking-datumapis-com--transfer-ingress
 ```
 
 #### datum-cloud/service-catalog — ServiceConfiguration.spec.defaultOffer
@@ -599,7 +758,8 @@ spec:
 
 For a new account in its first month running a standard-tier Compute instance
 in `us-central1` for one hour and sending 1,000 AI Assistant messages using
-`claude-sonnet-4-6`:
+`claude-sonnet-4-6`, plus the Data Transfer usage from
+[Real-world example: Data Transfer](#real-world-example-data-transfer):
 
 | Line item | Volume | Rate | Subtotal |
 |---|---|---|---|
@@ -610,7 +770,8 @@ in `us-central1` for one hour and sending 1,000 AI Assistant messages using
 | `conversation/output-tokens` (sonnet) | 1,000,000 tokens | $0.000015 | $15.00 |
 | `conversation/messages` | 1,000 messages | $0.000001 | $0.001 |
 | AI Assistant Access Fee (monthly) | 1 | $10.00 | $10.00 |
-| **Total** | | | **~$26.90/mo** |
+| Data Transfer (see worked example) | — | — | $16.50 |
+| **Total** | | | **~$43.40/mo** |
 
 ### How Offers relate to charge types
 
@@ -771,9 +932,21 @@ spec:
 `spec.metrics[]` entries carry a `pricing` block for Usage charges: currency,
 `pricingUnit`, and rates (flat or tiered). Per-dimension `match` entries let a
 rate vary by a label declared on the service's `monitoredResourceType` (one
-dimension per match entry; multi-dimension matches deferred).
+dimension per match entry; multi-dimension matches deferred). Services that
+need a compound key (for example source + destination region) **emit a single
+derived dimension** at metering time — see
+[Real-world example: Data Transfer](#real-world-example-data-transfer).
 `pricingUnit` is a human-readable label for the billing line item; it does not
 need to be the literal UCUM unit string of the meter.
+
+Each `rates[]` entry carries **either** `flat` **or** `tiered`, never both:
+
+- **`flat`** — a single decimal USD string multiplied by metered usage.
+- **`tiered`** — ordered graduated volume bands. Each band has a `rate` and an
+  exclusive upper bound `upTo` in `pricingUnit` units. The last band **omits**
+  `upTo` (open-ended). Zero (`"0"`) is a valid rate for free allowances.
+  Aggregation for tier breaks is **monthly, at billing-account scope**.
+  Volume/retroactive (reprice-all) modes are not expressed in v1.
 
 ```yaml
 spec:
@@ -794,6 +967,28 @@ spec:
           - match: { dimension: region, value: us-central1 }
             flat: "0.0000125"
           - flat: "0.0000130"
+    - name: networking.datumapis.com/transfer/egress-internet
+      pricing:
+        currency: USD
+        pricingUnit: gib
+        rates:
+          - match: { dimension: destination_region_group, value: us-eu }
+            tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.05"
+              - upTo: "153600"
+                rate: "0.03"
+              - rate: "0.01"
+          - tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.15"
+              - upTo: "153600"
+                rate: "0.12"
+              - rate: "0.09"
 ```
 
 ### ServicePricing fan-out
@@ -881,6 +1076,11 @@ namespace. Re-apply on policy reconcile is idempotent.
   with dimension filters).
 - `BillingEntitlement` → Amberflo Customer-Plan assignment.
 - Finalizer plus SSA pattern identical to the existing meter and customer sync.
+- `flat` rates map to a single LeafNode price as today. `tiered` rates map to
+  Amberflo graduated LeafNode / TieredPriceGroup tiers: band `i` becomes
+  `{ startAfterUnit, batchSize: 1, pricePerBatch: rate, allowPartialBatch: true }`
+  where `startAfterUnit` is `0` for the first band and the previous band's
+  `upTo` thereafter; the open-ended last band has no following tier.
 
 ### Display names
 
@@ -924,6 +1124,12 @@ staging. #747 designs against the Amberflo subtotal as its input.
 - Staff-portal can switch a billing account's active `BillingEntitlement` to a
   different Offer with an audit-log entry; the Amberflo Customer-Plan assignment
   updates within one reconcile.
+- The `ServiceConfiguration` pricing schema accepts graduated `tiered` rate
+  entries (`upTo` / `rate`, mutually exclusive with `flat` on the same entry).
+- The Data Transfer rates in
+  [Real-world example: Data Transfer](#real-world-example-data-transfer)
+  (internet egress by geo with volume bands, internal path flats, free ingress)
+  are authorable as `ServicePricing` snapshots on a published Offer.
 
 ## Suggested Implementation Phases
 
@@ -947,6 +1153,9 @@ staging. #747 designs against the Amberflo subtotal as its input.
 - 2026-06-09: Initial draft extracted from
   [enhancements#758][758] per review feedback to iterate in an enhancement
   document and walk through concrete use cases.
+- 2026-07-22: Document graduated `tiered` rates and a Data Transfer real-world
+  example (internet egress by geo, internal path rates, free ingress); wire
+  Data Transfer into the Default PAYG Offer.
 
 ## Drawbacks
 
@@ -967,6 +1176,12 @@ scoped resource.
 - **Overloading `ServiceEntitlement` for billing.** Reusing the per-project
   quota driver for account-level pricing would couple two different scopes and
   require invasive renames. Rejected (see Drawbacks).
+- **Multi-dimension `match` for Data Transfer.** Matching on raw
+  `source_region` × `destination_region` (or a single mega-meter with
+  `direction` + geo + path) would un-defer multi-dimension matches for every
+  service. Rejected: keep one dimension per match entry and require metering to
+  emit derived labels (`destination_region_group`, `path`) on separate meters
+  for internet egress, internal transfer, and ingress.
 
 ## Competitive Research
 
