@@ -19,6 +19,7 @@ Tracking issue:
 - [Design decisions](#design-decisions)
   - [VIP progression](#vip-progression)
   - [Proximity phases](#proximity-phases)
+  - [L4 load balancing](#l4-load-balancing)
   - [Signal distribution](#signal-distribution)
   - [Interfaces](#interfaces)
 - [Phasing and open items](#phasing-and-open-items)
@@ -29,7 +30,7 @@ Tracking issue:
 Routing a client to the right origin requires knowing which origin is nearby,
 healthy, has headroom, and is permitted to serve the request. Datum has none of
 these inputs today. Most of the data plane needed to act on them already exists
-— an Envoy fleet at every PoP behind an anycast VIP, configured over xDS —
+— Cilium providing Maglev-based L4 load balancing to an Envoy fleet at every PoP behind an anycast VIP, configured over xDS —
 but nothing computes the priorities and weights those messages carry. This
 design adds a control plane that assembles origin eligibility from health,
 capacity, and policy, and pushes it into the existing xDS channel. The
@@ -46,6 +47,7 @@ was not adopted.
 | Term | Expansion | What it is here |
 |---|---|---|
 | **BGP** | Border Gateway Protocol | Underlies anycast PoP selection |
+| **Cilium** | — | eBPF-based L4 load balancer and BGP announcer; provides Maglev consistent hashing from anycast VIP to Envoy |
 | **ECS** | EDNS Client Subnet | Lets a resolver forward client subnet for geo lookup |
 | **EDS** | Endpoint Discovery Service | xDS service carrying endpoints with locality, weight, priority |
 | **EPS** | Errors per Second | ORCA field for explicit error-rate incorporation |
@@ -117,6 +119,12 @@ what to put in those messages.
                           | (PoP A)|
                           +--------+
 ```
+
+Before Envoy is reached, the anycast VIP is terminated at the PoP by Cilium's
+eBPF Maglev load balancer, which distributes connections across the Envoy
+fleet using consistent hashing. This L4 layer is already deployed and is
+transparent to the GSLB control plane — the assembler pushes EDS only to
+Envoy, and Cilium does not participate in origin selection.
 
 **1. The origin resource.** A new resource describing what may be routed to:
 an endpoint set, a protocol, a health check definition, locality, an optional
@@ -250,6 +258,33 @@ bind to an address, relocating a service is a DNS change invisible to clients.
 - **Phase 2:** Measured RTT from Envoy's connection-establishment times.
   Triggered by evidence — instrument in Phase 1 so the upgrade decision is
   driven by data.
+
+### L4 load balancing
+
+Cilium is the L4 load balancer at each PoP, already deployed. Its role is
+narrow and stable:
+
+- **Announce the anycast VIP** via BGP from every PoP. This is Cilium's
+  current role and is expected to continue.
+- **Maglev-hash incoming connections** to Envoy instances within the PoP using
+  eBPF. Consistent hashing means flows survive Envoy restarts and scale
+  changes without mass TCP reset.
+- **Absorb DDoS at the eBPF/TC level**, dropping attack traffic before it
+  reaches Envoy. Not as early in the stack as a dedicated XDP LB (Katran),
+  but the same class of mitigation and sufficient for Datum's volumes.
+- **Stay out of origin selection.** Cilium does not know about cells, policy
+  constraints, or capacity. It distributes to the Envoy fleet; Envoy selects
+  the origin via EDS from the assembler. The layering is:
+  `anycast VIP → Cilium (L4 Maglev) → Envoy (L7 EDS) → origin`
+
+Cilium's L4 balancing to Envoy must use pure consistent hashing without any
+proximity bias — if Cilium tried to "prefer the nearest Envoy" it would fight
+with the assembler's EDS-based tier decisions. Cilium does L4 Maglev; Envoy
+does L7 proximity-aware routing. Clear separation, no conflict.
+
+The BGP announcer layer could change (to FRR, BIRD, or GoBGP) without
+affecting the layers above, but the L4 LB to Envoy is a stable part of this
+design regardless of which component announces the route.
 
 ### Signal distribution
 
