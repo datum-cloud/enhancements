@@ -10,8 +10,8 @@
   - [3.1 OFAC and Sanctions Screening Requirements](#31-ofac-and-sanctions-screening-requirements)
   - [3.2 Screening Implementation Options](#32-screening-implementation-options)
   - [3.3 Managing False Alarms and Geolocation Mismatches](#33-managing-false-alarms-and-geolocation-mismatches)
-- [4. Whitelist / Safe-list Strategy (Cost & Customer Experience Optimization)](#4-whitelist--safe-list-strategy-cost--customer-experience-optimization)
-  - [4.1 Designing the Whitelist Layer](#41-designing-the-whitelist-layer)
+- [4. Allow-list Strategy (Cost & Customer Experience Optimization)](#4-allow-list-strategy-cost--customer-experience-optimization)
+  - [4.1 Designing the Allow-list Layer](#41-designing-the-allow-list-layer)
   - [4.2 Orchestration and Short-Circuit Logic](#42-orchestration-and-short-circuit-logic)
 - [5. Advanced Long-Term Tooling: Specialized Fraud Platforms](#5-advanced-long-term-tooling-specialized-fraud-platforms)
   - [5.1 Overview of Specialized Tools](#51-overview-of-specialized-tools)
@@ -31,7 +31,7 @@ As self-service platforms grow, they face various safety and financial risks—i
 
 Our proposed strategy is divided into two horizons:
 
-1. **Short-Term Focus (Quick Wins)**: Implement aa higher barrier signup flow; implement Stripe Radar to mitigate payment fraud; improve existing MaxMind functionality and scoring; deploy a free self-hosted name screening tool to comply with OFAC federal regulations; and implement a local whitelist to fast-track trusted enterprise clients and reduce external testing costs.
+1. **Short-Term Focus (Quick Wins)**: Implement aa higher barrier signup flow; implement Stripe Radar to mitigate payment fraud; improve existing MaxMind functionality and scoring; deploy a free self-hosted name screening tool to comply with OFAC federal regulations; and implement a local allow-list to fast-track trusted enterprise clients and reduce external testing costs.
 2. **Long-Term Focus**: Evaluate and integrate specialized fraud tools (such as Sardine, Fingerprint, Darwinium, SEON, or our preferred choice, Castle.io) that analyze device details and mouse/typing behavior to block sophisticated, automated bot networks and multiple account signups.
 
 ### 1.1 Core Problems & Solution Mapping
@@ -51,7 +51,7 @@ To guide our evaluation and strategy, our findings and proposed tools are mapped
 3. **Problem: No way to fast-track trusted users from our community**
    - *Context*: We need to prevent unnecessary API latency and third-party validation costs for known, trusted enterprise and community signups.
    - *Solutions*: Deploy local pre-check short-circuit logic using verified corporate domains, trusted IP ranges, or OIDC/SSO logins.
-   - *Tools detailed in this document*: **Local Whitelist / Safe-list Layer** (Section 4).
+   - *Tools detailed in this document*: **Local Allow-list Layer** (Section 4).
 
 ---
 
@@ -126,7 +126,7 @@ Sanctions screening must be integrated into our onboarding pipeline, balancing c
                   [New User Registration]
                              │
                              ▼
-                [Step 1: Check Local Whitelist]
+                [Step 1: Check Local Allow-list]
                 (Fast-track known corporate SSO)
                              │
                              ▼
@@ -170,30 +170,30 @@ Because of fuzzy name matching, the system will occasionally flag legitimate use
 
 ---
 
-## 4. Whitelist / Safe-list Strategy (Cost & Customer Experience Optimization)
+## 4. Allow-list Strategy (Cost & Customer Experience Optimization)
 
-A local whitelist (or safe-list) check is a simple, highly effective optimization. It allows trusted users to bypass expensive fraud checks, saving money and improving the signup experience.
+A local allow-list check is a simple, highly effective optimization. It allows trusted users to bypass expensive fraud checks, saving money and improving the signup experience.
 
-### 4.1 Designing the Whitelist Layer
+### 4.1 Designing the Allow-list Layer
 
-The whitelist operates as an instant pre-check before any external third-party API is called. We structure the whitelist around several categories:
+The allow-list operates as an instant pre-check before any external third-party API is called. We structure the allow-list around several categories:
 
 - **Enterprise Domains**: Fast-track users registering with verified corporate domains (e.g., `@datum.com`, `@amberflo.io`).
 - **Trusted IP Ranges**: Allow signups from known office locations or dedicated partner network gateways.
 
 ### 4.2 Orchestration and Short-Circuit Logic
 
-By checking the whitelist first, we can dynamically skip subsequent fraud checks.
+By checking the allow-list first, we can dynamically skip subsequent fraud checks.
 
 ```text
        [User Onboarding Event]
                   │
                   ▼
     ┌───────────────────────────┐
-    │  STAGE 1: Local Whitelist  │
+    │  STAGE 1: Local Allow-list  │
     └─────────────┬─────────────┘
                   │
-         Matches Whitelist?
+         Matches Allow-list?
          ├── YES ──► [Skip General Risk Checks] ──┐
          └── NO  ─────────────────────────────────┼─► ┌─────────────────────────────┐
                                                   │   │ STAGE 2: External Risk API  │
@@ -273,7 +273,7 @@ To build our fraud prevention system efficiently, we recommend a phased approach
 
 - **Action Items**:
     1. Deploy **Moov Watchman** locally to handle name screening against global sanctions lists during registration.
-    2. Implement a local **whitelist check** for verified enterprise corporate emails and OIDC logins, ensuring a fast path for trusted clients.
+    2. Implement a local **allow-list check** for verified enterprise corporate emails and OIDC logins, ensuring a fast path for trusted clients.
     3. Define custom rules in **Stripe Radar** to automatically block high-risk cards and require verification for cross-border transactions.
 
 ### Phase 2: Scoring Calibration & Observation
