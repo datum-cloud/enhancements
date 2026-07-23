@@ -13,6 +13,7 @@
 - [4. Allow-list Strategy (Cost & Customer Experience Optimization)](#4-allow-list-strategy-cost--customer-experience-optimization)
   - [4.1 Designing the Allow-list Layer](#41-designing-the-allow-list-layer)
   - [4.2 Orchestration and Short-Circuit Logic](#42-orchestration-and-short-circuit-logic)
+  - [4.3 Allow-list Disambiguation & Verification Data](#43-allow-list-disambiguation--verification-data)
 - [5. Advanced Long-Term Tooling: Specialized Fraud Platforms](#5-advanced-long-term-tooling-specialized-fraud-platforms)
   - [5.1 Overview of Specialized Tools](#51-overview-of-specialized-tools)
   - [5.2 Business Comparison Matrix](#52-business-comparison-matrix)
@@ -211,6 +212,10 @@ By checking the allow-list first, we can dynamically skip subsequent fraud check
 ```
 
 By structuring the pipeline this way, we protect the user experience and only incur external checking costs when the customer is unverified.
+
+### 4.3 Allow-list Disambiguation & Verification Data
+
+Because the platform only allows OAuth logins via **Google** and **GitHub** (with no custom password-based registrations), we receive verified email data directly from the identity provider. We can safely check the verified email domain directly from the OAuth payload (e.g. `@google.com`, `@amberflo.io`) to match allow-list rules without any risk of domain-spoofing.
 
 ---
 
