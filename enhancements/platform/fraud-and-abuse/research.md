@@ -1,6 +1,7 @@
 # Research: Fraud, Abuse, and Compliance Mitigation
 
 - [1. Executive Summary](#1-executive-summary)
+  - [1.1 Core Problems & Solution Mapping](#11-core-problems--solution-mapping)
 - [2. Quick Win: Stripe Radar Integration](#2-quick-win-stripe-radar-integration)
   - [2.1 How Stripe Radar Works](#21-how-stripe-radar-works)
   - [2.2 Implementation Flow](#22-implementation-flow)
@@ -32,6 +33,25 @@ Our proposed strategy is divided into two horizons:
 
 1. **Short-Term Focus (Quick Wins)**: Implement aa higher barrier signup flow; implement Stripe Radar to mitigate payment fraud; improve existing MaxMind functionality and scoring; deploy a free self-hosted name screening tool to comply with OFAC federal regulations; and implement a local whitelist to fast-track trusted enterprise clients and reduce external testing costs.
 2. **Long-Term Focus**: Evaluate and integrate specialized fraud tools (such as Sardine, Fingerprint, Darwinium, SEON, or our preferred choice, Castle.io) that analyze device details and mouse/typing behavior to block sophisticated, automated bot networks and multiple account signups.
+
+### 1.1 Core Problems & Solution Mapping
+
+To guide our evaluation and strategy, our findings and proposed tools are mapped directly to the three core problems we are targeting:
+
+1. **Problem: Most users aren't real**
+   - *Context*: Too few barriers to signup currently exist, making it easy for automated bot networks and fraudulent users to register.
+   - *Solutions*: Calibrate existing MaxMind minFraud scoring, require a credit card authorization at signup, and use behavioral biometrics or device fingerprinting.
+   - *Tools detailed in this document*: **Stripe Radar** (Section 2), **MaxMind minFraud** (Section 6), and specialized systems like **Castle.io**, **Fingerprint**, **Sardine**, **SEON**, **Darwinium**, and **Sift** (Section 5).
+
+2. **Problem: No US export control compliance**
+   - *Context*: We have a legal obligation to ensure we are not transacting with or providing services to individuals or entities on active U.S. sanctions lists.
+   - *Solutions*: Mandate Full Name/Country fields during onboarding and check them against OFAC SDN/CSL lists.
+   - *Tools detailed in this document*: **Moov Watchman** (Section 3) and commercial screening SaaS providers (Sardine, Persona, Socure).
+
+3. **Problem: No way to fast-track trusted users from our community**
+   - *Context*: We need to prevent unnecessary API latency and third-party validation costs for known, trusted enterprise and community signups.
+   - *Solutions*: Deploy local pre-check short-circuit logic using verified corporate domains, trusted IP ranges, or OIDC/SSO logins.
+   - *Tools detailed in this document*: **Local Whitelist / Safe-list Layer** (Section 4).
 
 ---
 
