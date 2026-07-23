@@ -277,9 +277,9 @@ To build our fraud prevention system efficiently, we recommend a phased approach
 - **Objective**: Establish regulatory compliance (OFAC) and transaction-level safety.
 
 - **Action Items**:
-    1. Deploy **Moov Watchman** locally to handle name screening against global sanctions lists during registration.
-    2. Implement a local **allow-list check** for verified enterprise corporate emails and OIDC logins, ensuring a fast path for trusted clients.
-    3. Define custom rules in **Stripe Radar** to automatically block high-risk cards and require verification for cross-border transactions.
+    1. Require a credit card to sign up, and define custom rules in **Stripe Radar** to automatically block high-risk cards and require verification for cross-border transactions.
+    2. Implement a local **allow-list check** for verified enterprise corporate emails and OIDC logins, allowing trusted clients to bypass the credit card requirement.
+    3. Deploy **Moov Watchman** to handle name screening against global sanctions lists during registration.
 
 ### Phase 2: Scoring Calibration & Observation
 
