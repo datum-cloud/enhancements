@@ -21,7 +21,7 @@ The compressed SID encoding follows RFC 9800 (Compressed SRv6 Segment List Encod
 
 ## SID Structure (uSID Carrier)
 
-SIDs within a PoP's `/48` block follow the compressed SRv6 segment list encoding (C-SID) NEXT-C-SID flavor specified in RFC 9800. Under the platform's selected design, the 16-bit Next uSID slot is shared between the 4-bit Function (FL = 4) and the 12-bit Instance ID (AL = 12).
+SIDs within a PoP's `/48` block follow the compressed SRv6 segment list encoding (C-SID) REPLACE-CSID flavor specified in RFC 9800 §4.2 — the flavor RFC 9800 §4.2.7 defines for terminal `End.DT`/`End.DX`-family behaviors (RFC 9800 states no NEXT-CSID counterpart exists for these, since they're always the last SID in a container). Under the platform's selected design, the 16-bit Next uSID slot is shared between the 4-bit Function (FL = 4) and the 12-bit Instance ID (AL = 12).
 
 ```
 |<------- 48 bits ------->|<-- 16 bits -->|<-- 16 bits -->|<------- 48 bits ------->|
@@ -35,7 +35,7 @@ SIDs within a PoP's `/48` block follow the compressed SRv6 segment list encoding
 | uSID Block            | 48   | Identifies the PoP domain; drawn from the SRv6 locator block.                                    |
 | Node ID (Active uSID) | 16   | Identifies the specific node (Locator-Node / LNL = 16) within the PoP domain.                    |
 | Function + Instance   | 16   | Shared slot (Next uSID) containing a 4-bit Function (FL = 4) and a 12-bit Instance ID (AL = 12). |
-| Padding               | 48   | Zero; automatically filled from the right as uSIDs are shifted left.                             |
+| Padding               | 48   | Zero; this carrier has only one Next uSID slot, so there is never a further C-SID to shift in.   |
 
 This layout is referred to elsewhere in the platform's documentation (e.g. the Addressing Plan) as the `uFMT 48+16` (F4816) carrier format with a shared service slot. Bit positions cited in absolute terms (e.g. "bits 49–64") are 1-based and numbered from the most-significant bit of the 128-bit container — bit 1 is the first bit of the uSID Block, bit 49 is the first bit of the Node ID, and so on.
 
@@ -51,7 +51,10 @@ The 16-bit C-SID space is partitioned into a Global ID Block (GIB) for Node-IDs 
 
 The uSID block is PoP-scoped, which allows clean per-PoP filtering and isolation in the underlay. Each node individually advertises its own `/64` locator prefix (`[uSID Block][Node-ID]::/64`) into the underlay IGP and BGP IPv6 Unicast. Underlay routing resolves packets based on this `/64` prefix to deliver them to the exact egress node.
 
-Per RFC 9800 §5.3 ("Recommended Installation of CSIDs in FIB"), the node installs a FIB/local-SID-table entry that matches only its own `/64` locator: `[uSID Block][Node-ID]::/64` via longest-prefix match. When an incoming packet matches this entry, the node executes the NEXT-C-SID behavior (RFC 9800 §4.1), shifting the IPv6 destination address left by 16 bits. This shift exposes the `[Func (4)][Instance ID (12)]` block (Next uSID) in the active position (bits 49–64). The node then performs a longest-prefix match on the active 4-bit Function code (matching `LBL+FL = 52` bits: e.g. `[uSID Block][Function]::/52`) to execute the local endpoint behavior (e.g. L3 routing table lookup or L2 MAC lookup), reading the remaining 12 bits of the active slot (the Instance ID argument) to select the correct tenant VRF or Bridge Domain table.
+Per RFC 9800 §5.3 ("Recommended Installation of CSIDs in FIB"), the node installs a FIB/local-SID-table entry that matches only its own `/64` locator: `[uSID Block][Node-ID]::/64` via longest-prefix match. Function here always selects a terminal endpoint behavior (`uEnd.DT46` / `uEnd.DT2`), and RFC 9800 §4.2.7 states that no NEXT-CSID counterpart is defined for `End.DT`/`End.DX`-family behaviors — they instead run RFC 8986 §4.4–4.11's original decapsulation procedure under the REPLACE-CSID flavor, with the Argument value ignored by the SR segment endpoint node. RFC 9800 defines no destination-address shift or rewrite for this case at all: the shift/rewrite pseudocode in §4.1 (NEXT-CSID) and in §4.2.1 (REPLACE-CSID's own `End`/`End.X` forwarding case) only applies when there's a further C-SID to expose for a subsequent segment endpoint, which never happens here. The node therefore reads Function (bits 65–68) and Instance ID (bits 69–80) directly from the unmutated destination address to execute the local endpoint behavior (e.g. L3 routing table lookup or L2 MAC lookup) and select the correct tenant VRF or Bridge Domain table.
+
+> [!NOTE]
+> **This is RFC 9800 §4.2.7's own behavior, not a deviation from it.** NEXT-CSID (§4.1) and REPLACE-CSID's `End`/`End.X` forwarding case (§4.2.1) both shift the destination address to expose the *next* C-SID for a subsequent segment endpoint — but RFC 9800 explicitly carves out `End.DT`/`End.DX`-family behaviors as having no such shift step: per §4.2.7, they run RFC 8986's original procedure directly, ignoring the Argument bits for FIB purposes. Since Function here always selects one of these terminal behaviors (`uEnd.DT46` / `uEnd.DT2`), there is no further C-SID to advance to, and no shift is ever prescribed. (A literal 128-bit left-shift, had one been required, would in any case have corrupted the uSID Block in bits 1–48 — its low 32 bits would be overwritten by the Node-ID — which never squares with the uSID Block reappearing unchanged; reading Function/Instance ID directly at their fixed offsets was always the only coherent reading, and RFC 9800 §4.2.7 confirms it's also the RFC-prescribed one.)
 
 ---
 
@@ -79,12 +82,12 @@ Instance ID `0x000` is reserved and must not be allocated. Usable Instance IDs r
 
 The platform allocates IDs sequentially within each PoP's namespace when a tenant service is first instantiated at that PoP. The platform tracks these mappings independently per PoP.
 
-Per RFC 9800 §5.3, the node installs its local-SID-table entry to match only the Locator-Block and Function portion of the shifted SID — prefix length `LBL+FL = 48+4 = 52` bits, i.e., `[uSID Block][Function]::/52` — via longest-prefix match, and per §4.1 MUST accept any value in the trailing 12 Argument bits. So the Instance ID is never part of the local-SID-table match key itself.
+Per RFC 9800 §5.3, the node installs its local-SID-table entry to match only the Locator-Block and Node-ID — `[uSID Block][Node-ID]::/64` — via longest-prefix match; this design never shifts the destination address to expose Function at a shorter prefix (see [SID Structure](#sid-structure-usid-carrier) for why), so Function and Instance ID are instead read directly from their fixed offsets in the unmutated address. Per §4.2.7, the Argument value is ignored by the SR segment endpoint node for `End.DT`/`End.DX`-family behaviors, so the Instance ID is never part of the local-SID-table match key itself — VRF/Bridge Domain selection happens as a separate step (below).
 
 ### Instance ID to Infrastructure Mapping
 
 1. **The platform** allocates a VRF ID or EVI ID (1 to 4095) when a tenant service is instantiated at a PoP.
-2. **The egress node** resolves the arriving compressed SID to a specific VRF or Bridge Domain instance via the shift-and-match mechanism described in [SID Structure](#sid-structure-usid-carrier): match the `/64` locator, execute the NEXT-C-SID shift, match the resulting `/52` Function prefix, then read the Instance ID out of the Argument bits to select the forwarding instance.
+2. **The egress node** resolves the arriving compressed SID to a specific VRF or Bridge Domain instance as described in [SID Structure](#sid-structure-usid-carrier): match the `/64` locator, then read Function and Instance ID directly from their fixed offsets in the unmutated address to select the forwarding instance.
 3. **Tenant routes / MAC addresses** are imported into the selected forwarding instance by the control plane.
 
 The Instance ID is a platform-local integer managed by the provisioning layer and does not directly encode any external record or attachment ID.
@@ -114,17 +117,17 @@ Tenant routing and bridging states are distributed across the PoP fabric via BGP
 
 ### Instance ID Signaling
 
-The VRF ID or EVI ID is signaled as part of the BGP EVPN Route Distinguisher (RD). Per RFC 4364 §4, an RD is an 8-byte value composed of a 2-byte Type field and a 6-byte Value field. The platform uses RD Type 2 (RFC 4364 §4.3), whose 6-byte Value field consists of a 4-byte Administrator subfield (originating node's own loopback IP) and a 2-byte Assigned Number subfield carrying the Instance ID (bounded to `1–4095` to match the C-SID Argument capacity):
+The VRF ID or EVI ID is signaled as part of the BGP EVPN Route Distinguisher (RD). Per RFC 4364 §4, an RD is an 8-byte value composed of a 2-byte Type field and a 6-byte Value field. The platform uses RD Type 2 (RFC 4364 §4.3), whose 6-byte Value field consists of a 4-byte Administrator subfield (the platform's 4-byte Autonomous System number) and a 2-byte Assigned Number subfield carrying the Instance ID (bounded to `1–4095` to match the C-SID Argument capacity):
 
 ```
 RD (Type 2) — 8 bytes total:
 ├── Type: 0x0002 (2 bytes)
 └── Value (6 bytes):
-     ├── Node router-ID (4 bytes)
+     ├── AS number (4 bytes)
      └── VRF / EVI ID (2 bytes, range 1-4095)
 ```
 
-The 12-bit Instance ID capacity yields 4,095 usable identifier values per PoP (value `0x000` is reserved) — this bounds the number of distinct tenant routing/bridging instances addressable within a uSID Block, not the number of unique Route Distinguishers (RD uniqueness in this design comes from the Node router-ID sub-field). **Every node uses its own loopback as the Node router-ID sub-field — the RD is unique per node, not shared across the PoP.** This is deliberate and RFC-compliant: per RFC 7432 §7.9 and RFC 9136 §3.1, each PE uses a unique RD per instance so that its routes form distinct NLRIs, rather than colliding with another PE's routes. The same Instance ID value is used consistently across all nodes within a PoP — only the Node router-ID sub-field varies by originating node.
+Because the Administrator subfield is the platform's AS number, it is identical on every node, and the same Instance ID value is used consistently across all nodes within a PoP for a given tenant instance — so the RD itself is common across the PoP rather than unique per node. This is RFC-compliant: RFC 7432 §7.9 requires an RD to be unique per MAC-VRF *on a given PE*, and RFC 9136 §3.1 likewise requires the RD to be unique per VRF instance on the local device — neither mandates that different PEs use different RDs for the same instance. A shared AS:Instance-ID RD across PEs is a common EVPN/VXLAN convention; route disambiguation across nodes is handled by Route Targets ([below](#route-target-distribution)) and by the other NLRI key fields (e.g., ESI, Ethernet Tag, IP prefix), not by RD uniqueness.
 
 ### Route Target Distribution
 
@@ -140,7 +143,7 @@ Tenant prefix reachability and MAC learning are distributed via BGP EVPN, carrie
 
 #### L3 Services: EVPN Route Type 5 (IP Prefix Route)
 Each Type-5 route carries:
-- **Route Distinguisher** — identifies the originating node and VRF (embeds Node router-ID + VRF ID)
+- **Route Distinguisher** — identifies the tenant VRF instance (embeds platform AS number + VRF ID)
 - **Route Targets** — control route import/export scope
 - **Prefix** — the tenant subnet (inner payload address)
 - **Next Hop** — the SRv6 SID of the egress node (`[uSID Block][Node-ID][Func (0xE) + VRF ID (12)]::0`)
@@ -148,7 +151,7 @@ Each Type-5 route carries:
 
 #### L2 Services: EVPN Route Type 2 (MAC/IP Advertisement — Future Use)
 Each Type-2 route carries:
-- **Route Distinguisher** — identifies the originating node and EVI (embeds Node router-ID + EVI ID)
+- **Route Distinguisher** — identifies the tenant EVI instance (embeds platform AS number + EVI ID)
 - **Route Targets** — control route import/export scope
 - **MAC / IP Address** — the tenant hardware and binding IP addresses
 - **Next Hop** — the SRv6 SID of the egress node (`[uSID Block][Node-ID][Func (0xF) + EVI ID (12)]::0`)
@@ -169,14 +172,14 @@ The route's BGP Prefix-SID Attribute (RFC 8669) carries an **SRv6 L3 Service TLV
 | Transposition Length (TL)  | 0     | No transposition into an NLRI label field             |
 | Transposition Offset (TO)  | 0     | Not applicable when TL = 0                            |
 
-LNL and FL are reported separately because they carry different semantics per RFC 8986 §3.1: LNL covers the bits the underlay actually consumes to route to a node (forming the /64 locator prefix), while FL covers bits that are local and opaque to routing (matching on the shifted /52 in the local-SID-table). **TL = 0** because the full 128-bit compressed SID is carried directly in the Next Hop field with no separate NLRI label transposition. The remaining 48 bits of zero padding sit outside the declared four fields by design and are fully conformant.
+LNL and FL are reported separately because they carry different semantics per RFC 8986 §3.1: LNL covers the bits the underlay actually consumes to route to a node (forming the /64 locator prefix), while FL covers bits that are local and opaque to routing — read directly from the unmutated SID rather than exposed via any address shift (see [SID Structure](#sid-structure-usid-carrier)). **TL = 0** because the full 128-bit compressed SID is carried directly in the Next Hop field with no separate NLRI label transposition. The remaining 48 bits of zero padding sit outside the declared four fields by design and are fully conformant.
 
 ### SID Programming Flow
 
 1. The control plane allocates a VRF ID or EVI ID for a new tenant service at a PoP.
 2. EVPN routes carry each service's Route Targets, establishing import/export policy across all nodes in the PoP.
 3. EVPN routes inject tenant prefixes (Type-5) or MACs (Type-2), carrying the Instance ID in the RD and the egress node's SRv6 SID as next hop.
-4. Each node in the PoP programs its FIB locator entry and local-SID-table Function entries as described in [SID Structure](#sid-structure-usid-carrier), so the node is ready to shift and forward for this instance.
+4. Each node in the PoP programs its FIB locator entry and local-SID-table Function entries as described in [SID Structure](#sid-structure-usid-carrier), so the node is ready to dispatch to the correct endpoint behavior for this instance.
 5. Ingress nodes construct the outer IPv6 header using the egress SID from the EVPN next hop, encapsulating the tenant packet.
 
 ---
