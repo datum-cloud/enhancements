@@ -42,7 +42,7 @@ This layout is referred to elsewhere in the platform's documentation (e.g. the A
 The uSID components correspond to RFC 9800's own Locator-Node (LNL), Function (FL), and Argument (AL) length parameters. The platform's parameters are:
 
 | Component                    | Bits | Range         | Purpose                                                             |
-|------------------------------|------|---------------|---------------------------------------------------------------------|
+|------------------------------|------|---------------|-----------------------------------------------------------------------|
 | Node-ID (Locator-Node / LNL) | 16   | 0x0001-0xDFFF | Identifies the target node (GIB / Locator-Node).                    |
 | Function (FL)                | 4    | 0xE-0xF       | Selects the behavior universe (in LIB).                             |
 | Instance ID (Argument / AL)  | 12   | 0x001-0xFFF   | Identifies VRF ID (for 0xE) or EVI ID (for 0xF). 0x000 is reserved. |
@@ -65,7 +65,7 @@ The Function field of the C-SID encodes the compressed SRv6 operation applied at
 The 4-bit Function field divides the `0xE000` starting LIB space into two entirely independent service universes:
 
 | Function (Hex) | Function (Dec) | Active C-SID Representation | Decimal Range | Behavior    | Description                                                                                                |
-|----------------|----------------|-----------------------------|---------------|-------------|------------------------------------------------------------------------------------------------------------|
+|----------------|----------------|-----------------------------|---------------|-------------|--------------------------------------------------------------------------------------------------------------|
 | `0x0 - 0xD`    | `0 - 13`       | GIB Reserved                | —             | Reserved    | Reserved for Node-IDs (Global ID Block).                                                                   |
 | `0xE`          | `14`           | `0xE000 \| VRF_ID`          | `57344-61439` | `uEnd.DT46` | **L3 Service Universe (Type 5)**: Shift, decapsulate, and lookup in tenant VRF (both IPv4/IPv6).           |
 | `0xF`          | `15`           | `0xF000 \| EVI_ID`          | `61440-65534` | `uEnd.DT2`  | **L2 Bridging Universe (Type 2)**: Shift, decapsulate, and lookup in Bridge Domain MAC table (Future Use). |
@@ -99,7 +99,7 @@ The Instance ID is a platform-local integer managed by the provisioning layer an
 A tenant service requires active uSID sequences based on its overlay type:
 
 | Service Type                               | SIDs Required                                         |
-|--------------------------------------------|-------------------------------------------------------|
+|--------------------------------------------|---------------------------------------------------------|
 | L3 Tenant VRF (IPv4, IPv6, or Dual-Stack)  | 1 — `uEnd.DT46` (Function `0xE` / `0xE000 \| VRF_ID`) |
 | L2 Tenant EVI (VPLS bridging — Future Use) | 1 — `uEnd.DT2` (Function `0xF` / `0xF000 \| EVI_ID`)  |
 
@@ -117,17 +117,17 @@ Tenant routing and bridging states are distributed across the PoP fabric via BGP
 
 ### Instance ID Signaling
 
-The VRF ID or EVI ID is signaled as part of the BGP EVPN Route Distinguisher (RD). Per RFC 4364 §4, an RD is an 8-byte value composed of a 2-byte Type field and a 6-byte Value field. The platform uses RD Type 2 (RFC 4364 §4.3), whose 6-byte Value field consists of a 4-byte Administrator subfield (the platform's 4-byte Autonomous System number) and a 2-byte Assigned Number subfield carrying the Instance ID (bounded to `1–4095` to match the C-SID Argument capacity):
+The VRF ID or EVI ID is signaled as part of the BGP EVPN Route Distinguisher (RD), alongside the originating node's own identity, so the RD is unique per node. Per RFC 4364 §4, an RD is an 8-byte value composed of a 2-byte Type field and a 6-byte Value field. The platform uses RD Type 1 (RFC 4364 §4.2), the type RFC 7432 §7.9 recommends for EVPN, whose 6-byte Value field consists of a 4-byte Administrator subfield (the originating node's own IPv4 loopback address) and a 2-byte Assigned Number subfield carrying the Instance ID (bounded to `1–4095` to match the C-SID Argument capacity):
 
 ```
-RD (Type 2) — 8 bytes total:
-├── Type: 0x0002 (2 bytes)
+RD (Type 1) — 8 bytes total:
+├── Type: 0x0001 (2 bytes)
 └── Value (6 bytes):
-     ├── AS number (4 bytes)
+     ├── Node loopback IPv4 address (4 bytes)
      └── VRF / EVI ID (2 bytes, range 1-4095)
 ```
 
-Because the Administrator subfield is the platform's AS number, it is identical on every node, and the same Instance ID value is used consistently across all nodes within a PoP for a given tenant instance — so the RD itself is common across the PoP rather than unique per node. This is RFC-compliant: RFC 7432 §7.9 requires an RD to be unique per MAC-VRF *on a given PE*, and RFC 9136 §3.1 likewise requires the RD to be unique per VRF instance on the local device — neither mandates that different PEs use different RDs for the same instance. A shared AS:Instance-ID RD across PEs is a common EVPN/VXLAN convention; route disambiguation across nodes is handled by Route Targets ([below](#route-target-distribution)) and by the other NLRI key fields (e.g., ESI, Ethernet Tag, IP prefix), not by RD uniqueness.
+Because the Administrator subfield is each node's own loopback address, the RD is naturally unique per node — no two nodes ever construct the identical RD for the same tenant instance, even though the Instance ID portion is the same. This is RFC-compliant: RFC 7432 §7.9 requires an RD to be unique per MAC-VRF *on a given PE* and recommends exactly this IP-address-based encoding. Per-node RD uniqueness means every node's advertisement for a given tenant instance is a structurally distinct NLRI, so a route reflector retains all of them without needing BGP ADD-PATH (RFC 7911) to preserve alternate paths — there is never a single contested NLRI in the first place. Route Targets ([below](#route-target-distribution)) still govern import/export scope; the RD's role here is per-node route distinctness, not scope.
 
 ### Route Target Distribution
 
@@ -143,7 +143,7 @@ Tenant prefix reachability and MAC learning are distributed via BGP EVPN, carrie
 
 #### L3 Services: EVPN Route Type 5 (IP Prefix Route)
 Each Type-5 route carries:
-- **Route Distinguisher** — identifies the tenant VRF instance (embeds platform AS number + VRF ID)
+- **Route Distinguisher** — identifies the originating node and tenant VRF instance (embeds the node's loopback address + VRF ID)
 - **Route Targets** — control route import/export scope
 - **Prefix** — the tenant subnet (inner payload address)
 - **Next Hop** — the SRv6 SID of the egress node (`[uSID Block][Node-ID][Func (0xE) + VRF ID (12)]::0`)
@@ -151,7 +151,7 @@ Each Type-5 route carries:
 
 #### L2 Services: EVPN Route Type 2 (MAC/IP Advertisement — Future Use)
 Each Type-2 route carries:
-- **Route Distinguisher** — identifies the tenant EVI instance (embeds platform AS number + EVI ID)
+- **Route Distinguisher** — identifies the originating node and tenant EVI instance (embeds the node's loopback address + EVI ID)
 - **Route Targets** — control route import/export scope
 - **MAC / IP Address** — the tenant hardware and binding IP addresses
 - **Next Hop** — the SRv6 SID of the egress node (`[uSID Block][Node-ID][Func (0xF) + EVI ID (12)]::0`)
@@ -164,7 +164,7 @@ Per RFC 9252 §5 and §6, the BGP Next Hop is set directly to the SRv6 SID — h
 The route's BGP Prefix-SID Attribute (RFC 8669) carries an **SRv6 L3 Service TLV** (for Type 5) or **SRv6 L2 Service TLV** (for Type 2), containing one **SRv6 SID Structure Sub-Sub-TLV** (RFC 9252 §3.2.1) describing how to parse the SID already present in Next Hop:
 
 | Sub-Sub-TLV Field          | Value | Maps to                                               |
-|----------------------------|-------|-------------------------------------------------------|
+|-----------------------------|-------|---------------------------------------------------------|
 | Locator Block Length (LBL) | 48    | uSID Block (PoP domain prefix)                        |
 | Locator Node Length (LNL)  | 16    | Node-ID — the routed portion of the locator           |
 | Function Length (FL)       | 4     | Function — local behavior code (`0xE` or `0xF`)       |
