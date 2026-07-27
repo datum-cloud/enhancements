@@ -102,11 +102,11 @@ The anchor PoP for a regional RR pair, and the anchor PoP for a global RR, is ch
 
 ## Session topology
 
- | Node type        | Session count | Peers                                                                                         |
- |------------------|---------------|-----------------------------------------------------------------------------------------------|
- | Worker node      | 2             | Both RRs in regional pair                                                                     |
- | Regional RR node | 4 + N         | Other node in the regional pair + all 3 global RRs + all worker nodes in the regional cluster |
- | Global RR node   | 2 + 6 = 8     | Other 2 global RRs + both nodes of each regional pair (3 regions × 2)                         |
+| Node type        | Session count | Peers                                                                                         |
+|------------------|---------------|-----------------------------------------------------------------------------------------------|
+| Worker node      | 2             | Both RRs in regional pair                                                                     |
+| Regional RR node | 4 + N         | Other node in the regional pair + all 3 global RRs + all worker nodes in the regional cluster |
+| Global RR node   | 2 + 6 = 8     | Other 2 global RRs + both nodes of each regional pair (3 regions × 2)                         |
 
 The design scales linearly: adding a worker node adds exactly 2 RR sessions. There is no fan-out at the global tier as worker count grows.
 
@@ -125,7 +125,7 @@ sequenceDiagram
     participant W_DST as Worker (destination)
 
     W_SRC ->> RR_SRC: BGP UPDATE — tenant prefix + Prefix-SID SRv6 Service TLV
-    RR_SRC ->> RR_SRC: Reflects to regional clients; reflects upstream only if export RT includes the cross-region community
+    RR_SRC ->> RR_SRC: Reflects to regional clients — reflects upstream only if export RT includes the cross-region community
     RR_SRC ->> GRR: BGP UPDATE — reflected prefix (cross-region RT present)
     GRR ->> RR_DST: BGP UPDATE — reflected to destination region
     RR_DST ->> W_DST: BGP UPDATE — installs in tenant VRF
@@ -139,15 +139,17 @@ This diagram shows one representative path through the fully redundant topology:
 
 All RR sessions negotiate the following address families:
 
- | Address family                                                                      | AFI/SAFI         | Purpose               |
- |---------------------------------------------------------------------------------------|------------------|------------------------|
- | EVPN (RFC 7432) + Prefix-SID attribute SRv6 L2/L3 Service TLV (RFC 8669 / RFC 9252)  | AFI 25 / SAFI 70 | Tenant L2/L3 overlay — the only tenant address family this design carries |
+| Address family                                                                      | AFI/SAFI         | Purpose                                                                   |
+|-------------------------------------------------------------------------------------|------------------|---------------------------------------------------------------------------|
+| EVPN (RFC 7432) + Prefix-SID attribute SRv6 L2/L3 Service TLV (RFC 8669 / RFC 9252) | AFI 25 / SAFI 70 | Tenant L2/L3 overlay — the only tenant address family this design carries |
 
 BGP-LS is intentionally not in this table — see [BGP-LS distribution](#bgp-ls-distribution), which uses separate, dedicated RR infrastructure and does not share sessions, cluster-ids, or RIBs with the address family above.
 
 This design carries tenant traffic exclusively over EVPN — no VPN-IPv4/VPN-IPv6 (RFC 4364/4659). EVPN's own Type-5 (IP Prefix) route natively covers pure-L3 tenant reachability, so a separate IP-VPN address family is not needed alongside it; running two overlapping tenant address families for the same purpose would only add operational surface without a corresponding requirement.
 
-RFC 9252 does not define a standalone "SRv6 Services TLV" mechanism or a dedicated address family for SRv6. It extends the BGP Prefix-SID path attribute (RFC 8669, attribute type 40) with two new TLV types — the SRv6 L3 Service TLV and the SRv6 L2 Service TLV — attached to the EVPN NLRI above (L3 Service TLV for Type-5 IP Prefix routes, L2 Service TLV for MAC/IP and Ethernet A-D routes). Each TLV carries an SRv6 SID Information Sub-TLV (RFC 9252 §3.1) with the SID value and an explicit 2-octet SRv6 Endpoint Behavior field. The originating PE selects the endpoint behaviour appropriate to its local VRF's address family (`End.DT4` for IPv4-only, RFC 8986 §4.7; `End.DT6` for IPv6-only, §4.6; `End.DT46` for dual-stack, §4.8) and signals that choice explicitly via the field — the receiving PE uses the signaled codepoint as-is rather than deriving it independently.
+RFC 9252 does not define a standalone "SRv6 Services TLV" mechanism or a dedicated address family for SRv6. It extends the BGP Prefix-SID path attribute (RFC 8669, attribute type 40) with two new TLV types — the SRv6 L3 Service TLV and the SRv6 L2 Service TLV — attached to the EVPN NLRI above (L3 Service TLV for Type-5 IP Prefix routes, L2 Service TLV for MAC/IP and Ethernet A-D routes). Each TLV carries an SRv6 SID Information Sub-TLV (RFC 9252 §3.1) with the SID value and an explicit 2-octet SRv6 Endpoint Behavior field.
+
+This design's SIDs use the platform's compressed uSID structure (RFC 9800, the REPLACE-CSID flavor applied to RFC 8986's terminal `End.DT`-family behaviors) rather than an independent, uncompressed SID per address family — see the [SRv6 uSID Plan](../addressing/srv6.md#sid-structure-usid-carrier) for the full carrier layout. Under that structure the platform defines exactly one L3 endpoint behavior, `uEnd.DT46` (Function code `0xE`), used for every tenant VRF regardless of whether the tenant is IPv4-only, IPv6-only, or dual-stack — there is no separate `uEnd.DT4`/`uEnd.DT6` codepoint, even though RFC 9800 §4.2.7 defines distinct REPLACE-CSID variants for each and would permit them. Running single-stack traffic over the unified `uEnd.DT46` behavior costs nothing extra in either the data plane (the inner packet's IP version is inspected directly) or the control plane (BGP EVPN only advertises routes for the address families actually configured on a VRF), so standardizing on one codepoint avoids per-address-family SID variation for no operational benefit. The L2 case uses the analogous `uEnd.DT2` (Function code `0xF`). The originating PE signals the codepoint explicitly via the Endpoint Behavior field — the receiving PE uses the signaled value as-is rather than deriving it independently.
 
 ---
 
@@ -157,13 +159,17 @@ Every peering relationship described in this document is iBGP (global-RR full me
 
 ### AS number
 
-A single AS number is used fabric-wide, drawn from the IANA-reserved private-use range (RFC 6996 §5: 64512–65534 for 2-byte ASNs, or 4200000000–4294967294 for 4-byte ASNs), since this AS never speaks eBGP outside the fabric. A 2-byte private ASN is sufficient here — only one AS is needed for the whole fabric, and 2-byte RD/RT encodings (below) are simpler to work with. Do not use 65535 or 4294967295: RFC 7300 reserves these only as "Last ASNs" for potential well-known-community use and explicitly states they are not private-use ASNs. The specific number is an assignment decision outside the scope of this document.
+A single AS number is used fabric-wide, drawn from the IANA-reserved private-use range (RFC 6996 §5: 64512–65534 for 2-byte ASNs, or 4200000000–4294967294 for 4-byte ASNs), since this AS never speaks eBGP outside the fabric. A 2-byte private ASN is sufficient here — only one AS is needed for the whole fabric. Do not use 65535 or 4294967295: RFC 7300 reserves these only as "Last ASNs" for potential well-known-community use and explicitly states they are not private-use ASNs. The specific number is an assignment decision outside the scope of this document.
+
+The Route Distinguisher scheme below (Type 1) does not embed this AS number at all — it is IP-address-based, not AS-number-based. The AS number's role here is limited to the iBGP session model itself and, if used, an AS-number-keyed Route Target encoding (RFC 4360 Type 0x00); a 2-byte ASN keeps that encoding compact where it applies, but nothing about the RD scheme depends on the ASN's byte width.
 
 ### Route Distinguisher scheme
 
 EVPN (AFI 25/SAFI 70) requires a **Type 1 RD unique per originating worker** (per MAC-VRF per PE), not a single RD shared across all workers in a tenant VRF. RFC 7432 §7.9 states an RD MUST be assigned per MAC-VRF per PE and MUST be unique across all MAC-VRFs on a PE, recommending Type 1 (RFC 4364 §4.2 encoding: IP-address administrator, here the worker's own loopback, plus a locally-assigned number).
 
 This is not incidental: RFC 7432 §8.4's aliasing and backup-path mechanism — EVPN's native multi-homing redundancy, built from Ethernet A-D per-ES and per-EVI route advertisements — depends on every originating worker's advertisement being retained as a distinct route, which per-worker RD uniqueness guarantees (two different workers advertising the same MAC/IP or prefix are never the same NLRI, so neither is ever a competing "best path" that suppresses the other). Worker redundancy in this design is therefore provided natively by EVPN itself (per-PE RD, aliasing, DF election, split-horizon) — the fabric does not need BGP ADD-PATH (RFC 7911) to see multiple workers' paths, because per-PE-unique RD means there is never a single contested NLRI with hidden alternate paths in the first place. This is also why this design does not enable ADD-PATH anywhere: given this RD scheme, there is no "select one best path, hide the rest" scenario for it to compensate for.
+
+**Deliberate choice, not the only valid option.** RFC 7432 §7.9's MUST only requires RD uniqueness per MAC-VRF *on a given PE* — it does not forbid a single RD shared across every PE for the same instance, which is also RFC-compliant and is a common EVPN/VXLAN convention (route disambiguation across nodes then falls to Route Targets and the other NLRI key fields instead of RD uniqueness). This design confirms Type 1 (per-worker-unique) specifically because it wants ADD-PATH-free multipath via native aliasing, per the paragraph above. A sibling document describing the same platform's SRv6 SID/Instance-ID encoding may reference a shared, per-instance RD (Type 2) — that is a different, also-valid choice serving a different goal (a constant RD per tenant instance, independent of which node originates), and the two are not reconcilable within one address family; this document's RD scheme for EVPN is Type 1, confirmed.
 
 ### Route Target policy
 
