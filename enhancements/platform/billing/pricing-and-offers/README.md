@@ -269,50 +269,55 @@ spec:
     - name: compute.datumapis.com/instance/cpu-allocated
       chargeType: Usage
       currency: USD
-      metricRef: compute.datumapis.com/instance/cpu-allocated
-      pricingUnit: vcpu
-      rates:
-        - match: { dimension: tier, value: standard }
-          flat: "0.025"
-        - flat: "0.030"
+      usage:
+        metricRef: compute.datumapis.com/instance/cpu-allocated
+        pricingUnit: vcpu
+        rates:
+          - match: { dimension: tier, value: standard }
+            flat: "0.025"
+          - flat: "0.030"
 
     - name: compute.datumapis.com/instance/memory-allocated
       chargeType: Usage
       currency: USD
-      metricRef: compute.datumapis.com/instance/memory-allocated
-      pricingUnit: gib
-      rates:
-        - match: { dimension: tier, value: standard }
-          flat: "0.003"
-        - flat: "0.0035"
+      usage:
+        metricRef: compute.datumapis.com/instance/memory-allocated
+        pricingUnit: gib
+        rates:
+          - match: { dimension: tier, value: standard }
+            flat: "0.003"
+          - flat: "0.0035"
 
     - name: compute.datumapis.com/instance/cpu-seconds
       chargeType: Usage
       currency: USD
-      metricRef: compute.datumapis.com/instance/cpu-seconds
-      pricingUnit: cpu-second
-      rates:
-        - match: { dimension: region, value: us-central1 }
-          flat: "0.0000125"
-        - flat: "0.0000130"
+      usage:
+        metricRef: compute.datumapis.com/instance/cpu-seconds
+        pricingUnit: cpu-second
+        rates:
+          - match: { dimension: region, value: us-central1 }
+            flat: "0.0000125"
+          - flat: "0.0000130"
 
     - name: compute.datumapis.com/instance/memory-seconds
       chargeType: Usage
       currency: USD
-      metricRef: compute.datumapis.com/instance/memory-seconds
-      pricingUnit: byte-second
-      rates:
-        - match: { dimension: region, value: us-central1 }
-          flat: "0.000000000008"
-        - flat: "0.0000000000085"
+      usage:
+        metricRef: compute.datumapis.com/instance/memory-seconds
+        pricingUnit: byte-second
+        rates:
+          - match: { dimension: region, value: us-central1 }
+            flat: "0.000000000008"
+          - flat: "0.0000000000085"
 
     - name: compute.datumapis.com/instance/uptime-seconds
       chargeType: Usage
       currency: USD
-      metricRef: compute.datumapis.com/instance/uptime-seconds
-      pricingUnit: instance-second
-      rates:
-        - flat: "0.000001"
+      usage:
+        metricRef: compute.datumapis.com/instance/uptime-seconds
+        pricingUnit: instance-second
+        rates:
+          - flat: "0.000001"
 ```
 
 #### datum-cloud/service-catalog: ServicePricing fan-out
@@ -468,61 +473,67 @@ spec:
     - name: assistant.miloapis.com/conversation/input-tokens
       chargeType: Usage
       currency: USD
-      metricRef: assistant.miloapis.com/conversation/input-tokens
-      pricingUnit: token
-      rates:
-        - match: { dimension: model, value: claude-sonnet-4-6 }
-          flat: "0.000003"
-        - match: { dimension: model, value: claude-opus-4-8 }
-          flat: "0.000015"
-        - flat: "0.000003"
+      usage:
+        metricRef: assistant.miloapis.com/conversation/input-tokens
+        pricingUnit: token
+        rates:
+          - match: { dimension: model, value: claude-sonnet-4-6 }
+            flat: "0.000003"
+          - match: { dimension: model, value: claude-opus-4-8 }
+            flat: "0.000015"
+          - flat: "0.000003"
 
     - name: assistant.miloapis.com/conversation/output-tokens
       chargeType: Usage
       currency: USD
-      metricRef: assistant.miloapis.com/conversation/output-tokens
-      pricingUnit: token
-      rates:
-        - match: { dimension: model, value: claude-sonnet-4-6 }
-          flat: "0.000015"
-        - match: { dimension: model, value: claude-opus-4-8 }
-          flat: "0.000075"
-        - flat: "0.000015"
+      usage:
+        metricRef: assistant.miloapis.com/conversation/output-tokens
+        pricingUnit: token
+        rates:
+          - match: { dimension: model, value: claude-sonnet-4-6 }
+            flat: "0.000015"
+          - match: { dimension: model, value: claude-opus-4-8 }
+            flat: "0.000075"
+          - flat: "0.000015"
 
     - name: assistant.miloapis.com/conversation/cache-read-tokens
       chargeType: Usage
       currency: USD
-      metricRef: assistant.miloapis.com/conversation/cache-read-tokens
-      pricingUnit: token
-      rates:
-        - match: { dimension: model, value: claude-sonnet-4-6 }
-          flat: "0.0000003"
-        - flat: "0.0000003"
+      usage:
+        metricRef: assistant.miloapis.com/conversation/cache-read-tokens
+        pricingUnit: token
+        rates:
+          - match: { dimension: model, value: claude-sonnet-4-6 }
+            flat: "0.0000003"
+          - flat: "0.0000003"
 
     - name: assistant.miloapis.com/conversation/cache-write-tokens
       chargeType: Usage
       currency: USD
-      metricRef: assistant.miloapis.com/conversation/cache-write-tokens
-      pricingUnit: token
-      rates:
-        - match: { dimension: model, value: claude-sonnet-4-6 }
-          flat: "0.00000375"
-        - flat: "0.00000375"
+      usage:
+        metricRef: assistant.miloapis.com/conversation/cache-write-tokens
+        pricingUnit: token
+        rates:
+          - match: { dimension: model, value: claude-sonnet-4-6 }
+            flat: "0.00000375"
+          - flat: "0.00000375"
 
     - name: assistant.miloapis.com/conversation/messages
       chargeType: Usage
       currency: USD
-      metricRef: assistant.miloapis.com/conversation/messages
-      pricingUnit: message
-      rates:
-        - flat: "0.000001"
+      usage:
+        metricRef: assistant.miloapis.com/conversation/messages
+        pricingUnit: message
+        rates:
+          - flat: "0.000001"
 
     - name: assistant.miloapis.com/access-fee
       chargeType: Recurring
       displayName: AI Assistant Access Fee
       currency: USD
-      amount: "10.00"
-      interval: monthly
+      recurring:
+        amount: "10.00"
+        interval: monthly
 ```
 
 #### datum-cloud/service-catalog: ServicePricing fan-out
@@ -616,59 +627,62 @@ spec:
     - name: networking.datumapis.com/transfer/egress-internet
       chargeType: Usage
       currency: USD
-      metricRef: networking.datumapis.com/transfer/egress-internet
-      pricingUnit: gib
-      rates:
-        - match: { dimension: destination_region_group, value: us-eu }
-          tiered:
-            - upTo: "200"
-              rate: "0"
-            - upTo: "10240"
-              rate: "0.05"
-            - upTo: "153600"
-              rate: "0.03"
-            - rate: "0.01"
-        - match: { dimension: destination_region_group, value: rest-of-world }
-          tiered:
-            - upTo: "200"
-              rate: "0"
-            - upTo: "10240"
-              rate: "0.15"
-            - upTo: "153600"
-              rate: "0.12"
-            - rate: "0.09"
-        # Default: treat unknown geo as Rest of World
-        - tiered:
-            - upTo: "200"
-              rate: "0"
-            - upTo: "10240"
-              rate: "0.15"
-            - upTo: "153600"
-              rate: "0.12"
-            - rate: "0.09"
+      usage:
+        metricRef: networking.datumapis.com/transfer/egress-internet
+        pricingUnit: gib
+        rates:
+          - match: { dimension: destination_region_group, value: us-eu }
+            tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.05"
+              - upTo: "153600"
+                rate: "0.03"
+              - rate: "0.01"
+          - match: { dimension: destination_region_group, value: rest-of-world }
+            tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.15"
+              - upTo: "153600"
+                rate: "0.12"
+              - rate: "0.09"
+          # Default: treat unknown geo as Rest of World
+          - tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.15"
+              - upTo: "153600"
+                rate: "0.12"
+              - rate: "0.09"
 
     - name: networking.datumapis.com/transfer/internal
       chargeType: Usage
       currency: USD
-      metricRef: networking.datumapis.com/transfer/internal
-      pricingUnit: gib
-      rates:
-        - match: { dimension: path, value: same-region }
-          flat: "0"
-        - match: { dimension: path, value: cross-region-na-eu }
-          flat: "0.01"
-        - match: { dimension: path, value: us-to-row }
-          flat: "0.05"
-        # Default: most expensive internal path
-        - flat: "0.05"
+      usage:
+        metricRef: networking.datumapis.com/transfer/internal
+        pricingUnit: gib
+        rates:
+          - match: { dimension: path, value: same-region }
+            flat: "0"
+          - match: { dimension: path, value: cross-region-na-eu }
+            flat: "0.01"
+          - match: { dimension: path, value: us-to-row }
+            flat: "0.05"
+          # Default: most expensive internal path
+          - flat: "0.05"
 
     - name: networking.datumapis.com/transfer/ingress
       chargeType: Usage
       currency: USD
-      metricRef: networking.datumapis.com/transfer/ingress
-      pricingUnit: gib
-      rates:
-        - flat: "0"
+      usage:
+        metricRef: networking.datumapis.com/transfer/ingress
+        pricingUnit: gib
+        rates:
+          - flat: "0"
 ```
 
 #### datum-cloud/service-catalog: ServicePricing fan-out
@@ -905,16 +919,19 @@ ServiceConfiguration            ServicePricing            Offer
 ### Charge type schema
 
 All three charge types are declared on `spec.charges[]`. They share `name`,
-`chargeType`, `displayName`, and `currency`, then diverge by type:
+`chargeType`, `displayName`, and `currency`. Type-specific fields live under
+nested option objects so supported configuration is explicit per chargeType:
 
-- **`Usage`** requires `metricRef` (must match a `spec.metrics[].name`),
-  `pricingUnit`, and `rates`. The rate is multiplied by the meter reading,
-  optionally filtered by a dimension. Amount, trigger, and interval must not
-  be set.
-- **`OneTime`** requires `amount` and `trigger`. It fires once at that
-  trigger. Meter fields must not be set.
-- **`Recurring`** requires `amount` and `interval`. It fires every billing
-  interval. Meter fields must not be set.
+- **`Usage`** requires `usage` with `metricRef` (must match a
+  `spec.metrics[].name`), `pricingUnit`, and `rates`. The rate is multiplied
+  by the meter reading, optionally filtered by a dimension. `oneTime` and
+  `recurring` must not be set.
+- **`OneTime`** requires `oneTime` with `amount` and `trigger`. It fires once
+  at that trigger. `usage` and `recurring` must not be set.
+- **`Recurring`** requires `recurring` with `amount` and `interval`. It fires
+  every billing interval. `usage` and `oneTime` must not be set.
+- The last band in a `tiered` rate list must omit `upTo` (open-ended). Earlier
+  bands require `upTo`.
 
 `ChargeFanOut` emits one `ServicePricing` per charge, distinguished by
 `chargeType`. Offers snapshot every kind; amberflo-provider maps each to the
@@ -934,32 +951,35 @@ spec:
     - name: compute.datumapis.com/instance/cpu-allocated
       chargeType: Usage
       currency: USD
-      metricRef: compute.datumapis.com/instance/cpu-allocated
-      pricingUnit: vcpu
-      rates:
-        - match: { dimension: tier, value: standard }
-          flat: "0.025"
-        - flat: "0.030"
+      usage:
+        metricRef: compute.datumapis.com/instance/cpu-allocated
+        pricingUnit: vcpu
+        rates:
+          - match: { dimension: tier, value: standard }
+            flat: "0.025"
+          - flat: "0.030"
 
     - name: compute.datumapis.com/instance/setup-fee
       chargeType: OneTime
       displayName: Compute Setup Fee
       currency: USD
-      amount: "10.00"
-      trigger: BillingAccountActivation
+      oneTime:
+        amount: "10.00"
+        trigger: BillingAccountActivation
 
     - name: compute.datumapis.com/platform-fee
       chargeType: Recurring
       displayName: Compute Platform Fee
       currency: USD
-      amount: "5.00"
-      interval: monthly
+      recurring:
+        amount: "5.00"
+        interval: monthly
 ```
 
 ### Charges on ServiceConfiguration
 
 `spec.charges[]` is the only place commercial terms are authored. Usage
-charges set `metricRef`, `pricingUnit`, and rates (flat or tiered).
+charges set those fields under `usage` (`metricRef`, `pricingUnit`, and rates).
 Per-dimension `match` entries let a rate vary by a label declared on the
 service's `monitoredResourceType` (one dimension per match entry;
 multi-dimension matches deferred). Services that need a compound key (for
@@ -989,44 +1009,47 @@ spec:
     - name: compute.datumapis.com/instance/cpu-allocated
       chargeType: Usage
       currency: USD
-      metricRef: compute.datumapis.com/instance/cpu-allocated
-      pricingUnit: vcpu
-      rates:
-        - match: { dimension: tier, value: standard }
-          flat: "0.025"
-        - flat: "0.030"
+      usage:
+        metricRef: compute.datumapis.com/instance/cpu-allocated
+        pricingUnit: vcpu
+        rates:
+          - match: { dimension: tier, value: standard }
+            flat: "0.025"
+          - flat: "0.030"
     - name: compute.datumapis.com/instance/cpu-seconds
       chargeType: Usage
       currency: USD
-      metricRef: compute.datumapis.com/instance/cpu-seconds
-      pricingUnit: cpu-second
-      rates:
-        - match: { dimension: region, value: us-central1 }
-          flat: "0.0000125"
-        - flat: "0.0000130"
+      usage:
+        metricRef: compute.datumapis.com/instance/cpu-seconds
+        pricingUnit: cpu-second
+        rates:
+          - match: { dimension: region, value: us-central1 }
+            flat: "0.0000125"
+          - flat: "0.0000130"
     - name: networking.datumapis.com/transfer/egress-internet
       chargeType: Usage
       currency: USD
-      metricRef: networking.datumapis.com/transfer/egress-internet
-      pricingUnit: gib
-      rates:
-        - match: { dimension: destination_region_group, value: us-eu }
-          tiered:
-            - upTo: "200"
-              rate: "0"
-            - upTo: "10240"
-              rate: "0.05"
-            - upTo: "153600"
-              rate: "0.03"
-            - rate: "0.01"
-        - tiered:
-            - upTo: "200"
-              rate: "0"
-            - upTo: "10240"
-              rate: "0.15"
-            - upTo: "153600"
-              rate: "0.12"
-            - rate: "0.09"
+      usage:
+        metricRef: networking.datumapis.com/transfer/egress-internet
+        pricingUnit: gib
+        rates:
+          - match: { dimension: destination_region_group, value: us-eu }
+            tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.05"
+              - upTo: "153600"
+                rate: "0.03"
+              - rate: "0.01"
+          - tiered:
+              - upTo: "200"
+                rate: "0"
+              - upTo: "10240"
+                rate: "0.15"
+              - upTo: "153600"
+                rate: "0.12"
+              - rate: "0.09"
 ```
 
 ### ServicePricing fan-out
@@ -1194,7 +1217,9 @@ staging. #747 designs against the Amberflo subtotal as its input.
 - 2026-08-04: Unify Usage onto `spec.charges[]` with `metricRef`. Drop
   `metrics[].pricing` and the separate `PricingFanOut`. Metrics stay
   telemetry/quota-only; one `ChargeFanOut` covers Usage, OneTime, and
-  Recurring (service-catalog PR #61).
+  Recurring (service-catalog PR #61). Nest type-specific fields under
+  `usage` / `oneTime` / `recurring`, and require the last tiered band to
+  omit `upTo`.
 
 ## Drawbacks
 
