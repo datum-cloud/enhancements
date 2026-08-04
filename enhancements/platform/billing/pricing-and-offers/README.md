@@ -30,7 +30,7 @@ latest-milestone: "v0.x"
 - [Design Details](#design-details)
   - [Resource Topology](#resource-topology)
   - [Charge type schema](#charge-type-schema)
-  - [Per-meter pricing on ServiceConfiguration](#per-meter-pricing-on-serviceconfiguration)
+  - [Charges on ServiceConfiguration](#charges-on-serviceconfiguration)
   - [ServicePricing fan-out](#servicepricing-fan-out)
   - [Offer](#offer)
   - [BillingEntitlement](#billingentitlement)
@@ -51,23 +51,24 @@ We can measure what customers use, but we can't yet charge them for it.
 [Metering][681] gave us usage data and the `BillingAccount`, but no prices are
 attached to anything, so when we invoice we'll have no amount to charge.
 
-This enhancement doc propeses missing pieces: service owners set prices on their
-meters, the platform bundles those into named **Offers** (pay-as-you-go, Pro,
-and so on), and every billing account gets one by default. Once that's in place,
-an Amberflo invoice run finally returns a real dollar amount — the input the
-credit ledger and eventual Stripe charge step depend on.
+This enhancement doc proposes the missing pieces: service owners declare
+Usage, OneTime, and Recurring charges on `ServiceConfiguration`, the platform
+bundles those into named **Offers** (pay-as-you-go, Pro, and so on), and every
+billing account gets one by default. Once that is in place, an Amberflo invoice
+run finally returns a real dollar amount, which is the input the credit ledger
+and eventual Stripe charge step depend on.
 
 ## Motivation
 
-The umbrella billing enhancement names three primitives — Service Pricing,
-Offers, and Entitlements — and the current implementation has none of them.
+The umbrella billing enhancement names three primitives: Service Pricing,
+Offers, and Entitlements: and the current implementation has none of them.
 Concrete blockers today:
 
 - **Amberflo has meters but no rates**, so any invoice run returns zero.
 - **New organizations have no pricing context.** Even after we build the
   invoice-run controller, there is nothing for it to bill.
 - **There is no platform-defined way to roll out a tier change** (for example,
-  "Pro now includes egress" — see
+  "Pro now includes egress": see
   [Real-world example: Data Transfer](#real-world-example-data-transfer))
   without hand-editing every billing account.
 - **Quota gating and pricing are unconnected.** `ServiceEntitlement` (per
@@ -76,12 +77,13 @@ Concrete blockers today:
 
 ### Goals
 
-- **Per-meter pricing on `ServiceConfiguration`.** A `pricing` block on each
-  `spec.metrics[]` entry: currency, pricing unit, and rates (flat or tiered,
-  including graduated volume bands via `tiered`), with per-dimension match
-  support so rates can vary by `MeterDefinition` dimension value.
-- **Fan-out to `ServicePricing` resources**, one per priced metric, emitted by
-  a new `PricingFanOut` sibling to the existing `QuotaFanOut`.
+- **Unified `spec.charges[]` on `ServiceConfiguration`.** One list for
+  `Usage`, `OneTime`, and `Recurring`. Metrics stay telemetry and quota only.
+  Usage charges reference a meter by `metricRef` and carry currency,
+  `pricingUnit`, and rates (flat or tiered, including graduated volume bands,
+  with per-dimension match so rates can vary by meter dimension value).
+- **Fan-out to `ServicePricing` resources**, one per charge, emitted by a
+  single `ChargeFanOut` sibling to the existing `QuotaFanOut`.
 - **`Offer` resource** that bundles service pricings into a named, versioned
   tier with `launchStage` semantics and a snapshot of the referenced pricings
   taken at publish time.
@@ -124,7 +126,7 @@ real usage returns a non-zero dollar subtotal.
   controller and Stripe.
 - **Multi-currency (USD only), discounting, marketplace billing, and cross-meter
   bundle discounts.**
-- **Re-rating historical usage** — prevented by construction via immutable
+- **Re-rating historical usage**: prevented by construction via immutable
   published Offers.
 
 ## Proposal
@@ -133,15 +135,17 @@ real usage returns a non-zero dollar subtotal.
 
 | Concept                 | Owner             | Lives in        | What it does                                              |
 | ----------------------- | ----------------- | --------------- | --------------------------------------------------------- |
-| **Service Pricing**     | Service owner     | service-catalog | Rates attached to a meter, declared next to that meter.   |
+| **Service Pricing**     | Service owner     | service-catalog | A charge (Usage, OneTime, or Recurring) fanned out to a CRD. |
 | **Offer**               | Platform owner    | service-catalog | A named, versioned bundle of service pricings (a "tier"). |
 | **Billing Entitlement** | Platform / policy | service-catalog | Binds a billing account to exactly one active Offer.      |
 
-Service owners author pricing where they already author meters. The platform
-composes priced services into "Offers". A billing account becomes billable by
-pointing a Billing Entitlement at an Offer. Everything downstream — the Amberflo
-Product Plan, the Customer-Plan assignment, the eventual invoice is derived
-from those three objects.
+Service owners author meters and charges on the same `ServiceConfiguration`.
+Meters describe what is measured. Charges describe what is billed. A Usage
+charge points at a meter by name; OneTime and Recurring charges do not need
+a meter. The platform composes those charges into Offers. A billing account
+becomes billable by pointing a Billing Entitlement at an Offer. Everything
+downstream (Amberflo Product Plan, Customer-Plan assignment, invoice) is
+derived from those three objects.
 
 ### Use Cases
 
@@ -173,16 +177,14 @@ collect a one-time setup fee when an account first activates the service
 service, the owner wants `claude-sonnet-4` priced differently from
 `claude-opus-4` on the same meter.
 
-**How the proposal addresses it.** For `Usage` charges, the owner adds a
-`pricing` block to the relevant `spec.metrics[]` entry in
-`ServiceConfiguration`, with per-dimension match rules that key off a label
-declared on the service's `monitoredResourceType` (`region`, `tier`, `model`,
-…). For `OneTime` and `Recurring` charges, the owner adds entries to
-`spec.charges[]` with a fixed `amount` and either a `trigger` or `interval`.
-Two fan-out controllers emit one `ServicePricing` per entry — `PricingFanOut`
-for meter-based Usage, `ChargeFanOut` for fixed charges — each with a
-`chargeType` discriminator. Providers watch the single `ServicePricing` shape
-rather than parsing `ServiceConfiguration`.
+**How the proposal addresses it.** The owner adds entries to
+`spec.charges[]` on `ServiceConfiguration`. Usage charges set `metricRef` to
+a declared metric name and attach rates (with optional per-dimension match on
+labels such as `region`, `tier`, or `model`). OneTime and Recurring charges
+set a fixed `amount` plus a `trigger` or `interval`. One fan-out controller
+(`ChargeFanOut`) emits a `ServicePricing` per charge, distinguished by
+`chargeType`. Providers watch that `ServicePricing` shape rather than parsing
+`ServiceConfiguration`.
 
 #### Use Case 3: The platform raises prices without re-pricing existing customers
 
@@ -201,7 +203,7 @@ construction.
 #### Use Case 4: Staff put a specific account on a custom or zero-rated Offer
 
 **Situation.** Support needs to move one billing account onto an internal,
-zero-rated Offer (`staff-zero-v1`) for testing, or onto a negotiated tier — and
+zero-rated Offer (`staff-zero-v1`) for testing, or onto a negotiated tier: and
 the change must be auditable.
 
 **How the proposal addresses it.** Staff-portal can switch a billing account's
@@ -231,23 +233,24 @@ the credit ledger ([#747][747]) draws against.
 This section walks through what each repository contributes to make compute
 billing work end-to-end.
 
-#### datum-cloud/compute — ServiceConfiguration
+#### datum-cloud/compute: ServiceConfiguration
 
 The compute `ServiceConfiguration` already declares `region` and `tier` as
 labels on the `compute.datumapis.com/Instance` monitored resource type, and
-publishes five billing metrics. A `pricing` block is added to each billable
-metric. The `pricingUnit` is a human-readable label that reflects the meter's
-unit dimension; it does not need to be the literal UCUM unit string.
+publishes five billing metrics. Billable meters get matching Usage entries on
+`spec.charges[]` that set `metricRef` to the metric name. The `pricingUnit` is
+a human-readable label for the line item; it does not need to be the literal
+UCUM unit string.
 
 `cpu-allocated` and `memory-allocated` are Gauges (instantaneous snapshots of
-reserved capacity). Pricing these means an account pays for what it has
+reserved capacity). Pricing those means an account pays for what it has
 reserved. `cpu-seconds` and `memory-seconds` are Cumulatives (actual
-consumption). Both sets carry pricing blocks; which ones apply to a given
-account is determined by the Offer — not the `ServiceConfiguration`. This lets
-the platform offer an allocated-capacity model, a consumption model, or a future
-combination, all from the same service definition. Compute opts in to
-billing-gated quota so accounts without an active Offer are blocked from
-creating resources.
+consumption). Both sets can carry charges; which ones apply to a given account
+is determined by the Offer, not the `ServiceConfiguration`. That lets the
+platform offer an allocated-capacity model, a consumption model, or a future
+combination from the same service definition. Metrics with no matching charge
+stay unpriced (telemetry or quota only). Compute opts in to billing-gated
+quota so accounts without an active Offer are blocked from creating resources.
 
 ```yaml
 spec:
@@ -256,54 +259,67 @@ spec:
 
   metrics:
     - name: compute.datumapis.com/instance/cpu-allocated
-      pricing:
-        currency: USD
-        pricingUnit: vcpu
-        rates:
-          - match: { dimension: tier, value: standard }
-            flat: "0.025"
-          - flat: "0.030"
+      # ... kind, unit, dimensions ...
+    - name: compute.datumapis.com/instance/memory-allocated
+    - name: compute.datumapis.com/instance/cpu-seconds
+    - name: compute.datumapis.com/instance/memory-seconds
+    - name: compute.datumapis.com/instance/uptime-seconds
+
+  charges:
+    - name: compute.datumapis.com/instance/cpu-allocated
+      chargeType: Usage
+      currency: USD
+      metricRef: compute.datumapis.com/instance/cpu-allocated
+      pricingUnit: vcpu
+      rates:
+        - match: { dimension: tier, value: standard }
+          flat: "0.025"
+        - flat: "0.030"
 
     - name: compute.datumapis.com/instance/memory-allocated
-      pricing:
-        currency: USD
-        pricingUnit: gib
-        rates:
-          - match: { dimension: tier, value: standard }
-            flat: "0.003"
-          - flat: "0.0035"
+      chargeType: Usage
+      currency: USD
+      metricRef: compute.datumapis.com/instance/memory-allocated
+      pricingUnit: gib
+      rates:
+        - match: { dimension: tier, value: standard }
+          flat: "0.003"
+        - flat: "0.0035"
 
     - name: compute.datumapis.com/instance/cpu-seconds
-      pricing:
-        currency: USD
-        pricingUnit: cpu-second
-        rates:
-          - match: { dimension: region, value: us-central1 }
-            flat: "0.0000125"
-          - flat: "0.0000130"
+      chargeType: Usage
+      currency: USD
+      metricRef: compute.datumapis.com/instance/cpu-seconds
+      pricingUnit: cpu-second
+      rates:
+        - match: { dimension: region, value: us-central1 }
+          flat: "0.0000125"
+        - flat: "0.0000130"
 
     - name: compute.datumapis.com/instance/memory-seconds
-      pricing:
-        currency: USD
-        pricingUnit: byte-second
-        rates:
-          - match: { dimension: region, value: us-central1 }
-            flat: "0.000000000008"
-          - flat: "0.0000000000085"
+      chargeType: Usage
+      currency: USD
+      metricRef: compute.datumapis.com/instance/memory-seconds
+      pricingUnit: byte-second
+      rates:
+        - match: { dimension: region, value: us-central1 }
+          flat: "0.000000000008"
+        - flat: "0.0000000000085"
 
     - name: compute.datumapis.com/instance/uptime-seconds
-      pricing:
-        currency: USD
-        pricingUnit: instance-second
-        rates:
-          - flat: "0.000001"
+      chargeType: Usage
+      currency: USD
+      metricRef: compute.datumapis.com/instance/uptime-seconds
+      pricingUnit: instance-second
+      rates:
+        - flat: "0.000001"
 ```
 
-#### datum-cloud/service-catalog — ServicePricing fan-out
+#### datum-cloud/service-catalog: ServicePricing fan-out
 
-The `PricingFanOut` controller (new, sibling to `QuotaFanOut`) watches
-`ServiceConfiguration` and emits one `ServicePricing` per priced metric into
-the `milo-system` namespace. These are owned by service-catalog and must not be
+The `ChargeFanOut` controller (sibling to `QuotaFanOut`) watches
+`ServiceConfiguration` and emits one `ServicePricing` per charge into the
+`milo-system` namespace. These are owned by service-catalog and must not be
 authored by hand.
 
 ```yaml
@@ -323,14 +339,14 @@ spec:
     - flat: "0.030"
 ```
 
-One `ServicePricing` is emitted per priced metric. The five compute billing
-metrics above produce five `ServicePricing` resources.
+One `ServicePricing` is emitted per charge. The five compute Usage charges
+above produce five `ServicePricing` resources.
 
-#### datum-cloud/service-catalog — Offers
+#### datum-cloud/service-catalog: Offers
 
 Two Offers are authored for compute in draft form, each referencing a different
 subset of the `ServicePricing` resources by name. The rate values are not
-duplicated here — the controller snapshots them automatically at publish.
+duplicated here: the controller snapshots them automatically at publish.
 
 ```yaml
 apiVersion: billing.miloapis.com/v1alpha1
@@ -361,7 +377,7 @@ spec:
     - name: compute-datumapis-com--instance-uptime-seconds
 ```
 
-#### datum-cloud/service-catalog — BillingEntitlement (applied by controller)
+#### datum-cloud/service-catalog: BillingEntitlement (applied by controller)
 
 When a `BillingAccount` is created the `billing-entitlement-defaults` controller
 reads `ServiceConfiguration.spec.defaultOffer` and SSA-applies a
@@ -381,7 +397,7 @@ spec:
     name: compute-allocated-v1
 ```
 
-#### datum-cloud/amberflo-provider — new reconcilers
+#### datum-cloud/amberflo-provider: new reconcilers
 
 Two new reconcilers are added:
 
@@ -428,12 +444,13 @@ This section shows the same end-to-end pattern for the AI Assistant service,
 which demonstrates per-`model` dimension pricing and a `Recurring` platform fee
 alongside `Usage` charges.
 
-#### datum-cloud/cloud-portal — ServiceConfiguration
+#### datum-cloud/cloud-portal: ServiceConfiguration
 
 The `assistant-miloapis-com` `ServiceConfiguration` already declares `model`
 and `region` as labels on the `assistant.miloapis.com/Conversation` monitored
-resource type. A `pricing` block is added to each billing metric, with rates
-that vary by `model`. A `Recurring` platform fee is added to `spec.charges[]`.
+resource type. Usage charges on `spec.charges[]` price those meters with rates
+that vary by `model`. A Recurring platform fee is also declared on
+`spec.charges[]`.
 
 ```yaml
 spec:
@@ -442,58 +459,64 @@ spec:
 
   metrics:
     - name: assistant.miloapis.com/conversation/input-tokens
-      pricing:
-        chargeType: Usage
-        currency: USD
-        pricingUnit: token
-        rates:
-          - match: { dimension: model, value: claude-sonnet-4-6 }
-            flat: "0.000003"
-          - match: { dimension: model, value: claude-opus-4-8 }
-            flat: "0.000015"
-          - flat: "0.000003"
-
     - name: assistant.miloapis.com/conversation/output-tokens
-      pricing:
-        chargeType: Usage
-        currency: USD
-        pricingUnit: token
-        rates:
-          - match: { dimension: model, value: claude-sonnet-4-6 }
-            flat: "0.000015"
-          - match: { dimension: model, value: claude-opus-4-8 }
-            flat: "0.000075"
-          - flat: "0.000015"
-
     - name: assistant.miloapis.com/conversation/cache-read-tokens
-      pricing:
-        chargeType: Usage
-        currency: USD
-        pricingUnit: token
-        rates:
-          - match: { dimension: model, value: claude-sonnet-4-6 }
-            flat: "0.0000003"
-          - flat: "0.0000003"
-
     - name: assistant.miloapis.com/conversation/cache-write-tokens
-      pricing:
-        chargeType: Usage
-        currency: USD
-        pricingUnit: token
-        rates:
-          - match: { dimension: model, value: claude-sonnet-4-6 }
-            flat: "0.00000375"
-          - flat: "0.00000375"
-
     - name: assistant.miloapis.com/conversation/messages
-      pricing:
-        chargeType: Usage
-        currency: USD
-        pricingUnit: message
-        rates:
-          - flat: "0.000001"
 
   charges:
+    - name: assistant.miloapis.com/conversation/input-tokens
+      chargeType: Usage
+      currency: USD
+      metricRef: assistant.miloapis.com/conversation/input-tokens
+      pricingUnit: token
+      rates:
+        - match: { dimension: model, value: claude-sonnet-4-6 }
+          flat: "0.000003"
+        - match: { dimension: model, value: claude-opus-4-8 }
+          flat: "0.000015"
+        - flat: "0.000003"
+
+    - name: assistant.miloapis.com/conversation/output-tokens
+      chargeType: Usage
+      currency: USD
+      metricRef: assistant.miloapis.com/conversation/output-tokens
+      pricingUnit: token
+      rates:
+        - match: { dimension: model, value: claude-sonnet-4-6 }
+          flat: "0.000015"
+        - match: { dimension: model, value: claude-opus-4-8 }
+          flat: "0.000075"
+        - flat: "0.000015"
+
+    - name: assistant.miloapis.com/conversation/cache-read-tokens
+      chargeType: Usage
+      currency: USD
+      metricRef: assistant.miloapis.com/conversation/cache-read-tokens
+      pricingUnit: token
+      rates:
+        - match: { dimension: model, value: claude-sonnet-4-6 }
+          flat: "0.0000003"
+        - flat: "0.0000003"
+
+    - name: assistant.miloapis.com/conversation/cache-write-tokens
+      chargeType: Usage
+      currency: USD
+      metricRef: assistant.miloapis.com/conversation/cache-write-tokens
+      pricingUnit: token
+      rates:
+        - match: { dimension: model, value: claude-sonnet-4-6 }
+          flat: "0.00000375"
+        - flat: "0.00000375"
+
+    - name: assistant.miloapis.com/conversation/messages
+      chargeType: Usage
+      currency: USD
+      metricRef: assistant.miloapis.com/conversation/messages
+      pricingUnit: message
+      rates:
+        - flat: "0.000001"
+
     - name: assistant.miloapis.com/access-fee
       chargeType: Recurring
       displayName: AI Assistant Access Fee
@@ -502,16 +525,15 @@ spec:
       interval: monthly
 ```
 
-#### datum-cloud/service-catalog — ServicePricing fan-out
+#### datum-cloud/service-catalog: ServicePricing fan-out
 
-`PricingFanOut` emits five `ServicePricing` resources (one per priced metric,
-`chargeType: Usage`). `ChargeFanOut` emits one additional `ServicePricing` for
-the monthly access fee (`chargeType: Recurring`).
+`ChargeFanOut` emits six `ServicePricing` resources: five Usage charges and
+one Recurring access fee.
 
-#### datum-cloud/service-catalog — Offer
+#### datum-cloud/service-catalog: Offer
 
 The Offer is authored in draft form, referencing `ServicePricing` resources by
-name. Rates are not duplicated — the controller snapshots them at publish.
+name. Rates are not duplicated: the controller snapshots them at publish.
 
 ```yaml
 apiVersion: billing.miloapis.com/v1alpha1
@@ -570,7 +592,7 @@ and maps 1:1 to Amberflo line items:
 Metric names are illustrative (`networking.datumapis.com/...`); a service owner
 may place equivalent meters under another API group. Classification into
 `destination_region_group` and `path` is a **metering / label-enrichment**
-contract — pricing never matches on raw source+destination region pairs.
+contract: pricing never matches on raw source+destination region pairs.
 Multi-dimension `match` stays deferred; compound keys are emitted as a single
 derived dimension. Snapshot storage data-transfer is not metered for transfer
 charges.
@@ -579,7 +601,7 @@ charges.
 bands to `200` / `10240` (10 × 1024) / `153600` (150 × 1024) GiB. Confirm the
 exact unit boundary with product before production rates ship.
 
-#### datum-cloud/service-catalog — ServiceConfiguration (Data Transfer)
+#### datum-cloud/service-catalog: ServiceConfiguration (Data Transfer)
 
 ```yaml
 spec:
@@ -587,72 +609,77 @@ spec:
   # owning service opts into BillingEntitlement separately.
   metrics:
     - name: networking.datumapis.com/transfer/egress-internet
-      pricing:
-        chargeType: Usage
-        currency: USD
-        pricingUnit: gib
-        rates:
-          - match: { dimension: destination_region_group, value: us-eu }
-            tiered:
-              - upTo: "200"
-                rate: "0"
-              - upTo: "10240"
-                rate: "0.05"
-              - upTo: "153600"
-                rate: "0.03"
-              - rate: "0.01"
-          - match: { dimension: destination_region_group, value: rest-of-world }
-            tiered:
-              - upTo: "200"
-                rate: "0"
-              - upTo: "10240"
-                rate: "0.15"
-              - upTo: "153600"
-                rate: "0.12"
-              - rate: "0.09"
-          # Default: treat unknown geo as Rest of World
-          - tiered:
-              - upTo: "200"
-                rate: "0"
-              - upTo: "10240"
-                rate: "0.15"
-              - upTo: "153600"
-                rate: "0.12"
-              - rate: "0.09"
+    - name: networking.datumapis.com/transfer/internal
+    - name: networking.datumapis.com/transfer/ingress
+
+  charges:
+    - name: networking.datumapis.com/transfer/egress-internet
+      chargeType: Usage
+      currency: USD
+      metricRef: networking.datumapis.com/transfer/egress-internet
+      pricingUnit: gib
+      rates:
+        - match: { dimension: destination_region_group, value: us-eu }
+          tiered:
+            - upTo: "200"
+              rate: "0"
+            - upTo: "10240"
+              rate: "0.05"
+            - upTo: "153600"
+              rate: "0.03"
+            - rate: "0.01"
+        - match: { dimension: destination_region_group, value: rest-of-world }
+          tiered:
+            - upTo: "200"
+              rate: "0"
+            - upTo: "10240"
+              rate: "0.15"
+            - upTo: "153600"
+              rate: "0.12"
+            - rate: "0.09"
+        # Default: treat unknown geo as Rest of World
+        - tiered:
+            - upTo: "200"
+              rate: "0"
+            - upTo: "10240"
+              rate: "0.15"
+            - upTo: "153600"
+              rate: "0.12"
+            - rate: "0.09"
 
     - name: networking.datumapis.com/transfer/internal
-      pricing:
-        chargeType: Usage
-        currency: USD
-        pricingUnit: gib
-        rates:
-          - match: { dimension: path, value: same-region }
-            flat: "0"
-          - match: { dimension: path, value: cross-region-na-eu }
-            flat: "0.01"
-          - match: { dimension: path, value: us-to-row }
-            flat: "0.05"
-          # Default: most expensive internal path
-          - flat: "0.05"
+      chargeType: Usage
+      currency: USD
+      metricRef: networking.datumapis.com/transfer/internal
+      pricingUnit: gib
+      rates:
+        - match: { dimension: path, value: same-region }
+          flat: "0"
+        - match: { dimension: path, value: cross-region-na-eu }
+          flat: "0.01"
+        - match: { dimension: path, value: us-to-row }
+          flat: "0.05"
+        # Default: most expensive internal path
+        - flat: "0.05"
 
     - name: networking.datumapis.com/transfer/ingress
-      pricing:
-        chargeType: Usage
-        currency: USD
-        pricingUnit: gib
-        rates:
-          - flat: "0"
+      chargeType: Usage
+      currency: USD
+      metricRef: networking.datumapis.com/transfer/ingress
+      pricingUnit: gib
+      rates:
+        - flat: "0"
 ```
 
-#### datum-cloud/service-catalog — ServicePricing fan-out
+#### datum-cloud/service-catalog: ServicePricing fan-out
 
-`PricingFanOut` emits three `ServicePricing` resources:
+`ChargeFanOut` emits three `ServicePricing` resources:
 
 - `networking-datumapis-com--transfer-egress-internet`
 - `networking-datumapis-com--transfer-internal`
 - `networking-datumapis-com--transfer-ingress`
 
-#### datum-cloud/service-catalog — Offer
+#### datum-cloud/service-catalog: Offer
 
 A standalone Offer bundles the three transfer pricings (also referenced from
 Default PAYG below):
@@ -707,7 +734,7 @@ billing-account scope for tier breaks):
 This shows how a single default Offer bundles Compute, AI Assistant, and Data
 Transfer into the Offer every new billing account lands on automatically.
 
-#### datum-cloud/service-catalog — Offer
+#### datum-cloud/service-catalog: Offer
 
 The `default-pay-as-you-go-v1` Offer references `ServicePricing` resources
 from Compute, AI Assistant, and Data Transfer. Compute uses the consumption
@@ -743,7 +770,7 @@ spec:
     - name: networking-datumapis-com--transfer-ingress
 ```
 
-#### datum-cloud/service-catalog — ServiceConfiguration.spec.defaultOffer
+#### datum-cloud/service-catalog: ServiceConfiguration.spec.defaultOffer
 
 The `billing-miloapis-com` `ServiceConfiguration` is updated to point to this
 Offer so the `billing-entitlement-defaults` controller knows which Offer to
@@ -770,12 +797,12 @@ in `us-central1` for one hour and sending 1,000 AI Assistant messages using
 | `conversation/output-tokens` (sonnet) | 1,000,000 tokens | $0.000015 | $15.00 |
 | `conversation/messages` | 1,000 messages | $0.000001 | $0.001 |
 | AI Assistant Access Fee (monthly) | 1 | $10.00 | $10.00 |
-| Data Transfer (see worked example) | — | — | $16.50 |
+| Data Transfer (see worked example) |-|-| $16.50 |
 | **Total** | | | **~$43.40/mo** |
 
 ### How Offers relate to charge types
 
-Every `Offer` carries a required `spec.chargeTypes` field — a set of the charge
+Every `Offer` carries a required `spec.chargeTypes` field: a set of the charge
 types the Offer covers:
 
 | Charge type | What it means | Example |
@@ -799,11 +826,11 @@ Quota gating on billing is **opt-in** per service via
 | `BillingEntitlement` | Quota granted only when the service's `ServicePricing` appears in the account's active Offer. The service is inaccessible if absent from the Offer. |
 
 Today, quota grants are issued unconditionally by `GrantCreationPolicy` +
-`GrantCreationController` — this is the `OrganizationDefault` path and
+`GrantCreationController`: this is the `OrganizationDefault` path and
 requires no changes. The `BillingEntitlement` path introduces one new
 controller:
 
-- **`ServiceEntitlementReconciler.ensureQuotaGrants`** — watches
+- **`ServiceEntitlementReconciler.ensureQuotaGrants`**: watches
   `BillingEntitlement` create and `offerRef` changes; for services that have
   opted in (`quotaGating: BillingEntitlement`), issues quota grants for those
   present in the active Offer and revokes grants for those no longer present.
@@ -819,7 +846,7 @@ The activation sequence for an opted-in service is:
 For example, if Compute has opted in (`quotaGating: BillingEntitlement`) and
 DNS has not (`OrganizationDefault`): a billing account on an Offer that
 includes DNS and Compute `ServicePricing`s has normal quota for both. Remove
-Compute from the Offer and Compute quota is revoked — the account can no longer
+Compute from the Offer and Compute quota is revoked: the account can no longer
 create Compute resources. DNS quota is unaffected because it is not
 billing-gated.
 
@@ -840,12 +867,12 @@ grants and the Amberflo Customer-Plan assignment in a single reconcile.
   mis-price every new account. _Mitigation:_ it is a single GitOps-managed field
   per environment, reviewed like any other config change, and idempotent on
   re-apply.
-- **Billed but not gated.** A service owner adds pricing to their
+- **Billed but not gated.** A service owner adds Usage charges to their
   `ServiceConfiguration` but omits `quotaGating: BillingEntitlement`, so
   accounts are billed for usage but never blocked even without an active Offer.
-  _Mitigation:_ the `PricingFanOut` controller emits a warning event when a
-  `ServicePricing` is created for a service whose `quotaGating` is
-  `OrganizationDefault`, prompting the owner to confirm the intent is correct.
+  _Mitigation:_ `ChargeFanOut` logs a warning when Usage `ServicePricing`
+  objects are created for a service whose `quotaGating` is
+  `OrganizationDefault`, so the owner can confirm that intent.
 
 ## Design Details
 
@@ -853,14 +880,12 @@ grants and the Amberflo Customer-Plan assignment in a single reconcile.
 
 ```text
 ServiceConfiguration            ServicePricing            Offer
-  .spec.metrics[].pricing  ─►  (one per priced  ◄──refs── .spec.servicePricings[]
-   (authored by service           metric)                  (snapshot at Publish)
-    owner; per-dimension      (fan-out emitted by                ▲
-    rates supported)           service-catalog,                  │
-                              analogous to                       │
-                              MeterDefinition)                   │
-                                    │                            │
-                                    ▼                            ▼
+  .spec.charges[]         ─►  (one per charge)  ◄──refs── .spec.servicePricings[]
+   (Usage / OneTime /          (fan-out emitted by         (snapshot at Publish)
+    Recurring; Usage            service-catalog)                  ▲
+    sets metricRef)                                               │
+                                    │                             │
+                                    ▼                             ▼
                             amberflo-provider:           amberflo-provider:
                             Product Plan Items           Product Plan
                             (with dimension              (groups items by Offer)
@@ -879,21 +904,22 @@ ServiceConfiguration            ServicePricing            Offer
 
 ### Charge type schema
 
-The three charge types use different fields in `ServiceConfiguration` because
-they represent fundamentally different things:
+All three charge types are declared on `spec.charges[]`. They share `name`,
+`chargeType`, `displayName`, and `currency`, then diverge by type:
 
-- **`Usage`** is declared on `spec.metrics[]` via a `pricing` block. The rate
-  is multiplied by the meter reading, optionally filtered by a dimension.
-- **`OneTime`** and **`Recurring`** are declared on a new `spec.charges[]`
-  list. They carry a fixed `amount` rather than a rate, and no meter is
-  required. `OneTime` charges fire once at a defined `trigger`; `Recurring`
-  charges fire every billing `interval`.
+- **`Usage`** requires `metricRef` (must match a `spec.metrics[].name`),
+  `pricingUnit`, and `rates`. The rate is multiplied by the meter reading,
+  optionally filtered by a dimension. Amount, trigger, and interval must not
+  be set.
+- **`OneTime`** requires `amount` and `trigger`. It fires once at that
+  trigger. Meter fields must not be set.
+- **`Recurring`** requires `amount` and `interval`. It fires every billing
+  interval. Meter fields must not be set.
 
-Both fans — `PricingFanOut` for meter-based Usage and `ChargeFanOut` for
-fixed charges — emit `ServicePricing` resources distinguished by a `chargeType`
-field. Offers snapshot both kinds; the amberflo-provider maps each to the
-corresponding Amberflo concept (Product Plan Item for Usage, setup fee for
-OneTime, fixed recurring item for Recurring).
+`ChargeFanOut` emits one `ServicePricing` per charge, distinguished by
+`chargeType`. Offers snapshot every kind; amberflo-provider maps each to the
+matching Amberflo concept (Product Plan Item for Usage, setup fee for OneTime,
+fixed recurring item for Recurring).
 
 ```yaml
 spec:
@@ -902,16 +928,19 @@ spec:
 
   metrics:
     - name: compute.datumapis.com/instance/cpu-allocated
-      pricing:
-        chargeType: Usage
-        currency: USD
-        pricingUnit: vcpu
-        rates:
-          - match: { dimension: tier, value: standard }
-            flat: "0.025"
-          - flat: "0.030"
+      # ... kind, unit, dimensions ...
 
   charges:
+    - name: compute.datumapis.com/instance/cpu-allocated
+      chargeType: Usage
+      currency: USD
+      metricRef: compute.datumapis.com/instance/cpu-allocated
+      pricingUnit: vcpu
+      rates:
+        - match: { dimension: tier, value: standard }
+          flat: "0.025"
+        - flat: "0.030"
+
     - name: compute.datumapis.com/instance/setup-fee
       chargeType: OneTime
       displayName: Compute Setup Fee
@@ -927,101 +956,104 @@ spec:
       interval: monthly
 ```
 
-### Per-meter pricing on ServiceConfiguration
+### Charges on ServiceConfiguration
 
-`spec.metrics[]` entries carry a `pricing` block for Usage charges: currency,
-`pricingUnit`, and rates (flat or tiered). Per-dimension `match` entries let a
-rate vary by a label declared on the service's `monitoredResourceType` (one
-dimension per match entry; multi-dimension matches deferred). Services that
-need a compound key (for example source + destination region) **emit a single
-derived dimension** at metering time — see
+`spec.charges[]` is the only place commercial terms are authored. Usage
+charges set `metricRef`, `pricingUnit`, and rates (flat or tiered).
+Per-dimension `match` entries let a rate vary by a label declared on the
+service's `monitoredResourceType` (one dimension per match entry;
+multi-dimension matches deferred). Services that need a compound key (for
+example source and destination region) emit a single derived dimension at
+metering time; see
 [Real-world example: Data Transfer](#real-world-example-data-transfer).
 `pricingUnit` is a human-readable label for the billing line item; it does not
 need to be the literal UCUM unit string of the meter.
 
-Each `rates[]` entry carries **either** `flat` **or** `tiered`, never both:
+Each `rates[]` entry carries either `flat` or `tiered`, never both:
 
-- **`flat`** — a single decimal USD string multiplied by metered usage.
-- **`tiered`** — ordered graduated volume bands. Each band has a `rate` and an
-  exclusive upper bound `upTo` in `pricingUnit` units. The last band **omits**
+- **`flat`** is a single decimal USD string multiplied by metered usage.
+- **`tiered`** is ordered graduated volume bands. Each band has a `rate` and
+  an exclusive upper bound `upTo` in `pricingUnit` units. The last band omits
   `upTo` (open-ended). Zero (`"0"`) is a valid rate for free allowances.
-  Aggregation for tier breaks is **monthly, at billing-account scope**.
+  Aggregation for tier breaks is monthly, at billing-account scope.
   Volume/retroactive (reprice-all) modes are not expressed in v1.
 
 ```yaml
 spec:
   metrics:
     - name: compute.datumapis.com/instance/cpu-allocated
-      pricing:
-        currency: USD
-        pricingUnit: vcpu
-        rates:
-          - match: { dimension: tier, value: standard }
-            flat: "0.025"
-          - flat: "0.030"
     - name: compute.datumapis.com/instance/cpu-seconds
-      pricing:
-        currency: USD
-        pricingUnit: cpu-second
-        rates:
-          - match: { dimension: region, value: us-central1 }
-            flat: "0.0000125"
-          - flat: "0.0000130"
     - name: networking.datumapis.com/transfer/egress-internet
-      pricing:
-        currency: USD
-        pricingUnit: gib
-        rates:
-          - match: { dimension: destination_region_group, value: us-eu }
-            tiered:
-              - upTo: "200"
-                rate: "0"
-              - upTo: "10240"
-                rate: "0.05"
-              - upTo: "153600"
-                rate: "0.03"
-              - rate: "0.01"
-          - tiered:
-              - upTo: "200"
-                rate: "0"
-              - upTo: "10240"
-                rate: "0.15"
-              - upTo: "153600"
-                rate: "0.12"
-              - rate: "0.09"
+
+  charges:
+    - name: compute.datumapis.com/instance/cpu-allocated
+      chargeType: Usage
+      currency: USD
+      metricRef: compute.datumapis.com/instance/cpu-allocated
+      pricingUnit: vcpu
+      rates:
+        - match: { dimension: tier, value: standard }
+          flat: "0.025"
+        - flat: "0.030"
+    - name: compute.datumapis.com/instance/cpu-seconds
+      chargeType: Usage
+      currency: USD
+      metricRef: compute.datumapis.com/instance/cpu-seconds
+      pricingUnit: cpu-second
+      rates:
+        - match: { dimension: region, value: us-central1 }
+          flat: "0.0000125"
+        - flat: "0.0000130"
+    - name: networking.datumapis.com/transfer/egress-internet
+      chargeType: Usage
+      currency: USD
+      metricRef: networking.datumapis.com/transfer/egress-internet
+      pricingUnit: gib
+      rates:
+        - match: { dimension: destination_region_group, value: us-eu }
+          tiered:
+            - upTo: "200"
+              rate: "0"
+            - upTo: "10240"
+              rate: "0.05"
+            - upTo: "153600"
+              rate: "0.03"
+            - rate: "0.01"
+        - tiered:
+            - upTo: "200"
+              rate: "0"
+            - upTo: "10240"
+              rate: "0.15"
+            - upTo: "153600"
+              rate: "0.12"
+            - rate: "0.09"
 ```
 
 ### ServicePricing fan-out
 
-service-catalog gains two new fan-out controllers alongside the existing
-`QuotaFanOut`:
-
-- **`PricingFanOut`** — watches `spec.metrics[].pricing` and emits one
-  `ServicePricing` per priced metric with `chargeType: Usage`.
-- **`ChargeFanOut`** — watches `spec.charges[]` and emits one `ServicePricing`
-  per fixed charge with `chargeType: OneTime` or `chargeType: Recurring`.
-
-Both emit into the `milo-system` namespace, follow the `MeterDefinition`
-fan-out pattern, and must not be authored by hand. Providers watch the single
-`ServicePricing` shape — distinguished by `chargeType` — rather than parsing
-`ServiceConfiguration`.
+service-catalog gains a `ChargeFanOut` controller alongside the existing
+`QuotaFanOut`. It watches `spec.charges[]` and emits one `ServicePricing` per
+charge (`Usage`, `OneTime`, or `Recurring`) into `milo-system`. The fan-out
+follows the `MeterDefinition` pattern and must not be authored by hand.
+Providers watch the single `ServicePricing` shape, distinguished by
+`chargeType`, rather than parsing `ServiceConfiguration`.
 
 ### Offer
 
 `Offer` bundles service pricings into a named tier with `launchStage`
 semantics. An Offer has two distinct states:
 
-**Draft** — the platform owner references `ServicePricing` resources by name
+**Draft**: the platform owner references `ServicePricing` resources by name
 via `spec.servicePricingRefs[]`. No rates are stored inline; the Offer is
 mutable and not yet usable by accounts.
 
-**Published (GA)** — the platform owner advances `launchStage` to `GA`. The
+**Published (GA)**: the platform owner advances `launchStage` to `GA`. The
 controller reads each referenced `ServicePricing`, copies the current rates
 into `spec.servicePricings[]` as an immutable snapshot, and the Offer becomes
-live. Rates are **not** authored twice — the snapshot is generated
+live. Rates are **not** authored twice: the snapshot is generated
 automatically at publish time.
 
-An Offer need not reference all `ServicePricing`s for a service — the subset
+An Offer need not reference all `ServicePricing`s for a service: the subset
 chosen determines which services are accessible and billed for accounts on
 that Offer. `spec.chargeTypes` must enumerate every charge type present in the
 referenced pricings.
@@ -1086,34 +1118,37 @@ namespace. Re-apply on policy reconcile is idempotent.
 
 `Offer` carries a `kubernetes.io/display-name` annotation (matching the
 convention used on milo `Role`s) so the human-readable name can change without
-bumping the Offer version. `ServicePricing` inherits its `MeterDefinition`'s
-display name; `BillingEntitlement` defers to its Offer's.
+bumping the Offer version. Usage `ServicePricing` can fall back to the
+referenced metric's display name when the charge omits `displayName`. Fixed
+charges use the charge `displayName`. `BillingEntitlement` defers to its
+Offer's display name.
 
 ### Boundary with credits
 
 Invoice-run sequence: Amberflo computes the subtotal using Offer rates → the
 credit ledger ([#747][747]) draws down → the remainder hits Stripe. The
 invoice-run controller that orchestrates this step is out of scope here and
-will be designed in a follow-on enhancement once phases 1–4 are green in
+will be designed in a follow-on enhancement once phases 1-4 are green in
 staging. #747 designs against the Amberflo subtotal as its input.
 
 ## Acceptance Criteria
 
-- The `ServiceConfiguration` for `compute.datumapis.com` carries `pricing`
-  blocks on all five billing metrics: `instance/cpu-allocated`,
-  `instance/memory-allocated`, `instance/cpu-seconds`, `instance/memory-seconds`,
-  and `instance/uptime-seconds`.
-- `ServicePricing` resources are emitted by the fan-out controller into
-  `milo-system`, one per priced metric.
+- The `ServiceConfiguration` for `compute.datumapis.com` carries Usage
+  charges (via `spec.charges[]`) for all five billing metrics:
+  `instance/cpu-allocated`, `instance/memory-allocated`, `instance/cpu-seconds`,
+  `instance/memory-seconds`, and `instance/uptime-seconds`.
+- `ServicePricing` resources are emitted by `ChargeFanOut` into `milo-system`,
+  one per charge.
 - Two published Offers exist: `compute-allocated-v1` (bundles
   `cpu-allocated` + `memory-allocated`) and `compute-consumed-v1` (bundles
   `cpu-seconds` + `memory-seconds` + `uptime-seconds`). Dimension filters are
   honored in the Amberflo Product Plan Items for each.
 - Every new billing account in staging lands with a `BillingEntitlement`
   referencing the default Offer automatically, within a single reconcile.
-- Quota grants are issued only for services present in the active Offer;
-  switching an account to an Offer that excludes Compute revokes the Compute
-  quota grant and blocks Compute resource creation.
+- Quota grants are issued only for services present in the active Offer when
+  the service opts into `quotaGating: BillingEntitlement`; switching an account
+  to an Offer that excludes Compute revokes the Compute quota grant and blocks
+  Compute resource creation.
 - Amberflo console shows the Product Plan and Items for both Offers, plus a
   Customer-Plan assignment per account reflecting the active Offer.
 - An Amberflo invoice run for an organization with non-zero compute usage
@@ -1124,7 +1159,7 @@ staging. #747 designs against the Amberflo subtotal as its input.
 - Staff-portal can switch a billing account's active `BillingEntitlement` to a
   different Offer with an audit-log entry; the Amberflo Customer-Plan assignment
   updates within one reconcile.
-- The `ServiceConfiguration` pricing schema accepts graduated `tiered` rate
+- The `ServiceConfiguration` charge schema accepts graduated `tiered` rate
   entries (`upTo` / `rate`, mutually exclusive with `flat` on the same entry).
 - The Data Transfer rates in
   [Real-world example: Data Transfer](#real-world-example-data-transfer)
@@ -1134,8 +1169,8 @@ staging. #747 designs against the Amberflo subtotal as its input.
 ## Suggested Implementation Phases
 
 1. **Resources + service-catalog fan-out.** Land `ServicePricing`, `Offer`, and
-   `BillingEntitlement` types, `PricingFanOut`, `ChargeFanOut`, and the
-   default-entitlement controller. No Amberflo writes yet.
+   `BillingEntitlement` types, `ChargeFanOut`, and the default-entitlement
+   controller. No Amberflo writes yet.
 2. **Quota linkage.** Build `OrganizationDefaultsReconciler` and
    `ServiceEntitlementReconciler.ensureQuotaGrants` to gate quota grants on
    the services present in the active Offer. Verify that an account whose Offer
@@ -1146,7 +1181,7 @@ staging. #747 designs against the Amberflo subtotal as its input.
    publish / display-name edit) plus the billing-account Offer-switcher with
    audit. Read-only "active Offer" panel in cloud-portal.
 5. **Hand-off to invoice-run controller.** Out of scope here; a separate issue
-   is filed once phases 1–4 are green in staging.
+   is filed once phases 1-4 are green in staging.
 
 ## Implementation History
 
@@ -1156,12 +1191,16 @@ staging. #747 designs against the Amberflo subtotal as its input.
 - 2026-07-22: Document graduated `tiered` rates and a Data Transfer real-world
   example (internet egress by geo, internal path rates, free ingress); wire
   Data Transfer into the Default PAYG Offer.
+- 2026-08-04: Unify Usage onto `spec.charges[]` with `metricRef`. Drop
+  `metrics[].pricing` and the separate `PricingFanOut`. Metrics stay
+  telemetry/quota-only; one `ChargeFanOut` covers Usage, OneTime, and
+  Recurring (service-catalog PR #61).
 
 ## Drawbacks
 
 Introducing a second "Entitlement" kind alongside `ServiceEntitlement` adds
-conceptual surface area. The alternative — renaming or overloading the existing
-kind — was judged more invasive and riskier than adding a distinct, clearly
+conceptual surface area. The alternative (renaming or overloading the existing
+kind) was judged more invasive and riskier than adding a distinct, clearly
 scoped resource.
 
 ## Alternatives
@@ -1170,9 +1209,15 @@ scoped resource.
   avoid version proliferation but would silently re-price live customers and
   make historical re-rating possible. Rejected in favor of snapshot + immutable
   publish.
-- **Pricing as a standalone catalog separate from meters.** Authoring prices far
-  from the meters they rate would let pricing and metering drift. Co-locating
-  `pricing` on `spec.metrics[]` and fanning out keeps them in lockstep.
+- **Pricing nested on `spec.metrics[]`.** An earlier draft put Usage rates on
+  each metric. That forces every priced meter to look "commercial" and leaves
+  no shared place for OneTime/Recurring. Rejected in favor of `spec.charges[]`
+  with `metricRef` for Usage, so unbilled meters and non-usage charges share
+  one authoring surface.
+- **Pricing as a standalone catalog separate from ServiceConfiguration.**
+  Authoring prices far from the meters they rate would let pricing and metering
+  drift without a clear ownership path. Rejected: keep charges on the same SC
+  as the meters, with Usage charges pointing at meters by name.
 - **Overloading `ServiceEntitlement` for billing.** Reusing the per-project
   quota driver for account-level pricing would couple two different scopes and
   require invasive renames. Rejected (see Drawbacks).
@@ -1193,26 +1238,26 @@ source implementations).
 
 | Platform | Meter definition | Per-meter pricing | Plan / offer | Account assignment | Quota gate? |
 |---|---|---|---|---|---|
-| **GCP** | `ServiceConfiguration` → `MonitoredResource` + DELTA metrics | `services.skus.list` → `pricingExpression` with `tieredRates` | SKU category (resourceFamily/resourceGroup) + account-level custom pricing API | Committed Use Discounts, negotiated contracts | No — access is separate from billing |
+| **GCP** | `ServiceConfiguration` → `MonitoredResource` + DELTA metrics | `services.skus.list` → `pricingExpression` with `tieredRates` | SKU category (resourceFamily/resourceGroup) + account-level custom pricing API | Committed Use Discounts, negotiated contracts | No: access is separate from billing |
 | **AWS** | `serviceCode` + `attributes` block in Price List JSON | `terms.OnDemand` / `terms.Reserved` blocks per SKU | "Offer" in AWS parlance = the `terms` section; one product → many pricing terms | Savings Plans; Marketplace contract | Marketplace only: `GetEntitlements` call required before serving |
-| **Azure Marketplace** | Dimension declared per Plan with `includedQuantity` | Flat-rate or per-dimension overage via Metering Service API | `Offer` (top-level) → `Plan` (variant with independent pricing) | `Subscription` object via SaaS Fulfillment API (`Subscribed` state) | Yes — `RegisterUsage` must succeed at container start |
+| **Azure Marketplace** | Dimension declared per Plan with `includedQuantity` | Flat-rate or per-dimension overage via Metering Service API | `Offer` (top-level) → `Plan` (variant with independent pricing) | `Subscription` object via SaaS Fulfillment API (`Subscribed` state) | Yes: `RegisterUsage` must succeed at container start |
 | **Amberflo** | `Meter` (CloudEvents aggregation) | `ProductPlan` → price phases per meter | `ProductPlan` bundles meters + cadence + feature limits | `CustomerPlan` = ProductPlan instance with effective date + overrides | Optional per-plan feature entitlements |
-| **Stripe** | `Meter` (event aggregation) | `Price` object (flat, per-seat, metered, tiered) attached to `Product` | `Product` + set of `Price`s; `PricingTable` groups products | `Subscription` → activates `ActiveEntitlement` per mapped feature | No — Stripe documents entitlements, does not enforce them |
-| **OpenMeter** | `Meter` (CloudEvents) | `RateCard` (tiered, volume, flat, usage) per `Feature` | `Plan` bundles RateCards with a billing cadence | `Subscription` + `Entitlement` (real-time quota balance) | Yes — `Entitlement` tracks balance; grace period configurable |
+| **Stripe** | `Meter` (event aggregation) | `Price` object (flat, per-seat, metered, tiered) attached to `Product` | `Product` + set of `Price`s; `PricingTable` groups products | `Subscription` → activates `ActiveEntitlement` per mapped feature | No: Stripe documents entitlements, does not enforce them |
+| **OpenMeter** | `Meter` (CloudEvents) | `RateCard` (tiered, volume, flat, usage) per `Feature` | `Plan` bundles RateCards with a billing cadence | `Subscription` + `Entitlement` (real-time quota balance) | Yes: `Entitlement` tracks balance; grace period configurable |
 | **Zuora** | (external metering) | `ProductRatePlanCharge` (one-time / recurring / usage) | `ProductRatePlan` bundles charges; `Product` is the catalog entry | `Subscription` → `Invoice` | No |
 
 ### Key findings
 
-**"Service config owns the meter, billing owns pricing" is production-proven at
-Google scale.**  
-GCP's Service Infrastructure uses exactly this split: a `ServiceConfiguration`
-declares `MonitoredResource` types and DELTA metrics; Cloud Billing then
-attaches SKU pricing to those meters. Services call the Service Control API to
-report usage; the rating engine prices it. This directly validates the
-`ServiceConfiguration → ServicePricing` chain in this enhancement.
+**"Service config owns the meter; charges own the commercial terms"** matches
+how GCP separates meter declaration from SKU pricing. GCP's Service
+Infrastructure declares `MonitoredResource` types and DELTA metrics on a
+service config; Cloud Billing attaches SKU pricing to those meters. Services
+call the Service Control API to report usage; the rating engine prices it.
+This enhancement keeps meters on `ServiceConfiguration` and attaches prices
+as charges that fan out to `ServicePricing`, then into Offers.
 ([source](https://cloud.google.com/service-infrastructure/docs/reporting-billing-metrics))
 
-**Offer → BillingEntitlement is a well-established pattern.**  
+**Offer → BillingEntitlement is a well-established pattern.**
 Amberflo's `ProductPlan → CustomerPlan`, Azure's `Offer → Plan → Subscription`,
 AWS Marketplace's entitlement contract, and Stripe's `Product → ActiveEntitlement`
 all follow the same shape: a reusable pricing template (the Offer) plus a
@@ -1220,12 +1265,12 @@ per-account assignment record (the BillingEntitlement). The assignment record is
 what activates metered invoicing and optional access gating.
 
 **`chargeTypes` (Usage / OneTime / Recurring) maps directly to Zuora's
-`ProductRatePlanCharge` and Azure's dimension model.**  
+`ProductRatePlanCharge` and Azure's dimension model.**
 Every major billing system distinguishes these three charge types. Zuora's
 `ProductRatePlanCharge.type` is the canonical reference implementation.
 
 **Quota gating tied to billing is opt-in, not universal.**  
-GCP, Stripe, Zuora, and Lago do not enforce access at the billing layer — they
+GCP, Stripe, Zuora, and Lago do not enforce access at the billing layer: they
 document entitlements and leave enforcement to the application. Only AWS
 Marketplace (container products) and Azure Marketplace mandate an entitlement
 check at startup. OpenMeter and Schematic explicitly provide enforcement as a
@@ -1237,9 +1282,9 @@ ecosystem works.
 The [ControlPlane flux-operator][flux-operator] ships an `EntitlementReconciler`
 that watches Namespaces, calls `RegisterUsage()` to obtain an entitlement token,
 stores it in a Secret, and requeues every 30 minutes to re-verify. On failure it
-purges the Secret, triggering downstream feature gating. The same pattern —
+purges the Secret, triggering downstream feature gating. The same pattern , 
 entitlement as a Kubernetes-reconciled resource with an external billing authority
-— is what this design proposes for `BillingEntitlement`.
+,  is what this design proposes for `BillingEntitlement`.
 
 **GCP Marketplace for K8s chose Secrets + ConfigMaps over CRDs.**  
 The [GCP Marketplace K8s billing integration][gcp-marketplace-k8s] injects a
