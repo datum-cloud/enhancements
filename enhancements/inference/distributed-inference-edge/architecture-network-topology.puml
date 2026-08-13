@@ -1,0 +1,67 @@
+@startuml architecture-network-topology
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include ../../datum-theme.puml
+
+title Distributed Inference Edge — Network Topology\nAnycast entry → Edge PoPs → SRv6 backbone → Global control plane
+
+Person(client_na, "Client (North America)", "AI application;\nconnects to anycast VIP")
+Person(client_eu, "Client (Europe)", "AI application;\nmay roam across networks")
+
+System_Ext(anycast, "BGP Anycast / DNS", "Single inference VIP advertised\nfrom all GPU-capable PoPs.\nRoutes each new session to\nclosest PoP by RTT.")
+
+System_Ext(galactic, "Galactic VPC SRv6 Backbone", "IPv6 full mesh, MTU ≥ 9080.\nTwo SRv6 function types:\n• inference.steer — roaming client redirect (no BW reservation)\n• inference.cache-xfer — KV shard transfer (bandwidth-reserved)")
+
+System_Boundary(global_layer, "Global Layer  ·  Datum Production Cluster") {
+    Container(gcp, "Global Control Plane", "Go service", "Anycast weight controller;\nSRv6 policy engine;\nprefix cache global index.\nNot in the request path.")
+    ContainerDb(session_reg, "Session Registry", "CockroachDB (Phase 3)", "session_id → owning PoP.\nConsensus-replicated.\nShort-lived entries with TTL GC.")
+    ContainerDb(prefix_idx, "Prefix Cache Index", "embedded store", "SHA-256(prompt prefix) → [PoP, node].\nDrives cross-PoP cache routing.")
+}
+
+System_Boundary(pop_us, "Edge PoP: us-central-1  (ORD)") {
+    Container(envoy_us, "Envoy", "Envoy + xDS", "Within-PoP VRAM-weighted\nload balancer. Consistent\nhash on KV prefix hash.")
+    Container(router_us, "pop-router", "Go / go-control-plane", "xDS control plane.\nDrives Envoy CDS/EDS from\nDCGM metrics. Assigns and\ntracks session IDs.")
+    ContainerDb(redis_us, "Redis Sentinel", "Redis + Sentinel (3-node)", "Local session registry.\nKV cache prefix index.")
+    Container(nodes_us, "Inference Nodes ×3–6", "llama-server + DCGM\n+ kv-cache-store", "GPU nodes (dedicated pool).\nOpenAI-compat /v1 endpoint.\n/health exposes VRAM pressure.")
+}
+
+System_Boundary(pop_eu, "Edge PoP: eu-west-1  (AMS)") {
+    Container(envoy_eu, "Envoy", "Envoy + xDS", "Within-PoP VRAM-weighted\nload balancer.")
+    Container(router_eu, "pop-router", "Go / go-control-plane", "xDS control plane.")
+    ContainerDb(redis_eu, "Redis Sentinel", "Redis + Sentinel (3-node)", "Local session registry;\nKV cache prefix index.")
+    Container(nodes_eu, "Inference Nodes ×3–6", "llama-server + DCGM\n+ kv-cache-store", "GPU nodes (dedicated pool).")
+}
+
+' Client entry
+Rel_D(client_na, anycast, "1. Connect to\ninference VIP", "HTTPS")
+Rel_D(client_eu, anycast, "1. Connect to\ninference VIP", "HTTPS")
+Rel_D(anycast, envoy_us, "2. Route NA client\nto nearest PoP", "HTTPS")
+Rel_D(anycast, envoy_eu, "2. Route EU client\nto nearest PoP", "HTTPS")
+
+' Within PoP US
+Rel_D(envoy_us, nodes_us, "Load balance\n(VRAM-weighted,\nconsistent hash)", "HTTP/1.1")
+Rel_L(router_us, envoy_us, "Push cluster/\nendpoint weights", "gRPC xDS v3")
+Rel_D(router_us, redis_us, "Session registry R/W", "Redis protocol / mTLS")
+Rel_U(nodes_us, redis_us, "KV prefix index updates", "Redis HSET / mTLS")
+
+' Within PoP EU
+Rel_D(envoy_eu, nodes_eu, "Load balance\n(VRAM-weighted)", "HTTP/1.1")
+Rel_R(router_eu, envoy_eu, "Push cluster/\nendpoint weights", "gRPC xDS v3")
+Rel_D(router_eu, redis_eu, "Session registry R/W", "Redis protocol / mTLS")
+Rel_U(nodes_eu, redis_eu, "KV prefix index updates", "Redis HSET / mTLS")
+
+' PoP → Global (async, NOT in request path)
+Rel_U(router_us, gcp, "Report VRAM headroom;\nquery registry on roaming\n(async, not in request path)", "HTTPS / mTLS")
+Rel_U(router_eu, gcp, "Report VRAM headroom;\nquery registry on roaming", "HTTPS / mTLS")
+Rel_R(gcp, session_reg, "R/W", "gRPC")
+Rel_D(gcp, prefix_idx, "R/W", "in-process")
+Rel_L(gcp, anycast, "Adjust anycast weights\nper VRAM headroom", "BGP weight update")
+
+' Cross-PoP SRv6 (Phase 2+)
+Rel_L(galactic, envoy_us, "inference.steer:\nsteer roaming client\nto owning PoP", "SRv6 encap")
+Rel_R(galactic, envoy_eu, "inference.steer:\nsteer roaming client\nto owning PoP", "SRv6 encap")
+Rel_U(nodes_us, galactic, "inference.cache-xfer:\nKV shard (Phase 3,\nmTLS over SRv6)", "SRv6 + BW reservation")
+Rel_U(nodes_eu, galactic, "inference.cache-xfer:\nKV shard (Phase 3)", "SRv6 + BW reservation")
+
+SHOW_LEGEND()
+@enduml
