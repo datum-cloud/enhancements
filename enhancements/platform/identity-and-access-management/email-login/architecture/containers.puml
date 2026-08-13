@@ -1,0 +1,53 @@
+@startuml containers
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title Email Login — Container View
+
+AddElementTag("blocker", $bgColor="#c0392b", $fontColor="#ffffff", $borderColor="#922b21")
+AddRelTag("new", $lineColor="#c0392b", $textColor="#c0392b")
+
+Person(user, "User", "Registering or logging in with email/password")
+
+System_Boundary(iam, "datum-iam-system (Kubernetes namespace)") {
+    Container(zitadel, "Zitadel", "Go / Kubernetes Deployment", "Identity provider. Handles email/password auth, session management, and email verification flows.")
+    Container(zitadel_smtp, "Email Provider", "DefaultEmailProvider (Pulumi resource)", "Zitadel's own SMTP integration. Sends verification links and password-reset emails directly to the user.", $tags="blocker")
+    ContainerDb(zitadel_db, "Zitadel DB", "CockroachDB", "Stores Zitadel users, sessions, and credentials.")
+}
+
+System_Boundary(apz, "auth-provider-zitadel (Kubernetes Deployment)") {
+    Container(actions_server, "Actions Server", "Go / HTTP", "Receives Zitadel execution events (user.human.added, idpintent.succeeded). Creates and updates Milo User resources.")
+    Container(virtual_api, "Virtual API Server", "Go / Kubernetes aggregated API", "Serves identity.milo.io/v1alpha1 UserIdentity resources by proxying to Zitadel user APIs.")
+}
+
+System_Boundary(milo_cp, "Milo Control Plane") {
+    Container(milo_api, "Milo API Server", "Go / Kubernetes aggregated API", "Serves iam.miloapis.com/v1alpha1 User and UserInvitation resources.")
+    Container(waitlist, "UserWaitlistController", "Go / controller-runtime", "Holds new users in Pending state and notifies them via Milo notifications — separate from Zitadel SMTP.")
+    Container(notif, "Notification System", "notification.miloapis.com", "Sends waitlist and platform emails through Milo's own delivery pipeline.")
+}
+
+Container(auth_ui, "auth-ui", "Next.js / Zitadel login v2", "Login UI hosted at auth.datum.net. /register, /verify, /password/reset routes already exist and are gated on loginSettings.allowUsernamePassword.")
+Container(cloud_portal, "cloud-portal", "Next.js / React", "Web portal. AccountSignInMethodSettingsCard wired to UserIdentity API to show linked providers and password management actions.")
+System_Ext(email_dest, "User's inbox", "Final destination for verification and password-reset emails")
+
+Rel(user, auth_ui, "Registers / logs in", "HTTPS")
+Rel(user, cloud_portal, "Manages account", "HTTPS")
+
+Rel(auth_ui, zitadel, "Auth & session", "gRPC (UserService v2)")
+Rel(zitadel, zitadel_db, "Reads/writes", "SQL")
+
+Rel(zitadel, zitadel_smtp, "Sends verification\n& password-reset emails", "SMTP", $tags="new")
+Rel(zitadel_smtp, email_dest, "Delivers email", "SMTP → email", $tags="new")
+
+Rel(zitadel, actions_server, "Fires execution events\n(user.human.added,\nidpintent.succeeded)", "HTTPS / actions hook")
+Rel(actions_server, milo_api, "Creates / updates User resource", "Kubernetes API")
+
+Rel(milo_api, waitlist, "Watches User resources")
+Rel(waitlist, notif, "Emits waitlist notification\n(not Zitadel SMTP)")
+Rel(notif, email_dest, "Delivers waitlist email", "email")
+
+Rel(cloud_portal, virtual_api, "Fetches UserIdentity resources", "HTTPS / Kubernetes API")
+Rel(virtual_api, zitadel, "Proxies user IDP-link state", "gRPC")
+
+@enduml
