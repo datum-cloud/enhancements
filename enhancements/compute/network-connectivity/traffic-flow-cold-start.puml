@@ -1,0 +1,27 @@
+@startuml traffic-flow-cold-start
+!include ../../datum-theme-sequence.puml
+
+participant "OVS Bridge" as ovs
+participant "Wake Daemon" as daemon
+participant "Instance" as instance
+
+note over ovs: Packet arrives for\nsleeping instance.\nNo matching flow rule.
+
+ovs -> daemon: Flow miss\n(packet for sleeping instance)
+
+== Boot Instance (~3-14ms) ==
+
+daemon -> instance: Wake instance\n(runtime wake API)
+
+instance --> daemon: Ready signal
+
+== Release Traffic ==
+
+daemon -> ovs: Install flow rule\nfor instance
+ovs -> instance: Release held packet\nvia TAP
+
+note over ovs, instance: Subsequent packets match\nOVS flow rule, offloaded\nto DPU eSwitch hardware.
+
+note right of daemon: Total cold-start latency:\n3-14ms (boot time only).\nClient never retransmits.
+
+@enduml
