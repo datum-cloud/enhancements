@@ -1,0 +1,38 @@
+@startuml edge-accumulation
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include https://raw.githubusercontent.com/datum-cloud/enhancements/main/enhancements/datum-theme.puml
+
+title Edge Buffering During Hub Outage (no persistent storage)
+
+skinparam ParticipantBackgroundColor $DATUM_BG_CONTAINER
+skinparam ParticipantBorderColor $DATUM_MIDNIGHT_FJORD
+skinparam ParticipantFontColor $DATUM_MIDNIGHT_FJORD
+skinparam SequenceLifeLineBorderColor $DATUM_PINE_FORGE
+skinparam NoteBackgroundColor $DATUM_AURORA_MOSS
+skinparam NoteBorderColor $DATUM_MIDNIGHT_FJORD
+skinparam SequenceDividerBackgroundColor $DATUM_GLACIER_MIST
+skinparam sequenceMessageAlign center
+
+participant "OTel Collector" as col
+participant "Bridge" as bridge
+participant "Leaf (core NATS,\nno JetStream)" as leaf
+participant "NATS hub\n(GCP)" as hub
+
+== Normal operation ==
+col -> bridge : OTLP/HTTP
+bridge -> leaf : publish (telemetry.<signal>.<project_id>)
+leaf -> hub : forward (mTLS)
+
+== Hub unreachable ==
+note over hub : WAN link down\nor hub unavailable
+col -> bridge : OTLP/HTTP (continues)
+bridge -> leaf : publish (continues)
+note over leaf : Bounded in-memory buffer fills.\nNO disk persistence at the edge.
+leaf -x hub : forwarding paused
+note over leaf #ECD0D0 : Buffer full → drop by priority\n(operations dropped before billing).\nPriority scheme TBD.
+
+== Hub reconnects ==
+leaf -> hub : forwards whatever remains in memory
+note over leaf, hub : Anything evicted while the buffer was\nfull is permanently lost
+@enduml
