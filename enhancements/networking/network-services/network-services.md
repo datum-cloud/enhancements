@@ -86,7 +86,7 @@ every consumer solving it separately and re-solving it on every deployment chang
 
 - Give consumers one resource meaning "my application's endpoints, wherever they run."
 - Track membership automatically as instances appear, disappear, and move.
-- Define a well-known label vocabulary that interface-creating services populate, so
+- Define a well-known label vocabulary that claim-creating services populate, so
   selection and address management work without a consumer inventing conventions.
 - Serve each request from the nearest members, failing over to the next-nearest location
   automatically and returning on recovery, with no configuration.
@@ -98,7 +98,7 @@ every consumer solving it separately and re-solving it on every deployment chang
 
 | Out of scope | Why, and where it belongs |
 |---|---|
-| Modeling compute in the networking API | A NetworkService selects interfaces. It has no workload, deployment, or instance concept, which keeps it usable for endpoints compute did not create. |
+| Modeling compute in the networking API | A NetworkService selects network interface claims. It has no workload, deployment, or instance concept, which keeps it usable for anything that claims an interface. |
 | The Layer 4 load balancer's configuration surface | [Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md). This document defines the membership that load balancer consumes, not its policy. |
 | Per-request latency-based routing | Steering here is topology- and health-driven and changes at control plane speed. Measured round-trip time is [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #3. |
 | Geo authorization | [Roy Kent](../traffic-intelligence/ip-geo-roy-kent.md) and `SecurityPolicy` decide whether to serve a request. This document decides which member serves it. |
@@ -122,7 +122,7 @@ kind: NetworkService
 metadata:
   name: storefront
 spec:
-  networkInterfaces:
+  networkInterfaceClaims:
     selector:
       matchLabels:
         compute.datumapis.com/workload-name: storefront
@@ -187,9 +187,14 @@ rotation.
 runs. That is why the resource carries no location list, and why it stays correct when
 capacity moves.
 
-**Membership is a query over network interfaces.** Interfaces are networking's own
-resource, so anything holding one can be a member: a compute instance today, a load
-balancer or appliance later.
+**Membership is a query over network interface claims.** A claim is networking's own
+resource, so anything that claims an interface can be a member: a compute instance today, a
+load balancer or appliance later.
+
+Selecting the claim rather than the interface it holds matters for one reason. A retained
+interface outlives the claim that held it, keeping its address and its labels while nothing
+runs behind it. A claim exists only while something holds the slot, so retired capacity
+cannot be mistaken for a member.
 
 **Consumers label nothing.** Interface-creating services stamp a defined set of keys, so
 the facts worth selecting on are already present and spelled the same way for everyone. See
@@ -225,11 +230,11 @@ Members therefore need no public address. Origins are reachable only through the
 no IPv4 is consumed per instance.
 
 <<[UNRESOLVED endpoint resolution ]>>
-Membership selects interfaces; the edge forwards to CNI-published endpoints. Something has
+Membership selects claims; the edge forwards to CNI-published endpoints. Something has
 to join the two, and the join has to preserve the endpoint exactly as published, because
 rebuilding it separates the address from the segment identifier that makes it routable.
-Whether an interface names its endpoint, or both are found through shared labels, is the
-first thing to settle in implementation.
+Whether a claim reaches its endpoint through the interface it names, or both are found
+through shared labels, is the first thing to settle in implementation.
 <<[/UNRESOLVED]>>
 
 ### Risks and Mitigations
@@ -261,7 +266,7 @@ and broken traffic. Reachability must appear in the service's own status, not on
 error rates.
 
 **Security review** must cover selector scoping across namespace and project boundaries and
-confirm that a consumer cannot select interfaces they do not own.
+confirm that a consumer cannot select claims they do not own.
 
 ## Design Details
 
@@ -278,7 +283,7 @@ metadata:
 spec:
   # Which endpoints belong to this service. A standard label selector, so
   # both matchLabels and matchExpressions are available.
-  networkInterfaces:
+  networkInterfaceClaims:
     selector:
       matchLabels:
         compute.datumapis.com/workload-name: storefront
@@ -296,42 +301,43 @@ spec:
 
 ### Membership
 
-Membership is the set of interfaces matching the selector, resolved continuously. An
-interface joins when it matches and is reachable, and leaves when it stops matching or goes
-away. A member being retired drains first, so leaving is ordinarily graceful rather than
-abrupt. See [Draining](#draining).
+Membership is the set of claims matching the selector, resolved continuously. A claim joins
+when it matches and its interface is ready to serve, and leaves when it stops matching or
+goes away. A member being retired drains first, so leaving is ordinarily graceful rather
+than abrupt. See [Draining](#draining).
 
-Selectors are scoped to the consumer's own resources; selecting another project's
-interfaces is not possible.
+A claim states both halves of what membership needs in one object: the addresses its
+interface holds, and whether that interface is allocated and programmed.
+
+Selectors are scoped to the consumer's own resources; selecting another project's claims is
+not possible.
 
 A NetworkService is written in one control plane and its members live in others.
 [Federation](#federation) covers how the facts travel.
 
 ### Well-known labels
 
-Every network interface carries a defined set of labels applied by whichever service
+Every network interface claim carries a defined set of labels applied by whichever service
 created it. Consumers select on these labels and create none of them.
 
-Networking applies these when it publishes an interface into the consumer's project:
+Networking applies these when it publishes a claim into the consumer's project:
 
 | Label | Value | Example |
 |---|---|---|
-| `networking.datumapis.com/location` | The location holding the interface. | `us-central-1` |
-| `networking.datumapis.com/held-by` | The claim currently holding the interface. | `storefront-americas-dfw-0-eth0` |
+| `networking.datumapis.com/location` | The location serving the claim. | `us-central-1` |
 
-Compute applies these to the claim it creates, and they travel to the interface and its
-published copy:
+Compute applies these to the claim it creates, and they travel to the published copy:
 
 | Label | Value | Example |
 |---|---|---|
-| `compute.datumapis.com/workload-name` | The workload owning the interface. | `storefront` |
+| `compute.datumapis.com/workload-name` | The workload owning the claim. | `storefront` |
 | `compute.datumapis.com/placement-name` | The placement within that workload. | `americas` |
 | `compute.datumapis.com/city-code` | The city the workload was placed in. | `dfw` |
 | `compute.datumapis.com/instance-index` | The instance's ordinal within the placement. | `0` |
 
 These are the keys compute already stamps on every Instance, reused rather than reinvented.
 Location appears twice, once from each service. Networking's own key is the one to select
-on, because networking sets it on the published copy and guarantees it for interfaces no
+on, because networking sets it on the published copy and guarantees it for claims no
 workload created.
 
 Two properties follow. **Networking never interprets a compute key.** It matches values as
@@ -344,14 +350,14 @@ Selecting a whole application is the common case, as shown above. Narrower selec
 keys — one placement, or one city:
 
 ```yaml
-networkInterfaces:
+networkInterfaceClaims:
   selector:
     matchLabels:
       compute.datumapis.com/workload-name: storefront
       networking.datumapis.com/location: us-central-1
 ```
 
-Adding the city key restricts which interfaces are members; it does not steer traffic.
+Adding the location key restricts which claims are members; it does not steer traffic.
 Location steering is automatic and never appears in a selector. Restricting a service to
 Dallas capacity happens here; getting Dallas users served from Dallas requires nothing.
 
@@ -360,7 +366,7 @@ of a key. This is what lets two workloads serve one hostname, which is how a blu
 rollout or an application running alongside the thing it replaces both look:
 
 ```yaml
-networkInterfaces:
+networkInterfaceClaims:
   selector:
     matchExpressions:
       - key: compute.datumapis.com/workload-name
@@ -466,7 +472,7 @@ Locations:
   fra   members  2   healthy  2   serving
 Conditions:
   Ready               True
-  MembersResolved     True    24 interfaces matched
+  MembersResolved     True    24 claims matched
   EndpointsReachable  True
 ```
 
@@ -489,7 +495,7 @@ HTTP.
 
 ### Federation
 
-A consumer writes a NetworkService in their project. Its members are interfaces in POP
+A consumer writes a NetworkService in their project. Its members are claims served in POP
 cells, which are separate clusters from the edge clusters serving traffic. This section
 states which control plane holds what, and what happens when one becomes unreachable.
 
@@ -501,7 +507,7 @@ interfaces everywhere would couple the edge to allocation details it never uses.
 | Control plane | Holds | Written by |
 |---|---|---|
 | Project | `NetworkService` intent, resolved membership in status | Consumer writes spec; networking writes status |
-| POP cell | `NetworkInterface` and its claim — addresses, gateway, MTU, attachment | Networking, fulfilling compute's claim |
+| POP cell | `NetworkInterfaceClaim` and the `NetworkInterface` bound to it — addresses, gateway, MTU, attachment | Networking, fulfilling compute's claim |
 | Karmada | Endpoint projections written back from each POP cell | Networking in the POP cell |
 | Control plane cell | Nothing durable; aggregates projections into the project | Networking |
 | Edge clusters | The resolved endpoint set per service | Networking |
@@ -516,6 +522,7 @@ distribution mechanism.
 | `NetworkInterfaceClaimReconciler` | cell | Allocates addresses and binds a `NetworkInterface` to the claim |
 | `NetworkInterfaceWriteBackReconciler` | cell | Publishes a copy of the interface to the federation hub |
 | `NetworkInterfaceProjector` | hub | Publishes that copy into the consumer's project, owned by their `Network` |
+| Claim publication | cell and hub | Publishes the claim on the same path, so a consumer sees the slot as well as the interface. This does not exist yet. |
 | `NetworkInterfaceProjectionGCReconciler` | hub | Removes a project copy once nothing is published behind it |
 
 The published copy carries the network, interface name, MTU, addresses and reclaim policy.
@@ -524,10 +531,13 @@ reference, the network context, the attachment, and the VPC identifier. That cop
 consumer sees and what a NetworkService selects against.
 
 **Labels have to travel, and today they do not.** The vocabulary above is only useful if it
-survives from the claim compute writes to the copy a consumer selects. Three places drop it
-now: compute sets no labels on the claim, binding sets none on the interface it creates, and
-the projection builds a fixed set of keys rather than copying what it finds. Closing all
-three is the substantive federation work this proposal requires.
+survives from the claim compute writes to the copy a consumer selects. Compute sets no
+labels on the claim today, and no claim is published to the project at all. Those two gaps
+are the substantive federation work this proposal requires.
+
+Selecting claims rather than interfaces keeps that work short. Labels travel one hop, from
+where compute writes them to where a consumer reads them, instead of crossing binding and
+projection on the way.
 
 <<[UNRESOLVED label propagation ]>>
 Propagating labels blindly is the simple rule, and it lets a consumer's key collide with a
@@ -535,21 +545,13 @@ platform one. Restricting propagation to known prefixes avoids that and makes ne
 hold a list it otherwise would not. Decide which. Decide also whether a label added to a
 claim after creation is expected to reach the copy, since claims are written once and never
 updated today.
-
-Publishing claims to the project alongside interfaces would shorten this considerably.
-Labels would then travel one hop rather than three, from where compute already writes them
-to where a consumer already reads. A claim also states, in one object, both the addresses
-its interface holds and whether that interface is ready to serve, and it exists only while
-something holds the slot — so a retained interface with no holder could not be mistaken for
-a member. Selecting claims rather than interfaces is therefore a live alternative to the
-model described above, and it is the cheaper one to build.
 <<[/UNRESOLVED]>>
 
-**An endpoint joins when it can serve, not when it is allocated.** An interface holds an
-address before its data plane is programmed and before its instance runs. Publishing on
-allocation would put members into rotation that cannot carry traffic, so membership waits
-for programming. This is why the interface design keeps allocation and programming as
-separate conditions.
+**A member joins when it can serve, not when it is allocated.** A claim holds an address
+before its data plane is programmed and before its instance runs. Treating an allocated
+claim as a member would put endpoints into rotation that cannot carry traffic, so membership
+waits for the claim to report programmed. This is why the claim keeps allocation and
+programming as separate conditions.
 
 #### What happens when a control plane is unreachable
 
@@ -633,7 +635,7 @@ kind: NetworkService
 metadata:
   name: storefront
 spec:
-  networkInterfaces:
+  networkInterfaceClaims:
     selector:
       matchLabels:
         compute.datumapis.com/workload-name: storefront
@@ -735,7 +737,7 @@ the control plane and need measurement in the prod-fidelity environment first.
 
 ### Dependencies
 
-- Network interfaces as a selectable, labeled resource
+- Network interface claims as a selectable, labeled resource
   - Usage description: the unit of membership.
     - Impact of its outage on the feature: membership cannot change; programmed endpoints
       keep serving.
@@ -752,8 +754,8 @@ the control plane and need measurement in the prod-fidelity environment first.
 - Compute, for the well-known labels it applies
   - Usage description: `compute.datumapis.com/workload-name` and its siblings are what most
     consumers select on.
-    - Impact of its outage: existing interfaces keep their labels.
-    - Impact of its degraded performance: none on already-labeled interfaces.
+    - Impact of its outage: existing claims keep their labels.
+    - Impact of its degraded performance: none on already-labeled claims.
 - Location topology and coordinates
   - Usage description: ranking locations by proximity for each point of presence.
     - Impact of its outage: existing ranking continues to apply.
@@ -766,7 +768,7 @@ the control plane and need measurement in the prod-fidelity environment first.
 
 #### Will enabling / using this feature result in any new API calls?
 
-Yes. Membership resolution watches network interfaces, which the operator did not do
+Yes. Membership resolution watches network interface claims, which the operator did not do
 before. Volume scales with total member count, not request volume.
 
 #### Will enabling / using this feature result in introducing new API types?
@@ -829,7 +831,7 @@ not deliver.
 
 **Point the proxy at a workload.** Simpler to name, but it puts a compute concept in the
 networking API, couples the two services' release cycles, and offers nothing for endpoints
-compute did not create. Selecting interfaces delivers the same experience without the
+compute did not create. Selecting claims delivers the same experience without the
 coupling.
 
 **Let consumers list endpoints with per-location weights.** Maximum control, no new
@@ -843,6 +845,13 @@ federation path, which would decouple it from cross-cell propagation delays. Rej
 now because it adds a second delivery mechanism to operate and debug for a payload the
 existing path already carries correctly, and because endpoint updates are the case the
 resource path is best at. Worth revisiting if measured propagation misses its target.
+
+**Select the interface rather than the claim that holds it.** The interface is where the
+address lives, so this reads as the more direct choice. Rejected on two counts. A retained
+interface outlives its claim, keeping its address and labels while nothing runs behind it,
+so membership would include retired capacity that a label selector cannot filter out. And
+labels would have to survive binding and projection as well as creation, which is three
+places to get right instead of one.
 
 **Solve it in DNS.** Rejected as the wrong layer. It fails over at cache speed rather than
 connection speed and discards the edge's knowledge of where the request entered. DNS
