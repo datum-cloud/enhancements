@@ -206,19 +206,21 @@ request elsewhere, and to prefer a nearby location.
 If a NetworkService later gains an address, the edge still routes to members directly.
 Behavior attached to that address applies to clients that dial it, not to edge traffic.
 
-**Nearest is computed from topology and geography.** Peering and cable paths mean the
-geographically closest location is not always the fastest. Measured signals replace the
-approximation later, through the
+**Nearest is computed from topology and geography.** Because backhaul stays on Datum's own
+network, distance tracks latency closely and the approximation is a good one. Measured
+signals replace it later, through the
 [Zava](../traffic-intelligence/envoy-routing-zava.md) latency workstream, and change no
 API.
 
-<<[UNRESOLVED reachability ]>>
-What the edge dials to reach a member — a public address on the instance, or an address
-routed over the platform fabric — remains unsettled and changes the product. Public
-backhaul works today and crosses the internet. Fabric backhaul keeps traffic on Datum's
-network end to end but depends on the underlay work. Settle this before consumers see the
-feature, because it determines what a consumer must expose.
-<<[/UNRESOLVED]>>
+**Backhaul stays on the fabric.** The edge reaches a member over SRv6, dialing an IPv6
+uSID container whose locator steers to the member's node and whose VRF segment selects that
+VPC's forwarding instance. Members need no public address, so origins are reachable only
+through the edge, and no IPv4 is consumed per instance.
+
+Envoy is unaware of any of this. A uSID container is an ordinary IPv6 address, so the proxy
+opens a socket and the fabric does the rest. The endpoint the edge holds is a **fabric
+address, not a tenant address**: the edge learns no tenant addressing, holds no tenant
+routes, and imports no route targets.
 
 ### Risks and Mitigations
 
@@ -426,8 +428,10 @@ interfaces everywhere would couple the edge to allocation details it never uses.
 | Edge clusters | The resolved endpoint set per service | Networking |
 
 **The endpoint projection.** When an interface becomes usable, its POP cell publishes a
-small record — address, city, well-known labels, and programmed state — rather than the
-interface itself. This reuses the write-back-and-project pattern compute already uses for
+small record — the fabric address the edge dials, the city, the well-known labels, and
+programmed state — rather than the interface itself. The POP cell composes that address
+because it is the only place that knows all three inputs: the node's locator, the VRF
+segment for this VPC on that node, and the member's address inside the network. This reuses the write-back-and-project pattern compute already uses for
 `Instance`, described in
 [Federated Deployment Scheduling](https://github.com/datum-cloud/compute/blob/main/docs/enhancements/federated-deployment-scheduling.md),
 including the `ns-<uid>` namespace mapping and `meta.datumapis.com/*` label tracking. It
@@ -442,6 +446,20 @@ address before its data plane is programmed and before its instance runs. Publis
 allocation would put members into rotation that cannot carry traffic, so the projection
 waits for programming. This is why the interface design keeps allocation and programming as
 separate conditions.
+
+**A member's fabric address is node-scoped, so rescheduling changes it.** The uSID container
+embeds the locator of the node the member runs on. Retaining an interface preserves its
+address inside the network, but a member that moves to another node is a different fabric
+address and therefore a membership change. Placement churn drives propagation volume, not
+just scaling.
+
+<<[UNRESOLVED fabric addressing ]>>
+Two things follow from composing an address per member and need owners. First, what
+revalidates a projected address when a member moves, and how quickly a stale container stops
+being dialed. Second, how the fabric constrains which segments the edge may source: a uSID
+is a capability, so anything able to emit a tenant VRF segment reaches that VRF, and the
+control on that has to fail closed.
+<<[/UNRESOLVED]>>
 
 #### What happens when a control plane is unreachable
 
