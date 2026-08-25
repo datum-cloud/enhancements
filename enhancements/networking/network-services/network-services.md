@@ -245,8 +245,10 @@ through shared labels, is the first thing to settle in implementation.
 
 **An over-broad selector sends production traffic to the wrong endpoints.** Per-location
 status makes resolved membership visible, so a wrong selector shows up as a member count
-that does not match expectations. Validation should also reject a selector matching
-nothing.
+that does not match expectations. A selector matching claims across more than one network is
+the case to catch loudly, since those members cannot be served together. A selector matching
+nothing is reported as a condition rather than rejected, because a service is legitimately
+written before the workload it selects.
 
 **Failover moves traffic across a jurisdiction boundary.** There is no mitigation in this
 milestone, because there is no control for declaring that spilling to another location is
@@ -315,6 +317,13 @@ interface holds, and whether that interface is allocated and programmed.
 
 Selectors are scoped to the consumer's own resources; selecting another project's claims is
 not possible.
+
+**A service spans one network.** Reaching a member means entering the network it sits on,
+and the proxy establishes that once per upstream rather than once per request. Members drawn
+from two networks therefore cannot be served together, so a selector matching across networks
+is a configuration error rather than a wider service. Whether the service names its network
+outright or reports the mismatch when it happens is an open shape; the constraint holds
+either way.
 
 A NetworkService is written in one control plane and its members live in others.
 [Federation](#federation) covers how the facts travel.
@@ -880,6 +889,15 @@ interface outlives its claim, keeping its address and labels while nothing runs 
 so membership would include retired capacity that a label selector cannot filter out. And
 labels would have to survive binding and projection as well as creation, which is three
 places to get right instead of one.
+
+**Have the proxy fetch endpoints from a dedicated endpoint stream.** A proxy can be pointed
+at a separate source for endpoints while keeping everything else from its usual control
+plane. That keeps membership out of the cluster configuration entirely, so churn costs
+nothing and the size of a service stops bearing on configuration limits. Deferred rather
+than rejected: it needs a second control plane per edge, with its own versioning, failure
+modes and alerting, and it changes how every proxy in the fleet starts up. Revisit it if
+measurement shows membership size or churn is the constraint. Nothing in this proposal
+forecloses it.
 
 **Solve it in DNS.** Rejected as the wrong layer. It fails over at cache speed rather than
 connection speed and discards the edge's knowledge of where the request entered. DNS
