@@ -46,10 +46,11 @@ NetworkService covers the rest of the path: the edge serves that request from th
 nearest that point of presence, and moves to the next-nearest location when the closest one
 fails.
 
-The consumer configures none of that. They name a label the platform already applies to
-their interfaces, and membership follows whatever is actually running — new replicas join
-as they come up, and a new location starts serving its own users once it has healthy
-members.
+None of that needs configuring to work. The consumer names a label the platform already
+applies on their behalf, and membership follows whatever is actually running — new replicas
+join as they come up, and a new location starts serving its own users once it has healthy
+members. Controls over how traffic is spread come later; the point of this milestone is that
+the sensible behaviour is what you get before you reach for any of them.
 
 This document defines the consumer surface for
 [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #1, geo-aware upstream
@@ -103,7 +104,7 @@ every consumer solving it separately and re-solving it on every deployment chang
 | Per-request latency-based routing | Steering here is topology- and health-driven and changes at control plane speed. Measured round-trip time is [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #3. |
 | Geo authorization | [Roy Kent](../traffic-intelligence/ip-geo-roy-kent.md) and `SecurityPolicy` decide whether to serve a request. This document decides which member serves it. |
 | An address of its own | A virtual IP for east-west traffic is a natural extension. The name accommodates it; this milestone does not deliver it. |
-| Consumer-controlled steering | `Nearest` is the only strategy value. Weighting, pinning, and explicit failover order are deferred. See [Drawbacks](#drawbacks). |
+| Consumer-controlled steering | `Nearest` is the only strategy value in this milestone. Weighting, pinning, and explicit failover order are expected, and the field is shaped to take them. See [Drawbacks](#drawbacks). |
 | Consumer-configured health checks | The platform judges members by real request outcomes and consumers cannot tune it. Declared checks, such as a path and expected status, are deferred. |
 | Replacing connector-backed origins | Consumers behind a Datum connector keep that path unchanged. |
 
@@ -183,9 +184,10 @@ rotation.
 
 ### Notes/Constraints/Caveats
 
-**Consumers never write a member's location.** The platform reads it from where the member
-runs. That is why the resource carries no location list, and why it stays correct when
-capacity moves.
+**A member's location is observed, not declared.** The platform reads it from where the
+member runs, so the resource carries no location list and stays correct when capacity moves.
+Consumers will want to act on location — pinning a service to one, weighting across several
+— and those controls belong on top of an observed location rather than replacing it.
 
 **Membership is a query over network interface claims.** A claim is networking's own
 resource, so anything that claims an interface can be a member: a compute instance today, a
@@ -196,8 +198,10 @@ interface outlives the claim that held it, keeping its address and its labels wh
 runs behind it. A claim exists only while something holds the slot, so retired capacity
 cannot be mistaken for a member.
 
-**Consumers label nothing.** Interface-creating services stamp a defined set of keys, so
-the facts worth selecting on are already present and spelled the same way for everyone. See
+**Selecting works without labelling anything first.** Claim-creating services stamp a
+defined set of keys, so the facts worth selecting on are already present and spelled the
+same way for everyone. Consumers can still be given their own labels later; the vocabulary
+exists so the common case needs no setup, not to keep consumers out of it. See
 [Well-known labels](#well-known-labels).
 
 <<[UNRESOLVED labels ]>>
@@ -302,8 +306,8 @@ spec:
 ### Membership
 
 Membership is the set of claims matching the selector, resolved continuously. A claim joins
-when it matches and its interface is ready to serve, and leaves when it stops matching or
-goes away. A member being retired drains first, so leaving is ordinarily graceful rather
+when it matches, its interface is programmed, and the thing holding it reports that it is
+running. It leaves when it stops matching or goes away. A member being retired drains first, so leaving is ordinarily graceful rather
 than abrupt. See [Draining](#draining).
 
 A claim states both halves of what membership needs in one object: the addresses its
@@ -401,9 +405,19 @@ cost is that a single-value enum reads like an unfinished API.
 
 ### Health
 
-The edge judges members by what happens to real requests. A member that starts returning
-errors is ejected from rotation, and is brought back once it stops. Consumers configure
-none of this, and the resource carries no health check field.
+Three separate things have to be true before a member takes traffic, and each is established
+by whoever can actually see it.
+
+| Signal | Established by | Catches |
+|---|---|---|
+| The interface is programmed | networking, on the claim | Addresses that cannot yet carry packets |
+| The holder is running | whatever holds the claim | A member whose workload has not started |
+| Requests succeed | the edge, watching real traffic | A member that is up but broken |
+
+The first two decide whether a member is published at all. The third runs continuously
+afterwards: a member that starts returning errors is ejected from rotation and brought back
+once it stops. Consumers configure none of it, and the resource carries no health check
+field.
 
 Watching real traffic covers the failure that matters most: a member that is reachable and
 accepting connections while the application behind it is broken. It costs something to get
@@ -448,14 +462,23 @@ arrival rather than an update, which makes routine deployments the common case f
 rather than the rare one.
 
 Draining requires knowing that a member is about to go away, not observing that it has. That
-signal belongs to whatever retires the member.
+signal belongs to whatever retires the member, and it is the same reporting surface that
+tells membership a member has started. One mechanism, two edges.
 
-<<[UNRESOLVED draining ]>>
-Compute has to signal that an instance is being retired, early enough for the notice to
-reach the edge before the instance stops answering. How much warning that is depends on
-propagation, which is unmeasured, so the two questions should be settled together. An
-instance lost abruptly, through node failure, has no notice to give and is still handled by
-health checking.
+<<[UNRESOLVED holder lifecycle ]>>
+Whatever holds a claim has to report two transitions on it: that it has started, and that it
+is about to stop. For compute that means an instance reaching running, and an instance being
+retired, surfaced on the claim rather than left for networking to infer. The retirement
+notice has to arrive early enough to reach the edge before the member stops answering, and
+how much warning that needs depends on propagation, which is unmeasured — settle the two
+together. A member lost abruptly through node failure gives no notice and stays with the
+edge's own health checking.
+
+Decide also how a not-yet-running member is represented. Publishing it as not-ready marks it
+draining at the proxy, which correctly withholds traffic but also counts it against its
+location's health. A location scaling from two members to twenty would briefly look mostly
+unhealthy and could spill traffic to the next-nearest location for no reason. Omitting a
+member until it is running avoids that and makes joining and leaving asymmetric.
 <<[/UNRESOLVED]>>
 
 ### What a consumer can see
@@ -548,10 +571,15 @@ updated today.
 <<[/UNRESOLVED]>>
 
 **A member joins when it can serve, not when it is allocated.** A claim holds an address
-before its data plane is programmed and before its instance runs. Treating an allocated
-claim as a member would put endpoints into rotation that cannot carry traffic, so membership
-waits for the claim to report programmed. This is why the claim keeps allocation and
-programming as separate conditions.
+before its data plane is programmed, and its data plane is programmed before the workload
+behind it starts answering. Membership waits for both: the claim reports programmed, and
+whatever holds the claim reports running.
+
+The second half is not networking's to observe. The holder reports it on the claim, and
+membership reads it without knowing what kind of thing reported it. That is the same signal
+surface [Draining](#draining) needs for the other edge, so one mechanism covers both
+transitions: a member becomes eligible when its holder says it is running, and leaves
+rotation when its holder says it is going away.
 
 #### What happens when a control plane is unreachable
 
