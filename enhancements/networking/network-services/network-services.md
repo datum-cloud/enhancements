@@ -268,7 +268,8 @@ kind: NetworkService
 metadata:
   name: storefront
 spec:
-  # Which endpoints belong to this service.
+  # Which endpoints belong to this service. A standard label selector, so
+  # both matchLabels and matchExpressions are available.
   networkInterfaces:
     selector:
       matchLabels:
@@ -338,6 +339,23 @@ networkInterfaces:
 Adding the city key restricts which interfaces are members; it does not steer traffic.
 Location steering is automatic and never appears in a selector. Restricting a service to
 Dallas capacity happens here; getting Dallas users served from Dallas requires nothing.
+
+The selector is a standard label selector, so a service can also span more than one value
+of a key. This is what lets two workloads serve one hostname, which is how a blue/green
+rollout or an application running alongside the thing it replaces both look:
+
+```yaml
+networkInterfaces:
+  selector:
+    matchExpressions:
+      - key: compute.datumapis.com/workload
+        operator: In
+        values: [storefront-blue, storefront-green]
+```
+
+Matching on a set rather than a single value costs nothing to support now and cannot be
+added later without changing the shape of the field, which is why it is here from the
+start.
 
 **Managing addresses.** Defining these labels centrally pays off beyond load balancing.
 "Which addresses does this application hold," "which does it hold in Frankfurt," and "which
