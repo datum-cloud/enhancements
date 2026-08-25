@@ -104,7 +104,7 @@ every consumer solving it separately and re-solving it on every deployment chang
 | Geo authorization | [Roy Kent](../traffic-intelligence/ip-geo-roy-kent.md) and `SecurityPolicy` decide whether to serve a request. This document decides which member serves it. |
 | An address of its own | A virtual IP for east-west traffic is a natural extension. The name accommodates it; this milestone does not deliver it. |
 | Consumer-controlled steering | `Nearest` is the only strategy value. Weighting, pinning, and explicit failover order are deferred. See [Drawbacks](#drawbacks). |
-| Consumer-configured health checks | Health is platform-derived and not configurable, so this milestone cannot detect a member that is reachable but serving errors. |
+| Consumer-configured health checks | The platform judges members by real request outcomes and consumers cannot tune it. Declared checks, such as a path and expected status, are deferred. |
 | Replacing connector-backed origins | Consumers behind a Datum connector keep that path unchanged. |
 
 ## Proposal
@@ -362,19 +362,39 @@ cost is that a single-value enum reads like an unfinished API.
 
 ### Health
 
-The platform assesses health using a check derived from the port's protocol. Consumers do
-not configure it; the resource carries no health check field.
+The edge judges members by what happens to real requests. A member that starts returning
+errors is ejected from rotation, and is brought back once it stops. Consumers configure
+none of this, and the resource carries no health check field.
 
-That check proves a member is reachable and accepting connections, not that the
-application answers correctly. **A member serving errors on every request still looks
-healthy, keeps its share of traffic, and never triggers failover.** Until application-level
-checks exist, this milestone cannot detect a process that is up but broken.
+Watching real traffic covers the failure that matters most: a member that is reachable and
+accepting connections while the application behind it is broken. It costs something to get
+there. Detection is reactive, so a few requests fail before a member is ejected, and
+recovery is tested with real requests rather than probes. A member receiving no traffic is
+not assessed at all, which matters most in a location that is idle because its users are
+being served somewhere closer.
 
-The edge removes failing members from rotation and restores them automatically, within
-seconds. This is deliberately independent of the platform-wide health signals
+Ejection drives location failover as well as member selection. Enough ejected members in
+one location degrade it far enough that traffic spills to the next-nearest, which is the
+same mechanism described in [Traffic distribution](#traffic-distribution).
+
+This is deliberately independent of the platform-wide health signals
 [Nate](../traffic-intelligence/health-checks-nate.md) publishes, which operate on a
 different timescale for a different purpose. The two are complementary, as they are for the
 Layer 4 load balancer.
+
+**Small services need deliberate defaults.** Ejection is normally capped as a share of a
+location's members, and under a common default a location with two members can eject
+neither, because removing one exceeds the cap. A service with two replicas per location is
+the ordinary case here, so the platform's defaults have to make ejection work at that size
+rather than silently do nothing.
+
+<<[UNRESOLVED ejection ]>>
+Pick the ejection defaults against a two-member location, not a twenty-member one: how many
+failed requests eject a member, how long it stays out, and how much of a location may be
+ejected at once. Allowing a whole location to be ejected makes failover work when every
+member there is broken; capping it below that keeps a location from emptying on a
+correlated blip. The two pull against each other and the resolution should be written down.
+<<[/UNRESOLVED]>>
 
 ### Draining
 
@@ -749,14 +769,14 @@ reality, and it puts a lot of weight on the status surface being right.
 
 **Consumers whose needs differ from the defaults have no recourse.** With one strategy
 value and no health check configuration, canarying a location, draining one for maintenance,
-holding traffic inside a jurisdiction, and ejecting a member that is up but broken are all
+holding traffic inside a jurisdiction, and tuning how readily a member is ejected are all
 unavailable. In each case the only workaround is to stop using a NetworkService altogether,
 so a consumer who needs one of these is blocked.
 
-**Reachability-only health will cause a bad first impression.** Consumers read "automatic
-failover" as covering a broken application. It covers an unreachable one. A consumer whose
-instance returns 500s sees no failover and concludes the feature is broken. The product
-surface must be precise about what healthy means.
+**Judging health by real traffic means some requests pay for it.** A member is ejected
+after it has already failed requests, not before, and it is brought back by trying it
+again. Consumers who expect a broken member to be detected before it serves anyone will
+find that surprising, and only a declared health check would deliver it.
 
 **Nearest-location routing depends on the platform knowing where capacity is.** If that
 data is wrong, routing is wrong in a way that looks fine from the outside, and that is much
