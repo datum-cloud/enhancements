@@ -21,6 +21,7 @@ latest-milestone: "v0.x"
   - [Well-known labels](#well-known-labels)
   - [Traffic distribution](#traffic-distribution)
   - [Health](#health)
+  - [Draining](#draining)
   - [What a consumer can see](#what-a-consumer-can-see)
   - [Consuming a network service](#consuming-a-network-service)
   - [Federation](#federation)
@@ -89,6 +90,7 @@ every consumer solving it separately and re-solving it on every deployment chang
   selection and address management work without a consumer inventing conventions.
 - Serve each request from the nearest members, failing over to the next-nearest location
   automatically and returning on recovery, with no configuration.
+- Remove members gracefully, so scale-down and rolling updates do not drop requests.
 - Report per-location member and health counts so consumers diagnose their own problems.
 - Define one membership noun that serves the Layer 7 edge now and Layer 4 later.
 
@@ -163,7 +165,7 @@ route.
 
 Priya scales Dallas from two replicas to twenty for Black Friday. The new interfaces carry
 the same label, join the service, and take traffic as they become healthy. She scales back
-down on Saturday. Later she adds Frankfurt, and European users start being served there.
+down on Saturday, and the instances going away finish their in-flight requests first. Later she adds Frankfurt, and European users start being served there.
 
 None of this requires an edit to the NetworkService or the HTTPProxy.
 
@@ -287,7 +289,8 @@ spec:
 
 Membership is the set of interfaces matching the selector, resolved continuously. An
 interface joins when it matches and is reachable, and leaves when it stops matching or goes
-away.
+away. A member being retired drains first, so leaving is ordinarily graceful rather than
+abrupt. See [Draining](#draining).
 
 Selectors are scoped to the consumer's own resources; selecting another project's
 interfaces is not possible.
@@ -373,6 +376,29 @@ seconds. This is deliberately independent of the platform-wide health signals
 different timescale for a different purpose. The two are complementary, as they are for the
 Layer 4 load balancer.
 
+### Draining
+
+A member that is going away leaves rotation before it stops answering. The platform marks it
+draining, the edge stops giving it new requests, and requests already in flight finish.
+
+Without this, a member disappears and the edge finds out by dialing it and failing. Health
+checks eject it within seconds, but those seconds are user-visible errors, and every scale-
+down and every rolling update produces one such window per member replaced. A member's
+address is tied to the node it runs on, so a rescheduled instance is a departure and an
+arrival rather than an update, which makes routine deployments the common case for this
+rather than the rare one.
+
+Draining requires knowing that a member is about to go away, not observing that it has. That
+signal belongs to whatever retires the member.
+
+<<[UNRESOLVED draining ]>>
+Compute has to signal that an instance is being retired, early enough for the notice to
+reach the edge before the instance stops answering. How much warning that is depends on
+propagation, which is unmeasured, so the two questions should be settled together. An
+instance lost abruptly, through node failure, has no notice to give and is still handled by
+health checking.
+<<[/UNRESOLVED]>>
+
 ### What a consumer can see
 
 ```console
@@ -434,7 +460,7 @@ operate, monitor, and debug rather than two.
 
 **The endpoint projection.** When an interface becomes usable, its POP cell publishes a
 small record — the fabric address the edge dials, the city, the well-known labels, and
-programmed state — rather than the interface itself. The POP cell composes that address
+whether the member is programmed or draining — rather than the interface itself. The POP cell composes that address
 because it is the only place that knows all three inputs: the node's locator, the VRF
 segment for this VPC on that node, and the member's address inside the network. This reuses the write-back-and-project pattern compute already uses for
 `Instance`, described in
