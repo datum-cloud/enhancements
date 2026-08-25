@@ -427,6 +427,11 @@ interfaces everywhere would couple the edge to allocation details it never uses.
 | Control plane cell | Nothing durable; aggregates projections into the project | Networking |
 | Edge clusters | The resolved endpoint set per service | Networking |
 
+**Endpoints travel the platform's existing federation path.** They are not carried on a
+separate transport. Membership moves as ordinary resources through the same write-back and
+projection machinery every other cross-cell fact uses, which keeps one propagation path to
+operate, monitor, and debug rather than two.
+
 **The endpoint projection.** When an interface becomes usable, its POP cell publishes a
 small record — the fabric address the edge dials, the city, the well-known labels, and
 programmed state — rather than the interface itself. The POP cell composes that address
@@ -695,6 +700,11 @@ Prior edge scale work established that control plane translation, not the extens
 limits throughput. Endpoint fan-out grows differently from the gateway-count growth already
 measured and needs its own measurement in the prod-fidelity environment before limits are
 published.
+
+Test the xDS message ceiling early. A prior scale run stopped programming silently once
+generated configuration crossed the default gRPC message limit, and endpoints add to the
+same budget. A service with tens of members across several locations is a small object; a
+few hundred such services is not.
 <<[/UNRESOLVED]>>
 
 ## Implementation History
@@ -741,6 +751,13 @@ coupling.
 selection concept. Rejected because it hands the consumer exactly the work this proposal
 exists to absorb: a list that goes stale on the first capacity change, and a weight matrix
 maintained against every point of presence.
+
+**Carry endpoints on a dedicated signal transport.** Membership is a fast-changing signal
+and could travel a purpose-built path to every point of presence rather than the resource
+federation path, which would decouple it from cross-cell propagation delays. Rejected for
+now because it adds a second delivery mechanism to operate and debug for a payload the
+existing path already carries correctly, and because endpoint updates are the case the
+resource path is best at. Worth revisiting if measured propagation misses its target.
 
 **Solve it in DNS.** Rejected as the wrong layer. It fails over at cache speed rather than
 connection speed and discards the edge's knowledge of where the request entered. DNS
