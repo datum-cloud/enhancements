@@ -132,7 +132,7 @@ spec:
       port: 8080
 ```
 
-Nearest-location routing, automatic failover, and health checking are on by default.
+Nearest-location routing, failover and health checking apply without being asked for.
 
 The proxy in front of it:
 
@@ -164,11 +164,12 @@ route.
 
 #### Story 2: Change capacity without editing anything
 
-Priya scales Dallas from two replicas to twenty for Black Friday. The new interfaces carry
-the same label, join the service, and take traffic as they become healthy. She scales back
-down on Saturday, and the instances going away finish their in-flight requests first. Later she adds Frankfurt, and European users start being served there.
+Priya scales Dallas from two replicas to twenty for Black Friday. The new claims carry the
+same label, join the service, and take traffic once they are running. She scales back down on
+Saturday, and the instances going away finish their in-flight requests first. Later she adds
+Frankfurt, and European users start being served there.
 
-None of this requires an edit to the NetworkService or the HTTPProxy.
+None of it requires an edit to the NetworkService or the HTTPProxy.
 
 #### Story 3: Survive a location failure at 3am
 
@@ -199,9 +200,8 @@ This document proposes the vocabulary but cannot assign the work. Each owning se
 commit to stamping its keys, the compute keys especially.
 <<[/UNRESOLVED]>>
 
-**The edge balances across individual members**, because Layer 7 load balancing needs the
-proxy to see each one: to eject a bad member while its siblings keep serving, to retry a
-failed request elsewhere, and to prefer a nearby location.
+**The edge balances across individual members**, which is what lets it eject a bad member,
+retry elsewhere, and prefer a nearby location.
 
 **Backhaul stays on the fabric, using the path that already exists.** An HTTPProxy can
 already forward to a single instance on a tenant network: the CNI publishes an endpoint
@@ -249,51 +249,44 @@ kind: NetworkService
 metadata:
   name: storefront
 spec:
-  # Which endpoints belong to this service. A standard label selector, so
-  # both matchLabels and matchExpressions are available.
+  # A standard label selector.
   networkInterfaceClaims:
     selector:
       matchLabels:
         compute.datumapis.com/workload-name: storefront
 
-  # Ports this service exposes. Named, so consumers reference a name.
   ports:
     - name: http
       port: 8080
       protocol: TCP
 
-  # Optional. Defaults to Nearest, the only value this milestone accepts.
+  # Optional. Nearest is the only value this milestone accepts.
   trafficDistribution:
     strategy: Nearest
 ```
 
 ### Membership
 
-Membership is the set of claims matching the selector, resolved continuously. A claim joins
-when it matches, its interface is programmed, and the thing holding it reports that it is
-running. It leaves when it stops matching or goes away. A member being retired drains first, so leaving is ordinarily graceful rather
-than abrupt. See [Draining](#draining).
+A claim joins when it matches the selector, its interface is programmed, and its holder
+reports running. It leaves when it stops matching or goes away, ordinarily after
+[draining](#draining) rather than abruptly. A claim carries both halves of what membership
+needs: the addresses its interface holds, and whether that interface is allocated and
+programmed.
 
-A claim states both halves of what membership needs in one object: the addresses its
-interface holds, and whether that interface is allocated and programmed.
+Selectors are scoped to the consumer's own resources.
 
-Selectors are scoped to the consumer's own resources; selecting another project's claims is
-not possible.
-
-**A service spans one network.** Reaching a member means entering the network it sits on,
-and the proxy establishes that once per upstream rather than once per request. Members drawn
-from two networks therefore cannot be served together, so a selector matching across networks
-is a configuration error rather than a wider service. Whether the service names its network
-outright or reports the mismatch when it happens is an open shape; the constraint holds
-either way.
+**A service spans one network.** Reaching a member means entering the network it sits on, and
+the proxy establishes that once per upstream rather than per request, so members from two
+networks cannot be served together. A selector matching across networks is a configuration
+error. Whether the service names its network outright or reports the mismatch is an open
+shape; the constraint holds either way.
 
 A NetworkService is written in one control plane and its members live in others.
 [Federation](#federation) covers how the facts travel.
 
 ### Well-known labels
 
-Every network interface claim carries a defined set of labels applied by whichever service
-created it. Consumers select on these labels and create none of them.
+Every claim carries a defined set of labels, applied by whichever service created it.
 
 Networking applies these when it publishes a claim into the consumer's project:
 
@@ -315,10 +308,9 @@ Location appears twice, once from each service. Networking's own key is the one 
 on, because networking sets it on the published copy and guarantees it for claims no
 workload created.
 
-**Networking never interprets a compute key.** It matches values as opaque strings, exactly
-as a Kubernetes Service matches pods without knowing what a Deployment is: a key's prefix
-records which service guarantees it, not which understands it. So any service can populate
-its own keys under its own prefix without changing networking.
+**Networking never interprets a compute key.** A key's prefix records which service
+guarantees it, not which understands it, so any service can populate its own keys under its
+own prefix without changing networking.
 
 Selecting a whole application is the common case, as shown above. Narrower selections add
 keys — one placement, or one city:
@@ -354,24 +346,18 @@ become the same query.
 
 ### Traffic distribution
 
-`spec.trafficDistribution.strategy` selects how traffic spreads across a service's
-locations. It defaults to `Nearest`, and `Nearest` is the only value this milestone accepts.
+`spec.trafficDistribution.strategy` defaults to `Nearest`, the only value this milestone
+accepts: serve each request from the members nearest where it entered, shift to the
+next-nearest as health degrades, and return on recovery.
 
-| Strategy | Behavior |
-|---|---|
-| `Nearest` (default, only value today) | Serve each request from the members nearest where it entered the network. Shift to the next-nearest as health degrades, and return on recovery. |
-
-Within a location, the edge balances requests across that location's members per request.
-
-Carrying a field with one value is deliberate. Nearest-with-failover is what nearly every
-consumer wants, so it is worth getting right before anything else. We expect to add more
-strategies, and a consumer who sets this explicitly today keeps working when we do. The
-cost is that a single-value enum reads like an unfinished API.
+The field carries one value deliberately. We expect to add strategies, and a consumer who
+sets this today keeps working when we do. The cost is that a single-value enum reads like an
+unfinished API.
 
 ### Health
 
-Three separate things have to be true before a member takes traffic, and each is established
-by whoever can actually see it.
+Three things have to be true before a member takes traffic, each established by whoever can
+see it.
 
 | Signal | Established by | Catches |
 |---|---|---|
@@ -379,71 +365,56 @@ by whoever can actually see it.
 | The holder is running | whatever holds the claim | A member whose workload has not started |
 | Requests succeed | the edge, watching real traffic | A member that is up but broken |
 
-The first two decide whether a member is published at all. The third runs continuously
-afterwards: a member that starts returning errors is ejected from rotation and brought back
-once it stops. Consumers configure none of it, and the resource carries no health check
-field.
+The first two decide whether a member is published. The third runs continuously afterwards,
+and consumers configure none of it.
 
-Watching real traffic covers the failure that matters most: a member that is reachable and
-accepting connections while the application behind it is broken. It costs something to get
-there. Detection is reactive, so a few requests fail before a member is ejected, and
-recovery is tested with real requests rather than probes. A member receiving no traffic is
-not assessed at all, which matters most in a location that is idle because its users are
-being served somewhere closer.
+Judging by real traffic costs something. Detection is reactive, so a few requests fail
+before a member is ejected, and recovery is tested with real requests rather than probes. A
+member receiving no traffic is not assessed at all, which matters most in a location sitting
+idle because its users are served closer.
 
-Ejection drives location failover as well as member selection. Enough ejected members in
-one location degrade it far enough that traffic spills to the next-nearest, which is the
-same mechanism described in [Traffic distribution](#traffic-distribution).
+Ejection also drives location failover: enough ejected members degrade a location far enough
+that traffic spills to the next-nearest.
 
-This is deliberately independent of the platform-wide health signals
-[Nate](../traffic-intelligence/health-checks-nate.md) publishes, which operate on a
-different timescale for a different purpose. The two are complementary, as they are for the
-Layer 4 load balancer.
-
-**Small services need deliberate defaults.** Ejection is normally capped as a share of a
-location's members, and under a common default a location with two members can eject
-neither, because removing one exceeds the cap. A service with two replicas per location is
-the ordinary case here, so the platform's defaults have to make ejection work at that size
-rather than silently do nothing.
+This is independent of the platform-wide health signals
+[Nate](../traffic-intelligence/health-checks-nate.md) publishes, which run on a different
+timescale for a different purpose.
 
 <<[UNRESOLVED ejection ]>>
-Pick the ejection defaults against a two-member location, not a twenty-member one: how many
-failed requests eject a member, how long it stays out, and how much of a location may be
-ejected at once. Allowing a whole location to be ejected makes failover work when every
-member there is broken; capping it below that keeps a location from emptying on a
-correlated blip. The two pull against each other and the resolution should be written down.
+Ejection is capped as a share of a location's members, and under a common default a
+two-member location can eject neither. Two replicas per location is the ordinary case here,
+so pick the defaults against that size: how many failed requests eject a member, how long it
+stays out, and how much of a location may go at once. Allowing a whole location to be
+ejected makes failover work when everything there is broken; capping below that stops a
+location emptying on a correlated blip.
 <<[/UNRESOLVED]>>
 
 ### Draining
 
-A member that is going away leaves rotation before it stops answering. The platform marks it
-draining, the edge stops giving it new requests, and requests already in flight finish.
+A member that is going away leaves rotation before it stops answering, so requests already
+in flight finish and no new ones arrive.
 
-Without this, a member disappears and the edge finds out by dialing it and failing. Health
-checks eject it within seconds, but those seconds are user-visible errors, and every scale-
-down and every rolling update produces one such window per member replaced. A member's
-address is tied to the node it runs on, so a rescheduled instance is a departure and an
-arrival rather than an update, which makes routine deployments the common case for this
-rather than the rare one.
+Without it, the edge finds out by dialing a member and failing. Health checking bounds that
+to seconds, but those seconds are user-visible errors, and every scale-down and rolling
+update produces one such window per member replaced. Because a member's address is tied to
+its node, a rescheduled instance is a departure and an arrival rather than an update, which
+makes routine deployments the common case for this rather than the rare one.
 
-Draining requires knowing that a member is about to go away, not observing that it has. That
-signal belongs to whatever retires the member, and it is the same reporting surface that
-tells membership a member has started. One mechanism, two edges.
+Draining needs to know a member is about to go away, not that it has. That signal belongs to
+whatever retires the member, and it is the same surface that reports a member has started.
 
 <<[UNRESOLVED holder lifecycle ]>>
-Whatever holds a claim has to report two transitions on it: that it has started, and that it
-is about to stop. For compute that means an instance reaching running, and an instance being
-retired, surfaced on the claim rather than left for networking to infer. The retirement
-notice has to arrive early enough to reach the edge before the member stops answering, and
-how much warning that needs depends on propagation, which is unmeasured — settle the two
-together. A member lost abruptly through node failure gives no notice and stays with the
-edge's own health checking.
+Whatever holds a claim reports two transitions on it: started, and about to stop. For
+compute that is an instance reaching running and an instance being retired. The retirement
+notice has to reach the edge before the member stops answering, and how much warning that
+needs depends on propagation, which is unmeasured, so settle the two together. A member lost
+abruptly through node failure gives no notice and stays with the edge's health checking.
 
 Decide also how a not-yet-running member is represented. Publishing it as not-ready marks it
-draining at the proxy, which correctly withholds traffic but also counts it against its
-location's health. A location scaling from two members to twenty would briefly look mostly
-unhealthy and could spill traffic to the next-nearest location for no reason. Omitting a
-member until it is running avoids that and makes joining and leaving asymmetric.
+draining at the proxy, which withholds traffic correctly but counts it against its location's
+health: a location scaling from two members to twenty would briefly look mostly unhealthy and
+could spill traffic away for no reason. Omitting a member until it runs avoids that and makes
+joining and leaving asymmetric.
 <<[/UNRESOLVED]>>
 
 ### What a consumer can see
@@ -464,8 +435,8 @@ Conditions:
   EndpointsReachable  True
 ```
 
-Per-location counts are the primary diagnostic. A consumer must be able to answer "which
-location serves my users, and is any location out of rotation" without contacting support.
+A consumer should be able to answer "which location serves my users, and is any location
+out of rotation" without contacting support.
 
 ### Consuming a network service
 
