@@ -125,7 +125,7 @@ spec:
   networkInterfaces:
     selector:
       matchLabels:
-        compute.datumapis.com/workload: storefront
+        compute.datumapis.com/workload-name: storefront
   ports:
     - name: http
       port: 8080
@@ -214,15 +214,23 @@ signals replace it later, through the
 [Zava](../traffic-intelligence/envoy-routing-zava.md) latency workstream, and change no
 API.
 
-**Backhaul stays on the fabric.** The edge reaches a member over SRv6, dialing an IPv6
-uSID container whose locator steers to the member's node and whose VRF segment selects that
-VPC's forwarding instance. Members need no public address, so origins are reachable only
-through the edge, and no IPv4 is consumed per instance.
+**Backhaul stays on the fabric, using the path that already exists.** An HTTPProxy can
+already forward to a single instance on a tenant network: the CNI publishes an endpoint
+carrying the segment identifier the tenant-VRF mechanism needs, and the proxy forwards it
+untouched rather than synthesizing an address of its own. A NetworkService generalizes that
+from one endpoint to a selected, location-aware set. It introduces no second backhaul path
+and composes no addresses.
 
-Envoy is unaware of any of this. A uSID container is an ordinary IPv6 address, so the proxy
-opens a socket and the fabric does the rest. The endpoint the edge holds is a **fabric
-address, not a tenant address**: the edge learns no tenant addressing, holds no tenant
-routes, and imports no route targets.
+Members therefore need no public address. Origins are reachable only through the edge, and
+no IPv4 is consumed per instance.
+
+<<[UNRESOLVED endpoint resolution ]>>
+Membership selects interfaces; the edge forwards to CNI-published endpoints. Something has
+to join the two, and the join has to preserve the endpoint exactly as published, because
+rebuilding it separates the address from the segment identifier that makes it routable.
+Whether an interface names its endpoint, or both are found through shared labels, is the
+first thing to settle in implementation.
+<<[/UNRESOLVED]>>
 
 ### Risks and Mitigations
 
@@ -273,7 +281,7 @@ spec:
   networkInterfaces:
     selector:
       matchLabels:
-        compute.datumapis.com/workload: storefront
+        compute.datumapis.com/workload-name: storefront
 
   # Ports this service exposes. Named, so consumers reference a name.
   ports:
@@ -304,20 +312,27 @@ A NetworkService is written in one control plane and its members live in others.
 Every network interface carries a defined set of labels applied by whichever service
 created it. Consumers select on these labels and create none of them.
 
-Networking applies these to every interface, whatever created it:
+Networking applies these when it publishes an interface into the consumer's project:
 
 | Label | Value | Example |
 |---|---|---|
-| `topology.datum.net/city-code` | The city holding the interface. Already the platform's well-known topology key. | `DFW` |
-| `networking.datumapis.com/network` | The network the interface attaches to. | `default` |
+| `networking.datumapis.com/location` | The location holding the interface. | `us-central-1` |
+| `networking.datumapis.com/held-by` | The claim currently holding the interface. | `storefront-americas-dfw-0-eth0` |
 
-Compute applies these to interfaces it requests:
+Compute applies these to the claim it creates, and they travel to the interface and its
+published copy:
 
 | Label | Value | Example |
 |---|---|---|
-| `compute.datumapis.com/workload` | The workload owning the interface. | `storefront` |
-| `compute.datumapis.com/placement` | The placement within that workload. | `americas` |
-| `compute.datumapis.com/instance` | The instance holding the interface. | `storefront-americas-dfw-0` |
+| `compute.datumapis.com/workload-name` | The workload owning the interface. | `storefront` |
+| `compute.datumapis.com/placement-name` | The placement within that workload. | `americas` |
+| `compute.datumapis.com/city-code` | The city the workload was placed in. | `dfw` |
+| `compute.datumapis.com/instance-index` | The instance's ordinal within the placement. | `0` |
+
+These are the keys compute already stamps on every Instance, reused rather than reinvented.
+Location appears twice, once from each service. Networking's own key is the one to select
+on, because networking sets it on the published copy and guarantees it for interfaces no
+workload created.
 
 Two properties follow. **Networking never interprets a compute key.** It matches values as
 opaque strings, exactly as a Kubernetes Service matches pods without knowing what a
@@ -332,8 +347,8 @@ keys — one placement, or one city:
 networkInterfaces:
   selector:
     matchLabels:
-      compute.datumapis.com/workload: storefront
-      topology.datum.net/city-code: DFW
+      compute.datumapis.com/workload-name: storefront
+      networking.datumapis.com/location: us-central-1
 ```
 
 Adding the city key restricts which interfaces are members; it does not steer traffic.
@@ -348,7 +363,7 @@ rollout or an application running alongside the thing it replaces both look:
 networkInterfaces:
   selector:
     matchExpressions:
-      - key: compute.datumapis.com/workload
+      - key: compute.datumapis.com/workload-name
         operator: In
         values: [storefront-blue, storefront-green]
 ```
@@ -491,44 +506,50 @@ interfaces everywhere would couple the edge to allocation details it never uses.
 | Control plane cell | Nothing durable; aggregates projections into the project | Networking |
 | Edge clusters | The resolved endpoint set per service | Networking |
 
-**Endpoints travel the platform's existing federation path.** They are not carried on a
-separate transport. Membership moves as ordinary resources through the same write-back and
-projection machinery every other cross-cell fact uses, which keeps one propagation path to
-operate, monitor, and debug rather than two.
+**Endpoints travel the platform's existing federation path**, and most of it already
+exists. Interfaces are published to consumers today by controllers that predate this
+proposal, so membership reads a copy that is already there rather than introducing a new
+distribution mechanism.
 
-**The endpoint projection.** When an interface becomes usable, its POP cell publishes a
-small record — the fabric address the edge dials, the city, the well-known labels, and
-whether the member is programmed or draining — rather than the interface itself. The POP cell composes that address
-because it is the only place that knows all three inputs: the node's locator, the VRF
-segment for this VPC on that node, and the member's address inside the network. This reuses the write-back-and-project pattern compute already uses for
-`Instance`, described in
-[Federated Deployment Scheduling](https://github.com/datum-cloud/compute/blob/main/docs/enhancements/federated-deployment-scheduling.md),
-including the `ns-<uid>` namespace mapping and `meta.datumapis.com/*` label tracking. It
-introduces no new distribution mechanism.
+| Step | Runs in | Does |
+|---|---|---|
+| `NetworkInterfaceClaimReconciler` | cell | Allocates addresses and binds a `NetworkInterface` to the claim |
+| `NetworkInterfaceWriteBackReconciler` | cell | Publishes a copy of the interface to the federation hub |
+| `NetworkInterfaceProjector` | hub | Publishes that copy into the consumer's project, owned by their `Network` |
+| `NetworkInterfaceProjectionGCReconciler` | hub | Removes a project copy once nothing is published behind it |
 
-**Labels travel with the projection.** Selection runs against the projected record, so the
-well-known labels are part of it rather than re-derived downstream. A POP cell knows its own
-city, so producing the city label needs no lookup.
+The published copy carries the network, interface name, MTU, addresses and reclaim policy.
+It drops everything naming an object that does not exist where the copy lands: the claim
+reference, the network context, the attachment, and the VPC identifier. That copy is what a
+consumer sees and what a NetworkService selects against.
+
+**Labels have to travel, and today they do not.** The vocabulary above is only useful if it
+survives from the claim compute writes to the copy a consumer selects. Three places drop it
+now: compute sets no labels on the claim, binding sets none on the interface it creates, and
+the projection builds a fixed set of keys rather than copying what it finds. Closing all
+three is the substantive federation work this proposal requires.
+
+<<[UNRESOLVED label propagation ]>>
+Propagating labels blindly is the simple rule, and it lets a consumer's key collide with a
+platform one. Restricting propagation to known prefixes avoids that and makes networking
+hold a list it otherwise would not. Decide which. Decide also whether a label added to a
+claim after creation is expected to reach the copy, since claims are written once and never
+updated today.
+
+Publishing claims to the project alongside interfaces would shorten this considerably.
+Labels would then travel one hop rather than three, from where compute already writes them
+to where a consumer already reads. A claim also states, in one object, both the addresses
+its interface holds and whether that interface is ready to serve, and it exists only while
+something holds the slot — so a retained interface with no holder could not be mistaken for
+a member. Selecting claims rather than interfaces is therefore a live alternative to the
+model described above, and it is the cheaper one to build.
+<<[/UNRESOLVED]>>
 
 **An endpoint joins when it can serve, not when it is allocated.** An interface holds an
 address before its data plane is programmed and before its instance runs. Publishing on
-allocation would put members into rotation that cannot carry traffic, so the projection
-waits for programming. This is why the interface design keeps allocation and programming as
+allocation would put members into rotation that cannot carry traffic, so membership waits
+for programming. This is why the interface design keeps allocation and programming as
 separate conditions.
-
-**A member's fabric address is node-scoped, so rescheduling changes it.** The uSID container
-embeds the locator of the node the member runs on. Retaining an interface preserves its
-address inside the network, but a member that moves to another node is a different fabric
-address and therefore a membership change. Placement churn drives propagation volume, not
-just scaling.
-
-<<[UNRESOLVED fabric addressing ]>>
-Two things follow from composing an address per member and need owners. First, what
-revalidates a projected address when a member moves, and how quickly a stale container stops
-being dialed. Second, how the fabric constrains which segments the edge may source: a uSID
-is a capability, so anything able to emit a tenant VRF segment reaches that VRF, and the
-control on that has to fail closed.
-<<[/UNRESOLVED]>>
 
 #### What happens when a control plane is unreachable
 
@@ -615,7 +636,7 @@ spec:
   networkInterfaces:
     selector:
       matchLabels:
-        compute.datumapis.com/workload: storefront
+        compute.datumapis.com/workload-name: storefront
   ports:
     - name: http
       port: 8080
@@ -644,7 +665,7 @@ spec:
 ```
 
 **What follows without being written.** Four instances come up, two per city. Compute
-requests an interface for each and labels it `compute.datumapis.com/workload: storefront`;
+requests an interface for each and labels it `compute.datumapis.com/workload-name: storefront`;
 networking labels it with its city. All four join the service. A request for
 `shop.example.com` from Atlanta is served from Dallas; the same request from Portland is
 served from San Jose. Adding `FRA` to `cityCodes` serves European users from Frankfurt,
@@ -729,7 +750,7 @@ the control plane and need measurement in the prod-fidelity environment first.
       scaled-up members wait for traffic and scaled-down members linger. Edge health
       checking bounds the harm of the latter.
 - Compute, for the well-known labels it applies
-  - Usage description: `compute.datumapis.com/workload` and its siblings are what most
+  - Usage description: `compute.datumapis.com/workload-name` and its siblings are what most
     consumers select on.
     - Impact of its outage: existing interfaces keep their labels.
     - Impact of its degraded performance: none on already-labeled interfaces.
