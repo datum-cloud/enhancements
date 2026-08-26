@@ -1,8 +1,4 @@
----
-status: provisional
-stage: alpha
-latest-milestone: "v0.x"
----
+--- status: provisional stage: alpha latest-milestone: "v0.x" ---
 
 # Network Services
 
@@ -38,42 +34,42 @@ latest-milestone: "v0.x"
 
 ## Summary
 
-A **NetworkService** is a named set of endpoints spanning every location a consumer runs in.
-Consumers select members by label; an HTTPProxy names the service as its backend.
+A **NetworkService** is a named set of endpoints spanning every location a consumer runs
+in. Consumers select members by label; an HTTPProxy names the service as its backend.
 
-Anycast brings each request to the closest edge. A NetworkService covers the rest: that edge
-ranks the service's locations by distance from itself, serves the request from the best one,
-and moves to the next if it fails. Consumers configure none of it.
+Anycast brings each request to the closest edge. A NetworkService covers the rest: that
+edge ranks the service's locations by distance from itself, serves the request from the
+best one, and moves to the next if it fails. Consumers configure none of it.
 
-Compute is the first consumer, not the only one. A NetworkService selects network interface
-claims, which is networking's own resource, so it never learns what a workload is. Anything
-that claims an interface can be a member.
+Compute is the first consumer, not the only one. A NetworkService selects network
+interface claims, which is networking's own resource, so it never learns what a workload
+is.
 
-This defines the consumer surface for
+This proposal defines the consumer surface for
 [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #1, geo-aware upstream
-selection, and answers the
-[Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) question of how a load
+selection, and answers the [Dani
+Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) question of how a load
 balancer discovers compute backends as instances start and stop.
 
 ## Motivation
 
-HTTPProxy was designed for one origin on the internet. The edge terminates TLS, protects it,
-and forwards. One endpoint URL per backend is right for that, and stays right for a customer
-whose origin is their own infrastructure.
+HTTPProxy assumes one origin on the internet. The edge terminates TLS, protects the
+origin, and forwards. One endpoint URL per backend is right for that, and stays right for
+a customer whose origin is their own infrastructure.
 
 Compute changes the problem. The origin becomes a set of instances the platform places,
-replaces, scales, and moves between locations. One URL cannot describe that, so the consumer
-reconciles it: enumerate every instance address and keep the list current, decide which
-location each point of presence prefers, and detect a failed location fast enough to matter.
-The first is tedious. The other two are easy to get wrong and hard to notice being wrong.
+replaces, scales, and moves between locations. One URL cannot describe that, so the
+consumer reconciles it: enumerate every instance address and keep the list current, decide
+which location each edge prefers, and detect a failed location fast enough to matter. The
+first is tedious. The other two are easy to get wrong and hard to notice being wrong.
 
-The platform already holds the inputs: where instances run, where points of presence are, and
-which members are healthy. Solving it once is cheaper than every consumer solving it
-separately, and again on every deployment change.
+The platform already holds the inputs: where instances run, where the edges are, and which
+members are healthy. Solving it once is cheaper than every consumer solving it separately
+on every deployment change.
 
-Nobody runs a multi-location application behind Datum's edge yet. Compute is what makes this
-urgent, and whatever needs traffic spread across locations next should reuse this rather than
-repeat it.
+Nobody runs a multi-location application behind Datum's edge yet. Compute is what makes
+the problem urgent, and whatever needs traffic spread across locations next should reuse
+this resource rather than repeat the work.
 
 ### Goals
 
@@ -88,9 +84,8 @@ repeat it.
 
 - **Modeling compute in the networking API.** A NetworkService selects network interface
   claims, so it stays usable for anything that claims an interface.
-- **The Layer 4 load balancer's configuration surface.** That is
-  [Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md). This defines the
-  membership that load balancer consumes, not its policy.
+- **The Layer 4 load balancer's configuration surface.** [Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) owns that. A
+  NetworkService defines the membership the load balancer consumes, not its policy.
 - **Per-request latency-based routing.** Steering here changes at control plane speed.
   Measured round-trip time is [Zava](../traffic-intelligence/envoy-routing-zava.md)
   feature #3.
@@ -102,10 +97,10 @@ repeat it.
 
 ## Proposal
 
-A consumer creates a `NetworkService` naming a label and a port. The platform resolves that
-label into the current endpoint set, records each member's location, and keeps it current.
-It handles everything else too: traffic distribution has one behavior, and consumers can
-inspect what it did but not change it.
+A consumer creates a `NetworkService` naming a label and a port. The platform resolves
+that label into the endpoint set, records each member's location, and keeps both current.
+The platform handles the rest: traffic distribution has one behavior, and consumers can
+inspect the result but not change it.
 
 ### What a consumer writes
 
@@ -124,7 +119,7 @@ spec:
       port: 8080
 ```
 
-Nearest-location routing, failover and health checking apply without being asked for.
+Nearest-location routing, failover, and health checking apply unasked.
 
 The proxy in front of it:
 
@@ -150,16 +145,15 @@ spec:
 Priya's storefront runs in Dallas and San Jose. She creates the NetworkService above,
 selecting the label compute already applies to her workload's interfaces.
 
-A shopper in Atlanta reaches Datum's Ashburn point of presence and is served from Dallas;
-a shopper in Portland reaches Seattle and is served from San Jose. Priya configured neither
-route.
+A shopper in Atlanta reaches Datum's Ashburn edge and is served from Dallas; a shopper in
+Portland reaches Seattle and is served from San Jose. Priya configured neither route.
 
 #### Story 2: Change capacity without editing anything
 
 Priya scales Dallas from two replicas to twenty for Black Friday. The new claims carry the
-same label, join the service, and take traffic once they are running. She scales back down on
-Saturday, and the instances going away finish their in-flight requests first. Later she adds
-Frankfurt, and European users start being served there.
+same label, join the service, and take traffic once they are running. She scales back down
+on Saturday, and the instances going away finish their in-flight requests first. Later she
+adds Frankfurt, and European users start being served there.
 
 None of it requires an edit to the NetworkService or the HTTPProxy.
 
@@ -172,20 +166,18 @@ returns. Priya reads about it in the morning.
 ### Notes/Constraints/Caveats
 
 **A member's location is observed, not declared.** The platform reads it from where the
-member runs, so the resource carries no location list and stays correct when capacity moves.
-Controls consumers will want later, pinning to a location or weighting across several, belong
-on top of an observed location rather than replacing it.
+member runs, so the resource carries no location list and stays correct when capacity
+moves. Controls consumers will want later, pinning to a location or weighting across
+several, belong on top of an observed location rather than replacing it.
 
 **Membership is a query over network interface claims.** A claim is networking's own
-resource, so anything that claims an interface can be a member: a compute instance today, a
-load balancer or appliance later. It is the claim rather than the interface because a claim
-exists only while something holds the slot, so retired capacity cannot be mistaken for a
-member.
+resource, so anything that claims an interface can be a member: a compute instance today,
+a load balancer or appliance later.
 
-**Selecting works without labelling anything first.** Claim-creating services stamp a
+**Selecting works without labeling anything first.** Claim-creating services stamp a
 defined set of keys, so the facts worth selecting on are already present and spelled the
-same way for everyone. Consumers can still be given their own labels later. See
-[Well-known labels](#well-known-labels).
+same way for everyone. Consumers can still get their own labels later; see [Well-known
+labels](#well-known-labels).
 
 <<[UNRESOLVED labels ]>>
 This document proposes the vocabulary but cannot assign the work. Each owning service must
@@ -196,11 +188,10 @@ commit to stamping its keys, the compute keys especially.
 already forward to a single instance on a tenant network: the CNI publishes an endpoint
 carrying the segment identifier the tenant-VRF mechanism needs, and the proxy forwards it
 untouched rather than synthesizing an address. A NetworkService generalizes that to a
-selected, location-aware set, introducing no second backhaul path. Members therefore need no
-public address, so origins are reachable only through the edge. Nearest is computed from
-topology and geography, which tracks latency closely because backhaul stays on Datum's own
-network; measured signals replace the approximation later through
-[Zava](../traffic-intelligence/envoy-routing-zava.md) and change no API.
+selected, location-aware set, introducing no second backhaul path. Members therefore need
+no public address, so origins are reachable only through the edge. Because backhaul stays
+on Datum's own network, a nearest computed from topology and geography tracks latency
+closely.
 
 <<[UNRESOLVED endpoint resolution ]>>
 Membership selects claims; the edge forwards to CNI-published endpoints. Something has to
@@ -215,7 +206,7 @@ through shared labels, is the first thing to settle in implementation.
 | Risk | Mitigation |
 |---|---|
 | An over-broad selector sends traffic to the wrong endpoints | Per-location status makes resolved membership visible. A selector spanning networks is caught loudly; one matching nothing is a condition, not a rejection, since a service may be written before its workload. |
-| Failover moves traffic across a jurisdiction boundary | None in this milestone: there is no control for declaring that spilling is unacceptable. Consumers with hard residency obligations should not use a NetworkService yet, and the product surface must say so. The durable answer is a sovereignty constraint in [Total Load Balancing](../traffic-intelligence/total-load-balancing.md). |
+| Failover moves traffic across a jurisdiction boundary | None in this milestone: no control declares spilling unacceptable. Consumers with hard residency obligations should not use a NetworkService yet, and the product surface must say so. The durable answer is a sovereignty constraint in [Total Load Balancing](../traffic-intelligence/total-load-balancing.md). |
 | Membership goes stale, or members are unreachable, while status looks healthy | Report when membership was last confirmed rather than presenting it as live, and surface reachability in the service's own status rather than only in proxy error rates. |
 
 Security review must cover selector scoping across namespace and project boundaries, and
@@ -254,17 +245,15 @@ spec:
 
 A claim joins when it matches the selector, its interface is programmed, and its holder
 reports running. It leaves when it stops matching or goes away, ordinarily after
-[draining](#draining) rather than abruptly. A claim carries both halves of what membership
-needs: the addresses its interface holds, and whether that interface is allocated and
-programmed.
+[draining](#draining) rather than abruptly. A claim carries the addresses its interface
+holds and whether that interface is programmed. A selector reaches only the consumer's own
+resources.
 
-Selectors are scoped to the consumer's own resources.
-
-**A service spans one network.** Reaching a member means entering the network it sits on, and
-the proxy establishes that once per upstream rather than per request, so members from two
-networks cannot be served together. A selector matching across networks is a configuration
-error. Whether the service names its network outright or reports the mismatch is an open
-shape; the constraint holds either way.
+**A service spans one network.** Reaching a member means entering the network it sits on,
+and the proxy establishes that once per upstream rather than per request, so members from
+two networks cannot be served together. A selector matching across networks is a
+configuration error. Whether the service names its network outright or reports the
+mismatch is an open shape; the constraint holds either way.
 
 A NetworkService is written in one control plane and its members live in others.
 [Federation](#federation) covers how the facts travel.
@@ -288,14 +277,14 @@ Compute applies these to the claim it creates, and they travel to the published 
 | `compute.datumapis.com/city-code` | The city the workload was placed in. | `dfw` |
 | `compute.datumapis.com/instance-index` | The instance's ordinal within the placement. | `0` |
 
-These are the keys compute already stamps on every Instance, reused rather than reinvented.
-Location appears twice, once from each service. Networking's own key is the one to select
-on, because networking sets it on the published copy and guarantees it for claims no
-workload created.
+These are the keys compute already stamps on every Instance, reused rather than
+reinvented. Location appears twice: networking's `location` and compute's `city-code`.
+Networking's own key is the one to select on, because networking sets it on the published
+copy and guarantees it for claims no workload created.
 
 **Networking never interprets a compute key.** A key's prefix records which service
-guarantees it, not which understands it, so any service can populate its own keys under its
-own prefix without changing networking.
+guarantees the key, not which service understands it. Any service can therefore populate
+keys under its own prefix without changing networking.
 
 Selecting a whole application is the common case, as shown above. Narrower selections add
 keys — one placement, or one city:
@@ -309,12 +298,12 @@ networkInterfaceClaims:
 ```
 
 Adding the location key restricts which claims are members; it does not steer traffic.
-Location steering is automatic and never appears in a selector. Restricting a service to
-Dallas capacity happens here; getting Dallas users served from Dallas requires nothing.
+Restricting a service to Dallas capacity happens here; getting Dallas users served from
+Dallas requires nothing.
 
 The selector is a standard label selector, so a service can span more than one value of a
-key. That is what lets two workloads serve one hostname, as a blue/green rollout does. It is
-in from the start because the field's shape would have to change to add it later:
+key. Spanning values lets two workloads serve one hostname, as a blue/green rollout does.
+The field takes this shape from the start because adding it later would change the shape:
 
 ```yaml
 networkInterfaceClaims:
@@ -325,24 +314,22 @@ networkInterfaceClaims:
         values: [storefront-blue, storefront-green]
 ```
 
-**Managing addresses.** The same vocabulary pays off beyond load balancing: which addresses
-an application holds, which it holds in one location, and which survive a replacement all
-become the same query.
+**Managing addresses.** The same vocabulary pays off beyond load balancing: which
+addresses an application holds, which it holds in one location, and which survive a
+replacement all become the same query.
 
 ### Traffic distribution
 
 `spec.trafficDistribution.strategy` defaults to `Nearest`, the only value this milestone
-accepts. Each edge ranks the service's locations by distance from itself and serves from the
-best available one, moving down the ranking as health degrades and back up on recovery.
+accepts; see [How nearest is decided](#how-nearest-is-decided).
 
-The field carries one value deliberately. We expect to add strategies, and a consumer who
-sets this today keeps working when we do. The cost is that a single-value enum reads like an
-unfinished API.
+The field carries one value deliberately: a consumer who sets it today keeps working when
+we add strategies, at the cost of an enum that reads unfinished.
 
 ### Health
 
-Three things have to be true before a member takes traffic, each established by whoever can
-see it.
+Three things have to be true before a member takes traffic, each established by whoever
+can see it.
 
 | Signal | Established by | Catches |
 |---|---|---|
@@ -350,27 +337,27 @@ see it.
 | The holder is running | whatever holds the claim | A member whose workload has not started |
 | Requests succeed | the edge, watching real traffic | A member that is up but broken |
 
-The first two decide whether a member is published. The third runs continuously afterwards,
-and consumers configure none of it.
+The first two decide whether a member is published. The third runs continuously
+afterwards.
 
-Judging by real traffic costs something. Detection is reactive, so a few requests fail
-before a member is ejected, and recovery is tested with real requests rather than probes. A
-member receiving no traffic is not assessed at all, which matters most in a location sitting
-idle because its users are served closer.
+Detection is reactive, so a few requests fail before a member is ejected, and recovery is
+tested with real requests rather than probes. A member receiving no traffic is not
+assessed at all, which matters most in a location sitting idle because its users are
+served closer.
 
-Ejection also drives location failover: enough ejected members degrade a location far enough
-that traffic moves down the ranking.
+Ejection also drives location failover: enough ejected members degrade a location far
+enough that traffic moves down the ranking.
 
-This is independent of the platform-wide health signals
+Edge health checking is independent of the platform-wide health signals
 [Nate](../traffic-intelligence/health-checks-nate.md) publishes, which run on a different
 timescale for a different purpose.
 
 <<[UNRESOLVED ejection ]>>
 Ejection is capped as a share of a location's members, and under a common default a
-two-member location can eject neither. Two replicas per location is the ordinary case here,
-so pick the defaults against that size: how many failed requests eject a member, how long it
-stays out, and how much of a location may go at once. Allowing a whole location to be
-ejected makes failover work when everything there is broken; capping below that stops a
+two-member location can eject neither. Two replicas per location is the ordinary case
+here, so pick the defaults against that size: how many failed requests eject a member, how
+long it stays out, and how much of a location may go at once. Allowing a whole location to
+be ejected makes failover work when everything there is broken; capping below that stops a
 location emptying on a correlated blip.
 <<[/UNRESOLVED]>>
 
@@ -379,27 +366,29 @@ location emptying on a correlated blip.
 A member that is going away leaves rotation before it stops answering, so requests already
 in flight finish and no new ones arrive.
 
-Without it, the edge finds out by dialing a member and failing. Health checking bounds that
-to seconds, but those seconds are user-visible errors, and every scale-down and rolling
-update produces one such window per member replaced. Because a member's address is tied to
-its node, a rescheduled instance is a departure and an arrival rather than an update, which
-makes routine deployments the common case for this rather than the rare one.
+Without it, the edge finds out by dialing a member and failing. Health checking bounds
+that to seconds, but those seconds are user-visible errors, and every scale-down and
+rolling update produces one such window per member replaced. Because a member's address is
+tied to its node, a rescheduled instance is a departure and an arrival rather than an
+update, which makes routine deployments the common case for this rather than the rare one.
 
-Draining needs to know a member is about to go away, not that it has. That signal belongs to
-whatever retires the member, and it is the same surface that reports a member has started.
+Draining depends on notice that a member is about to go away, not that it has. That signal
+belongs to whatever retires the member, and it is the same surface that reports a member
+has started.
 
 <<[UNRESOLVED holder lifecycle ]>>
 Whatever holds a claim reports two transitions on it: started, and about to stop. For
 compute that is an instance reaching running and an instance being retired. The retirement
 notice has to reach the edge before the member stops answering, and how much warning that
-needs depends on propagation, which is unmeasured, so settle the two together. A member lost
-abruptly through node failure gives no notice and stays with the edge's health checking.
+needs depends on propagation, which is unmeasured, so settle the two together. A member
+lost abruptly through node failure gives no notice and stays with the edge's health
+checking.
 
-Decide also how a not-yet-running member is represented. Publishing it as not-ready marks it
-draining at the proxy, which withholds traffic correctly but counts it against its location's
-health: a location scaling from two members to twenty would briefly look mostly unhealthy and
-could spill traffic away for no reason. Omitting a member until it runs avoids that and makes
-joining and leaving asymmetric.
+Decide also how a not-yet-running member is represented. Publishing it as not-ready marks
+it draining at the proxy, which withholds traffic correctly but counts it against its
+location's health: a location scaling from two members to twenty would briefly look mostly
+unhealthy and could spill traffic away for no reason. Omitting a member until it runs
+avoids that and makes joining and leaving asymmetric.
 <<[/UNRESOLVED]>>
 
 ### What a consumer can see
@@ -426,30 +415,29 @@ out of rotation" without contacting support.
 ### Consuming a network service
 
 An HTTPProxy rule reaches a service through a `networkService` backend naming the service
-and one of its ports. This sits alongside the existing backend forms — an endpoint URL, and
-an endpoint reached through a connector.
-Referencing by name rather than by API group and kind keeps HTTPProxy backends a curated
-set; see [Alternatives](#alternatives). Naming a port rather than a number lets the
-reference survive a port change.
+and one of its ports. The `networkService` backend sits alongside three existing forms: an
+endpoint URL, an endpoint reached through a connector, and a single instance on a tenant
+network. It generalizes that last one from one endpoint to a set.
 
-The same resource is intended to back a Layer 4 load balancer when
-[Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) becomes
-customer-configurable. That is why ports carry a protocol and the resource is not named for
-HTTP.
+Referencing by name rather than by API group and kind keeps HTTPProxy backends a curated
+set. Naming a port rather than a number lets the reference survive a port change.
+
+We intend the same resource to back a Layer 4 load balancer when [Dani
+Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) becomes
+customer-configurable. That is why ports carry a protocol and the resource is not named
+for HTTP.
 
 ### Federation
 
 A consumer writes a NetworkService in their project. Its members are claims served in POP
-cells, which are separate clusters from the edge clusters serving traffic. This section
-states how the facts travel and what happens when a control plane becomes unreachable.
+cells, which are separate clusters from the edge clusters serving traffic.
 
 **Each control plane holds the minimum it needs.** A cell holds full-fidelity interfaces
-because providers there configure real NICs. The edge holds addresses, ports, locations and
-health, because that is all a proxy needs to pick a member. Copying whole interfaces
-everywhere would couple the edge to allocation details it never uses.
+because providers there configure real NICs. The edge holds addresses, ports, locations,
+and health, because that is all a proxy needs to pick a member.
 
-Most of the path already exists. Interfaces are published to consumers today by controllers
-that predate this proposal, so membership reads a copy that is already there rather than
+Most of the path already exists. Controllers that predate this proposal already publish
+interfaces to consumers, so membership reads a copy that is already there rather than
 introducing a new distribution mechanism.
 
 | Where | What happens |
@@ -458,18 +446,17 @@ introducing a new distribution mechanism.
 | Cell → hub | `NetworkInterfaceWriteBackReconciler` publishes a copy of the interface |
 | Hub → project | `NetworkInterfaceProjector` publishes that copy into the project, owned by the consumer's `Network` |
 | Hub | `NetworkInterfaceProjectionGCReconciler` removes a project copy once nothing is published behind it |
-| **Cell → hub → project** | **Claim publication, on the same path, so a consumer sees the slot as well as the interface. This does not exist yet.** |
+| **Cell → hub → project** | **Claim publication, on the same path, so a consumer sees the claim as well as the interface. This does not exist yet.** |
 | Project | The consumer's `NetworkService`, with resolved membership in its status |
 | Hub → edges | The resolved endpoint set per service, federated out |
 
-A published copy carries the network, interface name, MTU, addresses and reclaim policy, and
-drops everything naming an object that does not exist where it lands: the claim reference,
-the network context, the attachment, and the VPC identifier.
+A published copy carries the network, interface name, MTU, addresses, and reclaim policy.
+It drops everything naming an object that does not exist where it lands: the claim
+reference, the network context, the attachment, and the VPC identifier.
 
-**Labels have to travel, and today they do not.** The vocabulary above is only useful if it
-survives from the claim compute writes to the copy a consumer selects. Compute sets no
-labels on the claim today, and no claim is published to the project at all. Those two gaps
-are the substantive federation work this proposal requires.
+**Labels have to travel, and today they do not.** Compute sets no labels on the claim
+today, and no claim is published to the project at all. Those two gaps are the substantive
+federation work this proposal requires.
 
 Selecting claims rather than interfaces keeps that work short. Labels travel one hop, from
 where compute writes them to where a consumer reads them, instead of crossing binding and
@@ -479,16 +466,16 @@ projection on the way.
 Propagating labels blindly is the simple rule, and it lets a consumer's key collide with a
 platform one. Restricting propagation to known prefixes avoids that and makes networking
 hold a list it otherwise would not. Decide which. Decide also whether a label added to a
-claim after creation is expected to reach the copy, since claims are written once and never
-updated today.
+claim after creation is expected to reach the copy, since claims are written once and
+never updated today.
 <<[/UNRESOLVED]>>
 
 **A member joins when it can serve, not when it is allocated.** A claim holds an address
-before its data plane is programmed, and is programmed before the workload behind it starts
-answering. Membership waits for both. The second half is not networking's to observe: the
-holder reports it on the claim, and membership reads it without knowing what reported it.
-That is the same signal surface [Draining](#draining) needs for the other edge, so one
-mechanism covers both transitions.
+before its data plane is programmed, and is programmed before the workload behind it
+starts answering. Membership waits for both. The second half is not networking's to
+observe: the holder reports it on the claim, and membership reads that report without
+knowing what wrote it. That is the same signal surface [Draining](#draining) needs for the
+other edge, so one mechanism covers both transitions.
 
 #### What happens when a control plane is unreachable
 
@@ -500,25 +487,24 @@ mechanism covers both transitions.
 | Project control plane unavailable | Services cannot be created or edited; existing ones keep serving. | Consumers lose the ability to change things, not the ability to serve traffic. |
 | Edge cluster isolated | That edge serves its last known configuration. | Anycast withdraws an edge that is badly broken. One that is merely stale still serves users correctly. |
 
-**Control plane reachability is never treated as data plane health.** These are independent
-signals about different things, and conflating them turns routine control plane incidents
-into traffic incidents. Membership answers which members exist. Only edge health checking
-answers which members work.
+**Never treat control plane reachability as data plane health.** Conflating them turns
+routine control plane incidents into traffic incidents. Membership answers which members
+exist. Only edge health checking answers which members work.
 
 <<[UNRESOLVED staleness ]>>
 Fail-static is right for a short outage and wrong for an indefinite one. Membership frozen
-for a week is not a useful answer. Decide whether a staleness bound exists and what it does
-when crossed. Note that the obvious answer — expiring stale members — reintroduces the
-failure the table above rejects.
+for a week is not a useful answer. Decide whether a staleness bound exists and what it
+does when crossed. The obvious answer — expiring stale members — reintroduces the failure
+the table above rejects.
 <<[/UNRESOLVED]>>
 
 ### How nearest is decided
 
-Each point of presence ranks the service's locations by proximity to itself, prefers its own
-top-ranked location, and treats the rest as an ordered fallback. Because every point of
-presence ranks for itself, one NetworkService produces correct local behavior everywhere.
-The consumer never expresses a matrix of locations against points of presence, which is what
-makes hand-rolled multi-region routing miserable.
+Each edge ranks the service's locations by proximity to itself, prefers its own top-ranked
+location, and treats the rest as an ordered fallback. Because every edge ranks for itself,
+one NetworkService produces correct local behavior everywhere. The consumer never
+expresses a matrix of locations against edges, which is what makes hand-rolled
+multi-region routing miserable.
 
 Ranking starts from platform topology and geographic coordinates. Measured signals replace
 them as the [Total Load Balancing](../traffic-intelligence/total-load-balancing.md) signal
@@ -564,47 +550,39 @@ spec:
                   protocol: TCP
 ```
 
-**2. The network service and the proxy.** Exactly as shown in
-[What a consumer writes](#what-a-consumer-writes). Neither changes because the workload runs
-in two cities rather than one.
+**2. The network service and the proxy.** Exactly as shown in [What a consumer
+writes](#what-a-consumer-writes). Neither changes because the workload runs in two cities
+rather than one.
 
 **What follows without being written.** Four instances come up, two per city. Compute
-requests an interface for each and labels it `compute.datumapis.com/workload-name: storefront`;
-networking labels it with its city. All four join the service. A request for
-`shop.example.com` from Atlanta is served from Dallas; the same request from Portland is
-served from San Jose. Adding `FRA` to `cityCodes` serves European users from Frankfurt,
-changing neither networking resource. Losing Dallas moves its traffic to San Jose and
-returns it on recovery.
-
+requests an interface for each and labels it `compute.datumapis.com/workload-name:
+storefront`; networking labels it with its city. All four join the service. A request for
 The consumer wrote no label, and neither networking resource mentions a city, an address,
 or a workload.
-
-This assumes compute applies the keys in [Well-known labels](#well-known-labels), which is
-the open commitment noted there.
 
 ## Production Readiness Review Questionnaire
 
 ### Feature Enablement and Rollback
 
 Additive, and in use only where a consumer created a `NetworkService` and referenced it.
-Existing endpoint-URL, connector and instance backends are untouched, so enabling changes no
-default behaviour and needs no downtime. Rolling back is consumer-visible: a proxy backed by
-a NetworkService has no fallback backend, so those proxies stop serving. Re-enabling
-converges on reality, because membership re-resolves from current state rather than a stored
-list.
+Existing endpoint-URL, connector, and instance backends are untouched, so enabling changes
+no default behavior and needs no downtime. Rolling back is consumer-visible: a proxy
+backed by a NetworkService has no fallback backend, so those proxies stop serving.
+Re-enabling converges on reality, because membership re-resolves from current state rather
+than a stored list.
 
 ### Monitoring Requirements
 
 Uptake is a count of `NetworkService` resources and of HTTPProxy rules referencing one.
-Consumers see whether it works through `.status`: the `Ready`, `MembersResolved` and
+Consumers see whether it works through `.status`: the `Ready`, `MembersResolved`, and
 `EndpointsReachable` conditions, and per-location member and healthy counts. SLIs are
 membership resolution latency, per-location healthy member count, edge requests by serving
 location, and failover events per service.
 
 <<[UNRESOLVED slos ]>>
 Two numbers need agreement and neither should be guessed: how quickly a membership change
-reaches the edge, and how quickly a health change moves traffic. Both are end-to-end across
-the control plane and need measurement in the prod-fidelity environment first.
+reaches the edge, and how quickly a health change moves traffic. Both are end-to-end
+across the control plane and need measurement in the prod-fidelity environment first.
 <<[/UNRESOLVED]>>
 
 ### Dependencies
@@ -614,11 +592,12 @@ the control plane and need measurement in the prod-fidelity environment first.
 | Network interface claims | The unit of membership | Membership cannot change; programmed endpoints keep serving |
 | Karmada federation | Carrying claims toward the project and endpoints out to the edges | Membership freezes, deliberately |
 | Compute | Stamping the well-known labels most consumers select on | Existing claims keep their labels |
-| Location topology | Ranking locations by proximity for each point of presence | The existing ranking continues to apply |
+| Location topology | Ranking locations by proximity for each edge | The existing ranking continues to apply |
 | Edge proxy fleet | Load balancing and health checking | Traffic is not served, which is the existing edge failure mode |
 
 Degraded performance in the first two shows up as membership lagging reality: scaled-up
-members wait for traffic, scaled-down members linger. Edge health checking bounds the latter.
+members wait for traffic, scaled-down members linger. Edge health checking bounds the
+latter.
 
 ### Scalability
 
@@ -628,11 +607,12 @@ per application per project. Edge endpoint configuration grows from one endpoint
 rule to one per member.
 
 <<[UNRESOLVED scale ]>>
-Endpoint fan-out grows differently from the gateway-count growth already measured and needs
-its own measurement before limits are published. Test the configuration size ceiling early:
-a prior scale run stopped programming silently once generated configuration crossed the
-default message limit, and endpoints draw on the same budget. If this is what binds, it is
-the trigger for the separate delivery path recorded in [Alternatives](#alternatives).
+Endpoint fan-out grows differently from the gateway-count growth already measured and
+needs its own measurement before limits are published. Test the configuration size ceiling
+early: a prior scale run stopped programming silently once generated configuration crossed
+the default message limit, and endpoints draw on the same budget. If this is what binds,
+it is the trigger for the separate delivery path recorded in
+[Alternatives](#alternatives).
 <<[/UNRESOLVED]>>
 
 ## Implementation History
@@ -641,50 +621,51 @@ the trigger for the separate delivery path recorded in [Alternatives](#alternati
 
 ## Drawbacks
 
-**A selector that stops matching produces no error.** Traffic goes missing where an explicit
-list would fail visibly. That is the price of membership tracking reality, and it puts a lot
-of weight on the status surface being right.
+**A selector that stops matching produces no error.** Traffic goes missing where an
+explicit list would fail visibly. That is the price of membership tracking reality, and it
+puts a lot of weight on the status surface being right.
 
-**Consumers whose needs differ from the defaults have no recourse.** With one strategy value
-and no health check configuration, canarying a location, draining one for maintenance,
-holding traffic inside a jurisdiction, and tuning how readily a member is ejected are all
-unavailable. The only workaround is to stop using a NetworkService, so a consumer who needs
+**Consumers whose needs differ from the defaults have no recourse.** With one strategy
+value and no health check configuration, a consumer cannot canary a location, drain one
+for maintenance, hold traffic inside a jurisdiction, or tune how readily a member is
+ejected. The only workaround is to stop using a NetworkService, so a consumer who needs
 one of these is blocked rather than inconvenienced.
 
-**Judging health by real traffic means some requests pay for it.** A member is ejected after
-it has failed requests, not before. Only a declared health check would catch a broken member
-before it serves anyone.
+**Judging health by real traffic means some requests pay for it.** A member is ejected
+after it has failed requests, not before. Only a declared health check would catch a
+broken member before it serves anyone.
 
-**Nearest-location routing depends on the platform knowing where capacity is.** If that data
-is wrong, routing is wrong in a way that looks fine from the outside, which is much harder to
-debug than an outright failure.
+**Nearest-location routing depends on the platform knowing where capacity is.** If that
+data is wrong, routing is wrong in a way that looks fine from the outside, which is much
+harder to debug than an outright failure.
 
 ## Alternatives
 
-**Point the proxy at a workload.** Puts a compute concept in the networking API, couples the
-two services' release cycles, and offers nothing for endpoints compute did not create.
+**Point the proxy at a workload.** Puts a compute concept in the networking API, couples
+the two services' release cycles, and offers nothing for endpoints compute did not create.
 
 **Let consumers list endpoints with per-location weights.** Hands the consumer exactly the
-work this proposal exists to absorb: a list that goes stale on the first capacity change, and
-a weight matrix maintained against every point of presence.
+work this proposal exists to absorb: a list that goes stale on the first capacity change,
+and a weight matrix maintained against every edge.
 
-**Select the interface rather than the claim that holds it.** A retained interface outlives
-its claim, keeping its address and labels while nothing runs behind it, so membership would
-include retired capacity that a label selector cannot filter out. Labels would also have to
-survive binding and projection, which is three places to get right instead of one.
+**Select the interface rather than the claim that holds it.** A retained interface
+outlives its claim, keeping its address and labels while nothing runs behind it, so
+membership would include retired capacity that a label selector cannot filter out. Labels
+would also have to survive binding and projection, which is three places to get right
+instead of one.
 
 **Deliver endpoints outside the resource path**, either on a purpose-built transport or by
 pointing the proxy at a separate source. Both keep membership out of the configuration the
 proxy is otherwise given, so churn costs less and service size stops bearing on
 configuration limits. Deferred rather than rejected: each adds a delivery mechanism to
-operate, debug and alert on, for a payload the existing path already carries. Revisit if
-measurement shows membership size, churn or propagation is the binding constraint.
+operate, debug, and alert on, for a payload the existing path already carries. Revisit if
+measurement shows membership size, churn, or propagation is the binding constraint.
 
 **Solve it in DNS.** The wrong layer: it fails over at cache speed rather than connection
-speed, and discards the edge's knowledge of where the request entered. DNS steering remains
-valuable as [Jamie Tartt](../traffic-intelligence/gslb-jamie-tartt.md), a complement rather
-than a substitute.
+speed, and discards the edge's knowledge of where the request entered. DNS steering
+remains valuable as [Jamie Tartt](../traffic-intelligence/gslb-jamie-tartt.md), a
+complement rather than a substitute.
 
-**Name the resource `Backend` or `EndpointGroup`.** `Backend` collides with an existing type
-in the edge proxy stack and names a position rather than a thing. `EndpointGroup` describes
-membership accurately but forecloses the address this resource may grow.
+**Name the resource `Backend` or `EndpointGroup`.** `Backend` collides with an existing
+type in the edge proxy stack and names a position rather than a thing. `EndpointGroup`
+describes membership accurately but forecloses the address this resource may grow.
