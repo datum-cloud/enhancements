@@ -185,11 +185,16 @@ routes mean the closest location is sometimes not the fastest.
 
 ### Risks and Mitigations
 
-| Risk | Mitigation |
-|---|---|
-| An over-broad selector sends traffic to the wrong endpoints | Per-location status makes resolved membership visible. A selector spanning networks is caught loudly; one matching nothing raises a condition, since a service may be written before its workload. |
-| Failover moves traffic across a jurisdiction boundary | None in this milestone: no control declares spilling unacceptable. Consumers with hard residency obligations should not use a NetworkService yet, and the product must say so. The durable answer is a sovereignty constraint in [Total Load Balancing](../traffic-intelligence/total-load-balancing.md). |
-| Membership goes stale, or members are unreachable, while status looks healthy | Report when membership was last confirmed rather than presenting it as live, and report reachability in the service's own status rather than only in proxy error rates. |
+- **An over-broad selector sends traffic to the wrong endpoints.** Per-location status makes
+  resolved membership visible. A selector spanning networks is caught loudly. One matching
+  nothing raises a condition, since a service may be written before its workload.
+- **Failover moves traffic across a jurisdiction boundary.** No control declares spilling
+  unacceptable in this milestone, so consumers with hard residency obligations should not
+  use a NetworkService yet, and the product must say so. The durable answer is a sovereignty
+  constraint in [Total Load Balancing](../traffic-intelligence/total-load-balancing.md).
+- **Membership goes stale, or members are unreachable, while status looks healthy.** Report
+  when membership was last confirmed rather than presenting it as live, and report
+  reachability in the service's own status rather than only in proxy error rates.
 
 Security review must cover selector scoping across namespace and project boundaries, and
 confirm that a consumer cannot select claims they do not own.
