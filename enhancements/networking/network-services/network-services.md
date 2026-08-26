@@ -41,9 +41,8 @@ Anycast brings each request to the closest edge. A NetworkService covers the res
 edge ranks the service's locations by distance from itself, serves the request from the
 best one, and moves to the next if it fails. Consumers configure none of it.
 
-Compute is the first consumer, not the only one. A NetworkService selects network
-interface claims, which is networking's own resource, so it never learns what a workload
-is.
+Compute is the first consumer. Others follow. A NetworkService selects network interface
+claims, which is networking's own resource, so it never learns what a workload is.
 
 This proposal defines the consumer surface for
 [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #1, geo-aware upstream
@@ -85,7 +84,8 @@ this resource rather than repeat the work.
 - **Modeling compute in the networking API.** A NetworkService selects network interface
   claims, so it stays usable for anything that claims an interface.
 - **The Layer 4 load balancer's configuration surface.** [Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) owns that. A
-  NetworkService defines the membership the load balancer consumes, not its policy.
+  NetworkService defines the membership that load balancer consumes. Its policy belongs
+  there.
 - **Per-request latency-based routing.** Steering here changes at control plane speed.
   Measured round-trip time is [Zava](../traffic-intelligence/envoy-routing-zava.md)
   feature #3.
@@ -160,15 +160,15 @@ None of it requires an edit to the NetworkService or the HTTPProxy.
 #### Story 3: Survive a location failure at 3am
 
 Dallas loses power. Health checks fail and its traffic moves to San Jose within seconds.
-Users see higher latency, not errors. Dallas resumes serving its own region when it
-returns. Priya reads about it in the morning.
+Users see higher latency. They see no errors. Dallas resumes serving its own region when
+it returns. Priya reads about it in the morning.
 
 ### Notes/Constraints/Caveats
 
-**A member's location is observed, not declared.** The platform reads it from where the
-member runs, so the resource carries no location list and stays correct when capacity
-moves. Controls consumers will want later, pinning to a location or weighting across
-several, belong on top of an observed location rather than replacing it.
+**The platform observes a member's location.** The platform reads it from where the member
+runs, so the resource carries no location list and stays correct when capacity moves.
+Controls consumers will want later, pinning to a location or weighting across several,
+belong on top of an observed location rather than replacing it.
 
 **Membership is a query over network interface claims.** A claim is networking's own
 resource, so anything that claims an interface can be a member: a compute instance today,
@@ -205,7 +205,7 @@ through shared labels, is the first thing to settle in implementation.
 
 | Risk | Mitigation |
 |---|---|
-| An over-broad selector sends traffic to the wrong endpoints | Per-location status makes resolved membership visible. A selector spanning networks is caught loudly; one matching nothing is a condition, not a rejection, since a service may be written before its workload. |
+| An over-broad selector sends traffic to the wrong endpoints | Per-location status makes resolved membership visible. A selector spanning networks is caught loudly; one matching nothing raises a condition, since a service may be written before its workload. |
 | Failover moves traffic across a jurisdiction boundary | None in this milestone: no control declares spilling unacceptable. Consumers with hard residency obligations should not use a NetworkService yet, and the product surface must say so. The durable answer is a sovereignty constraint in [Total Load Balancing](../traffic-intelligence/total-load-balancing.md). |
 | Membership goes stale, or members are unreachable, while status looks healthy | Report when membership was last confirmed rather than presenting it as live, and surface reachability in the service's own status rather than only in proxy error rates. |
 
@@ -283,8 +283,8 @@ Networking's own key is the one to select on, because networking sets it on the 
 copy and guarantees it for claims no workload created.
 
 **Networking never interprets a compute key.** A key's prefix records which service
-guarantees the key, not which service understands it. Any service can therefore populate
-keys under its own prefix without changing networking.
+guarantees the key. No service has to understand another's keys. Any service can therefore
+populate keys under its own prefix without changing networking.
 
 Selecting a whole application is the common case, as shown above. Narrower selections add
 keys — one placement, or one city:
@@ -372,9 +372,9 @@ rolling update produces one such window per member replaced. Because a member's 
 tied to its node, a rescheduled instance is a departure and an arrival rather than an
 update, which makes routine deployments the common case for this rather than the rare one.
 
-Draining depends on notice that a member is about to go away, not that it has. That signal
-belongs to whatever retires the member, and it is the same surface that reports a member
-has started.
+Draining depends on notice that a member is about to go away, given before it does. That
+signal belongs to whatever retires the member, and it is the same surface that reports a
+member has started.
 
 <<[UNRESOLVED holder lifecycle ]>>
 Whatever holds a claim reports two transitions on it: started, and about to stop. For
@@ -470,12 +470,12 @@ claim after creation is expected to reach the copy, since claims are written onc
 never updated today.
 <<[/UNRESOLVED]>>
 
-**A member joins when it can serve, not when it is allocated.** A claim holds an address
-before its data plane is programmed, and is programmed before the workload behind it
-starts answering. Membership waits for both. The second half is not networking's to
-observe: the holder reports it on the claim, and membership reads that report without
-knowing what wrote it. That is the same signal surface [Draining](#draining) needs for the
-other edge, so one mechanism covers both transitions.
+**A member joins once it can serve.** A claim holds an address before its data plane is
+programmed, and is programmed before the workload behind it starts answering. Membership
+waits for both. The second half is not networking's to observe: the holder reports it on
+the claim, and membership reads that report without knowing what wrote it. That is the
+same signal surface [Draining](#draining) needs for the other edge, so one mechanism
+covers both transitions.
 
 #### What happens when a control plane is unreachable
 
@@ -484,7 +484,7 @@ other edge, so one mechanism covers both transitions.
 | Karmada unavailable | Membership freezes. Programmed endpoints keep serving; joins and departures wait. | Fail-static. A federation outage must not change what traffic does. |
 | POP cell unreachable, capacity healthy | Its members stay in rotation. | The alternative withdraws healthy capacity because a control plane became unreachable, turning a management outage into a customer outage. |
 | POP cell unreachable, capacity down | Edge health checks eject the members within seconds. | Liveness is the edge's job. |
-| Project control plane unavailable | Services cannot be created or edited; existing ones keep serving. | Consumers lose the ability to change things, not the ability to serve traffic. |
+| Project control plane unavailable | Services cannot be created or edited; existing ones keep serving. | Consumers lose the ability to change things. Traffic keeps flowing. |
 | Edge cluster isolated | That edge serves its last known configuration. | Anycast withdraws an edge that is badly broken. One that is merely stale still serves users correctly. |
 
 **Never treat control plane reachability as data plane health.** Conflating them turns
@@ -632,8 +632,8 @@ ejected. The only workaround is to stop using a NetworkService, so a consumer wh
 one of these is blocked rather than inconvenienced.
 
 **Judging health by real traffic means some requests pay for it.** A member is ejected
-after it has failed requests, not before. Only a declared health check would catch a
-broken member before it serves anyone.
+after it has already failed requests. Only a declared health check would catch a broken
+member before it serves anyone.
 
 **Nearest-location routing depends on the platform knowing where capacity is.** If that
 data is wrong, routing is wrong in a way that looks fine from the outside, which is much
