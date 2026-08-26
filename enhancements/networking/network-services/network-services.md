@@ -192,12 +192,9 @@ the address it belongs to in one place, so the two cannot disagree. A segment pa
 the wrong address is a silent hole rather than a visible failure. Grouping members
 together later is an optimisation that changes nothing a consumer or the edge can see.
 
-<<[UNRESOLVED reaching the fabric from an edge ]>>
-Wrapping a packet is done by the host, not by the proxy. Whether an edge can already do
-this, or whether something new has to run there, decides whether this is configuration or
-a new component. That answer is owed by the team that owns the fabric, and the rest of
-this design does not move until it lands.
-<<[/UNRESOLVED]>>
+Wrapping a packet is done by the host rather than by the proxy, and an edge can already do
+it. Nothing new has to run there: an edge learns, per member, which segment to wrap
+toward, and the rest is configuration it is already able to apply.
 
 <<[UNRESOLVED identity collisions ]>>
 Per-location allocation is safe for reaching a member, because nothing outside a location
@@ -364,7 +361,12 @@ can see it.
 | The holder reports itself available | the workload holding the interface | An address with nothing serving behind it |
 | Requests succeed | the edge, watching real traffic | A member that is up but broken |
 
-The first decides whether a member is published. The second runs continuously afterwards.
+The first decides whether a member is published. The second runs continuously afterwards
+and is acted on where it is observed: an edge stops using a member that fails requests,
+without asking anything else first. A service does not report it. Judging it centrally
+would mean carrying an account of every request back to the control plane, which grows
+with traffic rather than with the number of services, and the edge has already acted by
+the time any of that could arrive.
 
 Only the holder can answer the first. Networking sees an address and cannot tell whether
 anything is listening on it, so it reads a single condition the holder writes and never
