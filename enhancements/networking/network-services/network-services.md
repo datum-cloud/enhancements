@@ -466,9 +466,17 @@ one NetworkService produces correct local behavior everywhere. The consumer neve
 expresses a matrix of locations against edges, which is what makes hand-rolled
 multi-region routing miserable.
 
-Ranking starts from platform topology and geographic coordinates. Measured signals replace
-them as the [Total Load Balancing](../traffic-intelligence/total-load-balancing.md) signal
-set matures. That substitution is invisible in this API.
+Ranking starts from each location's coordinates. Measured signals replace them as the
+[Total Load Balancing](../traffic-intelligence/total-load-balancing.md) signal set matures,
+and that substitution is invisible in this API.
+
+<<[UNRESOLVED coordinates ]>>
+No location carries coordinates today. The field is optional on `Location` and is unset on
+all three that exist, so a ranking that reads it gets nothing everywhere and silently falls
+back. The only other topology recorded is a city code, which is a label rather than a
+position. Someone has to enter the data before ranking can work at all, which makes this an
+operator task rather than an engineering one.
+<<[/UNRESOLVED]>>
 
 ### End to end: a compute workload behind a proxy
 
@@ -552,7 +560,7 @@ across the control plane and need measurement in the prod-fidelity environment f
 | Network interface claims | The unit of membership | Membership cannot change; programmed endpoints keep serving |
 | Karmada federation | Carrying claims toward the project and endpoints out to the edges | Membership freezes, deliberately |
 | Compute | Stamping the well-known labels most consumers select on, which it does not do yet | Existing claims keep their labels |
-| Location topology | Ranking locations by proximity for each edge | The existing ranking continues to apply |
+| Location coordinates | Ranking locations by proximity for each edge | Every location ranks equally, so nearest degrades to arbitrary. Coordinates are unset today, so this is a precondition rather than a runtime risk. |
 | Edge proxy fleet | Load balancing and health checking | Traffic is not served, which is the existing edge failure mode |
 
 Degraded performance in the first two shows up as membership lagging reality: scaled-up
