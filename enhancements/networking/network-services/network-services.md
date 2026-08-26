@@ -164,19 +164,46 @@ defined set of keys. The facts worth selecting on are already present, spelled t
 way for everyone. Consumers can still get their own labels later; see [Well-known
 labels](#well-known-labels).
 
-<<[UNRESOLVED reachable address ]>>
-The edge needs an address it can actually dial, and an interface's addresses are inside
-its network. The tenant addresses a member holds today are unroutable from anywhere
-outside the VPC, so nothing a proxy is given can reach an origin. Two ways out, and they
-are a product decision rather than an engineering one: give each member a public address,
-which costs an IPv4 per instance and makes origins reachable without going through the
-edge; or reach members over the fabric, which costs nothing per instance and keeps origins
-private, but waits on work that is not finished.
+### Reaching a member
 
-Whichever is chosen, which address represents a member should be one named step rather
-than an assumption spread through the code, so the second answer replaces the first
-without a rewrite. This question was closed once on the reasoning that a member already
-reports addresses. It does, and they are not reachable ones.
+A member's addresses are inside its network. The tenant addresses it holds are unroutable
+from outside the VPC, so an address a proxy is handed cannot reach an origin on its own.
+Members are reached over the fabric, which costs nothing per instance and keeps origins
+private.
+
+The fabric carries a packet to a member by encapsulating it. The sending node wraps the
+packet toward a segment identifying the receiving attachment, and the receiving node
+unwraps it and looks the inner packet up in that attachment's table. The inner packet
+still carries the tenant address, so the address a proxy dials never changes. What changes
+is that the edge learns a segment to wrap toward.
+
+**A cell composes that segment, because only a cell can.** The values it is built from are
+allocated per location and mean nothing anywhere else. A cell knows which node holds a
+member, and it knows that node's block, so it can compose a complete address that any edge
+can route to without knowing how any of it was allocated.
+
+**The segment never reaches a consumer.** A consumer's own view keeps the tenant address,
+which is the honest one: it is the address their instance holds. The segment travels only
+on the copies the platform propagates to its edges, and is one platform-internal step
+between a member and the traffic it serves.
+
+**Each member gets its own published entry.** One member per object keeps a segment and
+the address it belongs to in one place, so the two cannot disagree. A segment paired with
+the wrong address is a silent hole rather than a visible failure. Grouping members
+together later is an optimisation that changes nothing a consumer or the edge can see.
+
+<<[UNRESOLVED reaching the fabric from an edge ]>>
+Wrapping a packet is done by the host, not by the proxy. Whether an edge can already do
+this, or whether something new has to run there, decides whether this is configuration or
+a new component. That answer is owed by the team that owns the fabric, and the rest of
+this design does not move until it lands.
+<<[/UNRESOLVED]>>
+
+<<[UNRESOLVED identity collisions ]>>
+Per-location allocation is safe for reaching a member, because nothing outside a location
+interprets what it allocated. It is not safe for the identity a network is known by across
+locations, which is allocated at random today and can collide. That is a separate problem
+with its own proposal, and it does not block reaching a member.
 <<[/UNRESOLVED]>>
 
 **Traffic from the edge to a member crosses the public internet today.** A private
