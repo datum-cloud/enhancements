@@ -58,7 +58,7 @@ a customer whose origin is their own infrastructure.
 
 Compute changes the problem. The origin becomes a set of instances the platform places,
 replaces, scales, and moves between locations. One URL cannot describe that. The consumer
-reconciles it instead: enumerate every instance address and keep the list current, decide
+does the work instead: enumerate every instance address and keep the list current, decide
 which location each edge prefers, and detect a failed location fast enough to matter. The
 first is tedious. The other two are easy to get wrong and hard to notice being wrong.
 
@@ -83,7 +83,7 @@ this resource rather than repeat the work.
 
 - **Modeling compute in the networking API.** A NetworkService selects network interface
   claims. Anything that claims an interface can use it.
-- **The Layer 4 load balancer's configuration surface.** [Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) owns that. A
+- **How the Layer 4 load balancer is configured.** [Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) owns that. A
   NetworkService defines the membership that load balancer consumes. Its policy belongs
   there.
 - **Per-request latency-based routing.** Steering here changes at control plane speed.
@@ -165,7 +165,9 @@ it returns. Priya reads about it in the morning.
 
 ### Notes/Constraints/Caveats
 
-**The platform observes a member's location.** Network members are registered with a reference to their location allowing the platform to know in which physical location the member is available in.
+**The platform observes a member's location.** Network members are registered with a
+reference to their location allowing the platform to know in which physical location the
+member is available in.
 
 **Membership is a query over network interface claims.** A claim belongs to the networking
 API. Anything that asks for a network interface can join a service: a compute instance
@@ -181,20 +183,15 @@ This document proposes the vocabulary but cannot assign the work. Each owning se
 commit to stamping its keys, the compute keys especially.
 <<[/UNRESOLVED]>>
 
-**Backhaul stays on the fabric, using the path that already exists.** An HTTPProxy can
-already forward to a single instance on a tenant network: the CNI publishes an endpoint
-carrying the segment identifier the tenant-VRF mechanism needs, and the proxy forwards it
-untouched rather than synthesizing an address. A NetworkService generalizes that to a
-selected, location-aware set, introducing no second backhaul path. Members need no public
-address. Origins are reachable only through the edge. Because backhaul stays on Datum's
-own network, a nearest computed from topology and geography tracks latency closely.
+**Traffic from the edge to a member crosses the public internet today.** A private
+backbone is planned, and it will shorten those hops without changing anything here. Until
+it lands, ranking locations by geography is a rough guide to latency: peering and cable
+routes mean the closest location is sometimes not the fastest.
 
 <<[UNRESOLVED endpoint resolution ]>>
-Membership selects claims; the edge forwards to CNI-published endpoints. Something has to
-join the two, and the join has to preserve the endpoint exactly as published, because
-rebuilding it separates the address from the segment identifier that makes it routable.
-Whether a claim reaches its endpoint through the interface it names, or both are found
-through shared labels, is the first thing to settle in implementation.
+Membership selects claims. The edge needs a reachable address for each member. What
+supplies that address, and how a claim resolves to it, is the first thing to settle in
+implementation.
 <<[/UNRESOLVED]>>
 
 ### Risks and Mitigations
@@ -202,16 +199,16 @@ through shared labels, is the first thing to settle in implementation.
 | Risk | Mitigation |
 |---|---|
 | An over-broad selector sends traffic to the wrong endpoints | Per-location status makes resolved membership visible. A selector spanning networks is caught loudly; one matching nothing raises a condition, since a service may be written before its workload. |
-| Failover moves traffic across a jurisdiction boundary | None in this milestone: no control declares spilling unacceptable. Consumers with hard residency obligations should not use a NetworkService yet, and the product surface must say so. The durable answer is a sovereignty constraint in [Total Load Balancing](../traffic-intelligence/total-load-balancing.md). |
-| Membership goes stale, or members are unreachable, while status looks healthy | Report when membership was last confirmed rather than presenting it as live, and surface reachability in the service's own status rather than only in proxy error rates. |
+| Failover moves traffic across a jurisdiction boundary | None in this milestone: no control declares spilling unacceptable. Consumers with hard residency obligations should not use a NetworkService yet, and the product must say so. The durable answer is a sovereignty constraint in [Total Load Balancing](../traffic-intelligence/total-load-balancing.md). |
+| Membership goes stale, or members are unreachable, while status looks healthy | Report when membership was last confirmed rather than presenting it as live, and report reachability in the service's own status rather than only in proxy error rates. |
 
 Security review must cover selector scoping across namespace and project boundaries, and
 confirm that a consumer cannot select claims they do not own.
 
 ## Design Details
 
-This section describes consumer-visible shape and behavior. A follow-on technical design
-owned by the network services operator covers how the edge gets programmed.
+This section describes what a consumer sees and how it behaves. A follow-on technical
+design owned by the network services operator covers how the edge gets programmed.
 
 ### NetworkService
 
@@ -245,11 +242,9 @@ reports running. It leaves when it stops matching or goes away, ordinarily after
 holds and whether that interface is programmed. A selector reaches only the consumer's own
 resources.
 
-**A service spans one network.** Reaching a member means entering the network it sits on,
-The proxy establishes that once per upstream. Members from two networks cannot be served
-together. A selector matching across networks is a configuration error. Whether the
-service names its network outright or reports the mismatch is an open shape; the
-constraint holds either way.
+**A service spans one network.** A selector matching claims across two networks is a
+configuration error. Whether the service names its network outright or reports the
+mismatch is still open. The constraint holds either way.
 
 A NetworkService is written in one control plane and its members live in others.
 [Federation](#federation) covers how the facts travel.
@@ -299,7 +294,7 @@ Dallas requires nothing.
 
 The selector is a standard label selector. A service can span more than one value of a
 key. Spanning values lets two workloads serve one hostname, as a blue/green rollout does.
-The field takes this shape from the start because adding it later would change the shape:
+The field allows it from the start, because adding it later would mean changing the field:
 
 ```yaml
 networkInterfaceClaims:
@@ -368,8 +363,8 @@ tied to its node, a rescheduled instance is a departure and an arrival rather th
 update, which makes routine deployments the common case for this rather than the rare one.
 
 Draining depends on notice that a member is about to go away, given before it does. That
-signal belongs to whatever retires the member, and it is the same surface that reports a
-member has started.
+signal belongs to whatever retires the member, which also reports when a member has
+started.
 
 <<[UNRESOLVED holder lifecycle ]>>
 Whatever holds a claim reports two transitions on it: started, and about to stop. For
@@ -468,8 +463,8 @@ never updated today.
 programmed, and is programmed before the workload behind it starts answering. Membership
 waits for both. The second half is not networking's to observe: the holder reports it on
 the claim, and membership reads that report without knowing what wrote it.
-[Draining](#draining) needs the same signal surface for the other edge. One mechanism
-covers both transitions.
+[Draining](#draining) needs the same report for the other transition. One mechanism covers
+both transitions.
 
 #### What happens when a control plane is unreachable
 
@@ -617,7 +612,7 @@ it is the trigger for the separate delivery path recorded in
 
 **A selector that stops matching produces no error.** Traffic goes missing where an
 explicit list would fail visibly. That is the price of membership tracking reality, and it
-puts a lot of weight on the status surface being right.
+puts a lot of weight on status being right.
 
 **Consumers whose needs differ from the defaults have no recourse.** With one strategy
 value and no health check configuration, a consumer cannot canary a location, drain one
