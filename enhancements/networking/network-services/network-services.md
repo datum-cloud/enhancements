@@ -41,10 +41,9 @@ latest-milestone: "v0.x"
 A **NetworkService** is a named set of endpoints spanning every location a consumer runs in.
 Consumers select members by label; an HTTPProxy names the service as its backend.
 
-Anycast gets each request to the nearest point of presence. A NetworkService covers the rest
-of the path: the edge serves that request from the members nearest that point of presence,
-and moves to the next-nearest location when the closest fails. Consumers configure none of
-it.
+Anycast brings each request to the closest edge. A NetworkService covers the rest: that edge
+ranks the service's locations by distance from itself, serves the request from the best one,
+and moves to the next if it fails. Consumers configure none of it.
 
 Compute is the first consumer, not the only one. A NetworkService selects network interface
 claims, which is networking's own resource, so it never learns what a workload is. Anything
@@ -327,8 +326,8 @@ become the same query.
 ### Traffic distribution
 
 `spec.trafficDistribution.strategy` defaults to `Nearest`, the only value this milestone
-accepts: serve each request from the members nearest where it entered, shift to the
-next-nearest as health degrades, and return on recovery.
+accepts. Each edge ranks the service's locations by distance from itself and serves from the
+best available one, moving down the ranking as health degrades and back up on recovery.
 
 The field carries one value deliberately. We expect to add strategies, and a consumer who
 sets this today keeps working when we do. The cost is that a single-value enum reads like an
@@ -354,7 +353,7 @@ member receiving no traffic is not assessed at all, which matters most in a loca
 idle because its users are served closer.
 
 Ejection also drives location failover: enough ejected members degrade a location far enough
-that traffic spills to the next-nearest.
+that traffic moves down the ranking.
 
 This is independent of the platform-wide health signals
 [Nate](../traffic-intelligence/health-checks-nate.md) publishes, which run on a different
