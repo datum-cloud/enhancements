@@ -47,10 +47,15 @@ nearest that point of presence, and moves to the next-nearest location when the 
 fails.
 
 None of that needs configuring to work. The consumer names a label the platform already
-applies on their behalf, and membership follows whatever is actually running — new replicas
-join as they come up, and a new location starts serving its own users once it has healthy
-members. Controls over how traffic is spread come later; the point of this milestone is that
-the sensible behaviour is what you get before you reach for any of them.
+applies on their behalf, and membership follows whatever is actually running. Controls over
+how traffic is spread come later; the point of this milestone is that the sensible behaviour
+is what you get before reaching for any of them.
+
+**Compute is the first consumer, not the only one.** A NetworkService selects network
+interface claims, which is networking's own resource, so it never learns what a workload is.
+Anything that claims an interface can be a member: compute instances now, and load
+balancers, appliances or another service's endpoints without changing this API. Building
+against the claim rather than against compute is what makes the second consumer free.
 
 This document defines the consumer surface for
 [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #1, geo-aware upstream
@@ -61,8 +66,10 @@ a load balancer discovers compute backends as instances start and stop.
 ## Motivation
 
 Nobody runs a multi-location application behind Datum's edge today. Compute is still early,
-and the edge started as a reverse proxy to a single public origin. We should decide how
-multi-location traffic works before consumers need it.
+and the edge started as a reverse proxy to a single public origin. Compute is what makes
+this urgent, and it is the reason to get the shape right rather than the thing to shape it
+around: whatever the platform grows next that needs traffic spread across locations should
+reuse this rather than repeat it.
 
 An HTTPProxy backend is one endpoint URL, but compute can place a workload in several
 cities. One URL cannot point at all of them, so the consumer has to load balance across
