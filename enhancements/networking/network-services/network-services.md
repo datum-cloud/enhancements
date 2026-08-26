@@ -240,11 +240,11 @@ spec:
 
 ### Membership
 
-An interface joins when it matches the selector, is held by a claim, and reports
-programmed. An interface whose claim has been released is retained capacity holding an
-address with nothing behind it, and is never a member. It leaves when it stops matching or
-goes away, ordinarily after [draining](#draining) rather than abruptly. A selector reaches
-only the consumer's own resources.
+An interface joins when it matches the selector, is held by a claim, and its holder
+reports itself available to serve. An interface whose claim has been released is retained
+capacity holding an address with nothing behind it, and is never a member. It leaves when
+it stops matching or goes away, ordinarily after [draining](#draining) rather than
+abruptly. A selector reaches only the consumer's own resources.
 
 **A service spans one network.** A selector matching interfaces across two networks is a
 configuration error. Whether the service names its network outright or reports the
@@ -329,15 +329,23 @@ we add strategies, at the cost of an enum that reads unfinished.
 
 ### Health
 
-Three things have to be true before a member takes traffic, each established by whoever
+Two things have to be true before a member takes traffic, each established by whoever
 can see it.
 
 | Signal | Established by | Catches |
 |---|---|---|
-| The interface is programmed | the data plane, on the interface | Addresses that cannot yet carry packets |
+| The holder reports itself available | the workload holding the interface | An address with nothing serving behind it |
 | Requests succeed | the edge, watching real traffic | A member that is up but broken |
 
 The first decides whether a member is published. The second runs continuously afterwards.
+
+Only the holder can answer the first. Networking sees an address and cannot tell whether
+anything is listening on it, so it reads a single condition the holder writes and never
+interprets what the holder is. A member is healthy while its holder vouches for it, and
+stops being healthy the moment the holder stops, including while it is shutting down.
+
+That an interface is programmed is a separate claim about whether its address can carry
+packets at all, and it is tracked with the reachability question below rather than here.
 
 Detection is reactive. A few requests fail before a member is ejected, and recovery is
 tested with real requests. A member receiving no traffic is not assessed at all, which
@@ -466,10 +474,10 @@ Whichever rule is chosen, publication must keep overwriting the keys networking 
 rather than merging them, since that is what makes the location authoritative.
 <<[/UNRESOLVED]>>
 
-**A member joins once it can serve.** An interface holds an address before its data plane
-is programmed, so membership waits for the data plane to report programmed rather than for
-allocation. For a workload that reporting happens when its sandbox is created, so a
-programmed interface already implies the thing behind it started.
+**A member joins once it can serve.** An interface holds an address long before anything
+answers on it, so membership waits for the holder to say it is serving rather than for
+allocation. Programming the data plane is not that signal: it says an address can carry
+packets, not that a workload is ready to answer, and the two are far apart in time.
 
 #### What happens when a control plane is unreachable
 
