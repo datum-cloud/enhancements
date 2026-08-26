@@ -86,13 +86,19 @@ repeat it.
 
 ### Non-Goals
 
-| Out of scope | Why, and where it belongs |
-|---|---|
-| Modeling compute in the networking API | A NetworkService selects network interface claims, so it stays usable for anything that claims an interface. |
-| The Layer 4 load balancer's configuration surface | [Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md). This defines the membership that load balancer consumes, not its policy. |
-| Per-request latency-based routing | Steering here changes at control plane speed. Measured round-trip time is [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #3. |
-| Consumer-controlled steering and health checks | `Nearest` is the only strategy, and the platform judges members by real request outcomes. Both are expected to gain controls; neither has them here. |
-| An address of its own | A virtual IP for east-west traffic is a natural extension. The name accommodates it; this milestone does not deliver it. |
+- **Modeling compute in the networking API.** A NetworkService selects network interface
+  claims, so it stays usable for anything that claims an interface.
+- **The Layer 4 load balancer's configuration surface.** That is
+  [Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md). This defines the
+  membership that load balancer consumes, not its policy.
+- **Per-request latency-based routing.** Steering here changes at control plane speed.
+  Measured round-trip time is [Zava](../traffic-intelligence/envoy-routing-zava.md)
+  feature #3.
+- **Consumer-controlled steering and health checks.** `Nearest` is the only strategy, and
+  the platform judges members by real request outcomes. Both are expected to gain controls;
+  neither has them here.
+- **An address of its own.** A virtual IP for east-west traffic is a natural extension. The
+  name accommodates it; this milestone does not deliver it.
 
 ## Proposal
 
