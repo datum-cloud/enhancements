@@ -476,16 +476,29 @@ one NetworkService produces correct local behavior everywhere. The consumer neve
 expresses a matrix of locations against edges, which is what makes hand-rolled
 multi-region routing miserable.
 
-Ranking starts from each location's coordinates. Measured signals replace them as the
-[Total Load Balancing](../traffic-intelligence/total-load-balancing.md) signal set
-matures, and that substitution is invisible in this API.
+Ranking starts from each location's coordinates, which every location a service can use is
+expected to carry.
+
+**An operator can override the computed order.** Geographic distance and network distance
+are not the same thing: peering, backbone topology and transit cost all decide which
+location an edge actually reaches fastest, and none of them are visible in a pair of
+coordinates. The platform therefore keeps a per-location preference order that replaces the
+computed one where it is set. An edge uses the row for the location it sits in.
+
+Consumers never see this table and never write to it. It is operator-controlled platform
+data, the same as the coordinates it overrides. Where no override exists, the computed order
+stands, so the table holds only the cases where geography lies.
+
+Measured signals replace both later as the
+[Total Load Balancing](../traffic-intelligence/total-load-balancing.md) signal set matures,
+and that substitution is invisible in this API.
 
 <<[UNRESOLVED coordinates ]>>
 No location carries coordinates today. The field is optional on `Location` and is unset on
-all three that exist, so a ranking that reads it gets nothing everywhere and silently
-falls back. The only other topology recorded is a city code, which is a label rather than
-a position. Someone has to enter the data before ranking can work at all, which makes this
-an operator task rather than an engineering one.
+all three that exist, so ranking cannot be computed until someone enters them. That is an
+operator task rather than an engineering one, and it gates the feature's headline behaviour.
+The override table does not remove the requirement: it is meant to correct a computed order,
+not to substitute for having one.
 <<[/UNRESOLVED]>>
 
 ### End to end: a compute workload behind a proxy
