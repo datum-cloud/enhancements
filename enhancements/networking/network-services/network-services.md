@@ -38,57 +38,43 @@ latest-milestone: "v0.x"
 
 ## Summary
 
-A **NetworkService** is a named set of endpoints spanning every location a consumer runs
-in. Consumers select members by label, and an HTTPProxy names the service as its backend.
+A **NetworkService** is a named set of endpoints spanning every location a consumer runs in.
+Consumers select members by label; an HTTPProxy names the service as its backend.
 
-Anycast already gets each request to the point of presence nearest the user. A
-NetworkService covers the rest of the path: the edge serves that request from the members
-nearest that point of presence, and moves to the next-nearest location when the closest one
-fails.
+Anycast gets each request to the nearest point of presence. A NetworkService covers the rest
+of the path: the edge serves that request from the members nearest that point of presence,
+and moves to the next-nearest location when the closest fails. Consumers configure none of
+it.
 
-None of that needs configuring to work. The consumer names a label the platform already
-applies on their behalf, and membership follows whatever is actually running. Controls over
-how traffic is spread come later; the point of this milestone is that the sensible behaviour
-is what you get before reaching for any of them.
+Compute is the first consumer, not the only one. A NetworkService selects network interface
+claims, which is networking's own resource, so it never learns what a workload is. Anything
+that claims an interface can be a member.
 
-**Compute is the first consumer, not the only one.** A NetworkService selects network
-interface claims, which is networking's own resource, so it never learns what a workload is.
-Anything that claims an interface can be a member: compute instances now, and load
-balancers, appliances or another service's endpoints without changing this API. Building
-against the claim rather than against compute is what makes the second consumer free.
-
-This document defines the consumer surface for
+This defines the consumer surface for
 [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #1, geo-aware upstream
-selection. It also answers the
-[Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) open question of how
-a load balancer discovers compute backends as instances start and stop.
+selection, and answers the
+[Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) question of how a load
+balancer discovers compute backends as instances start and stop.
 
 ## Motivation
 
-Nobody runs a multi-location application behind Datum's edge today. Compute is still early,
-and the edge started as a reverse proxy to a single public origin. Compute is what makes
-this urgent, and it is the reason to get the shape right rather than the thing to shape it
-around: whatever the platform grows next that needs traffic spread across locations should
-reuse this rather than repeat it.
+HTTPProxy was designed for one origin on the internet. The edge terminates TLS, protects it,
+and forwards. One endpoint URL per backend is right for that, and stays right for a customer
+whose origin is their own infrastructure.
 
-An HTTPProxy backend is one endpoint URL, but compute can place a workload in several
-cities. One URL cannot point at all of them, so the consumer has to load balance across
-locations themselves.
+Compute changes the problem. The origin becomes a set of instances the platform places,
+replaces, scales, and moves between locations. One URL cannot describe that, so the consumer
+reconciles it: enumerate every instance address and keep the list current, decide which
+location each point of presence prefers, and detect a failed location fast enough to matter.
+The first is tedious. The other two are easy to get wrong and hard to notice being wrong.
 
-That means the consumer enumerates every instance address and keeps the list current as
-instances are replaced and locations added. It means deciding which location each point of
-presence prefers — a matrix of edges against locations. And it means detecting a failed
-location and shifting traffic off it quickly. The first is tedious. The other two are easy
-to get wrong and hard to notice being wrong.
+The platform already holds the inputs: where instances run, where points of presence are, and
+which members are healthy. Solving it once is cheaper than every consumer solving it
+separately, and again on every deployment change.
 
-It also wastes the edge. Anycast puts the request at the point of presence nearest the
-user, then the proxy hauls it to whatever origin the URL names. The platform knows where
-the request arrived and where the consumer's capacity is, but a consumer cannot connect
-those two facts from outside.
-
-The platform should do this because it already holds the inputs: where instances run, where
-points of presence are, and which members are healthy. Solving it once is cheaper than
-every consumer solving it separately and re-solving it on every deployment change.
+Nobody runs a multi-location application behind Datum's edge yet. Compute is what makes this
+urgent, and whatever needs traffic spread across locations next should reuse this rather than
+repeat it.
 
 ### Goals
 
