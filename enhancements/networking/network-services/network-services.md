@@ -42,7 +42,7 @@ edge ranks the service's locations by distance from itself, serves the request f
 best one, and moves to the next if it fails. Consumers configure none of it.
 
 Compute is the first consumer. Others follow. A NetworkService selects network interface
-claims, which belong to the networking API. Nothing in it names a workload.
+interfaces, which belong to the networking API. Nothing in it names a workload.
 
 This proposal defines the consumer surface for
 [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #1, geo-aware upstream
@@ -102,7 +102,7 @@ kind: NetworkService
 metadata:
   name: storefront
 spec:
-  networkInterfaceClaims:
+  networkInterfaces:
     selector:
       matchLabels:
         compute.datumapis.com/workload-name: storefront
@@ -140,10 +140,10 @@ Portland reaches Seattle and is served from San Jose. Priya configured neither r
 
 #### Story 2: Change capacity without editing anything
 
-Priya scales Dallas from two replicas to twenty for Black Friday. The new claims carry the
-same label, join the service, and take traffic once they are running. She scales back down
-on Saturday, and the instances going away finish their in-flight requests first. Later she
-adds Frankfurt, and European users start being served there.
+Priya scales Dallas from two replicas to twenty for Black Friday. The new interfaces carry
+the same label, join the service, and take traffic once they are running. She scales back
+down on Saturday, and the instances going away finish their in-flight requests first.
+Later she adds Frankfurt, and European users start being served there.
 
 None of it requires an edit to the NetworkService or the HTTPProxy.
 
@@ -155,13 +155,29 @@ it returns. Priya reads about it in the morning.
 
 ### Notes/Constraints/Caveats
 
-**The platform records a member's location.** A claim is served in one location, and
-networking labels it with that location. Consumers never write it.
+**The platform records a member's location.** An interface is served in one location, and
+networking labels it with that location when it publishes the copy. Consumers never write
+it.
 
 **Selecting works without labeling anything first.** Claim-creating services stamp a
 defined set of keys. The facts worth selecting on are already present, spelled the same
 way for everyone. Consumers can still get their own labels later; see [Well-known
 labels](#well-known-labels).
+
+<<[UNRESOLVED reachable address ]>>
+The edge needs an address it can actually dial, and an interface's addresses are inside
+its network. The tenant addresses a member holds today are unroutable from anywhere
+outside the VPC, so nothing a proxy is given can reach an origin. Two ways out, and they
+are a product decision rather than an engineering one: give each member a public address,
+which costs an IPv4 per instance and makes origins reachable without going through the
+edge; or reach members over the fabric, which costs nothing per instance and keeps origins
+private, but waits on work that is not finished.
+
+Whichever is chosen, which address represents a member should be one named step rather
+than an assumption spread through the code, so the second answer replaces the first
+without a rewrite. This question was closed once on the reasoning that a member already
+reports addresses. It does, and they are not reachable ones.
+<<[/UNRESOLVED]>>
 
 **Traffic from the edge to a member crosses the public internet today.** A private
 backbone is planned, and it will shorten those hops without changing anything here. Until
@@ -182,20 +198,21 @@ routes mean the closest location is sometimes not the fastest.
   reachability in the service's own status rather than only in proxy error rates.
 
 Security review must cover selector scoping across namespace and project boundaries, and
-confirm that a consumer cannot select claims they do not own.
+confirm that a consumer cannot select interfaces they do not own.
 
 ## Design Details
 
 A follow-on technical design owned by the network services operator covers how the edge
 gets programmed.
 
-![Components involved in a network service, grouped by the control plane each runs in](./components.png)
+![Components involved in a network service, grouped by the control plane each runs
+in](./components.png)
 
-Four control planes carry a share of the work. A cell binds a claim and records where it is
-served. The federation hub carries a copy toward the consumer. The project resolves
-membership and turns it into endpoints. The edge translates those endpoints into localities
-and serves the request. No plane holds more than it needs, which is why the copy a consumer
-reads is smaller than the claim a cell holds.
+Four control planes carry a share of the work. A cell binds a claim and records where it
+is served. The federation hub carries a copy toward the consumer. The project resolves
+membership and turns it into endpoints. The edge translates those endpoints into
+localities and serves the request. No plane holds more than it needs, which is why the
+copy a consumer reads is smaller than the claim a cell holds.
 
 ### NetworkService
 
@@ -206,7 +223,7 @@ metadata:
   name: storefront
 spec:
   # A standard label selector.
-  networkInterfaceClaims:
+  networkInterfaces:
     selector:
       matchLabels:
         compute.datumapis.com/workload-name: storefront
@@ -223,12 +240,13 @@ spec:
 
 ### Membership
 
-A claim joins when it matches the selector, its interface is programmed, and its holder
-reports running. It leaves when it stops matching or goes away, ordinarily after
-[draining](#draining) rather than abruptly. A selector reaches only the consumer's own
-resources.
+An interface joins when it matches the selector, is held by a claim, and reports
+programmed. An interface whose claim has been released is retained capacity holding an
+address with nothing behind it, and is never a member. It leaves when it stops matching or
+goes away, ordinarily after [draining](#draining) rather than abruptly. A selector reaches
+only the consumer's own resources.
 
-**A service spans one network.** A selector matching claims across two networks is a
+**A service spans one network.** A selector matching interfaces across two networks is a
 configuration error. Whether the service names its network outright or reports the
 mismatch is still open. The constraint holds either way.
 
@@ -237,13 +255,13 @@ A NetworkService is written in one control plane and its members live in others.
 
 ### Well-known labels
 
-Every claim carries a defined set of labels, applied by whichever service created it.
+Every interface carries a defined set of labels, applied by whichever service created it.
 
-Networking applies this in the cell that serves the claim, where the location is known:
+Networking applies this when it publishes an interface, where the location is known:
 
 | Label | Value | Example |
 |---|---|---|
-| `networking.datumapis.com/location` | The location serving the claim. | `us-central-1` |
+| `networking.datumapis.com/location` | The location serving the interface. | `us-central-1` |
 
 **The location key is authoritative, and stays that way without a webhook.** Networking
 writes it where the truth lives, and publication rewrites the keys networking owns on
@@ -251,11 +269,12 @@ every pass, so an edit to a published copy is corrected on the next reconcile. A
 can add labels of their own; they cannot durably change this one. Correction is eventual
 rather than immediate, so a wrong value survives until the next pass.
 
-Compute applies these to the claim it creates, and they travel to the published copy:
+Compute applies these to the claim it creates, and they travel to the interface and its
+published copy:
 
 | Label | Value | Example |
 |---|---|---|
-| `compute.datumapis.com/workload-name` | The workload owning the claim. | `storefront` |
+| `compute.datumapis.com/workload-name` | The workload owning the interface. | `storefront` |
 | `compute.datumapis.com/placement-name` | The placement within that workload. | `americas` |
 | `compute.datumapis.com/city-code` | The city the workload was placed in. | `dfw` |
 | `compute.datumapis.com/instance-index` | The instance's ordinal within the placement. | `0` |
@@ -273,7 +292,7 @@ Selecting a whole application is the common case, as shown above. Narrower selec
 keys — one placement, or one city:
 
 ```yaml
-networkInterfaceClaims:
+networkInterfaces:
   selector:
     matchLabels:
       compute.datumapis.com/workload-name: storefront
@@ -288,7 +307,7 @@ hostname as a blue/green rollout does. The field allows it from the start, becau
 it later would mean changing the field:
 
 ```yaml
-networkInterfaceClaims:
+networkInterfaces:
   selector:
     matchExpressions:
       - key: compute.datumapis.com/workload-name
@@ -315,12 +334,10 @@ can see it.
 
 | Signal | Established by | Catches |
 |---|---|---|
-| The interface is programmed | networking, on the claim | Addresses that cannot yet carry packets |
-| The holder is running | whatever holds the claim | A member whose workload has not started |
+| The interface is programmed | the data plane, on the interface | Addresses that cannot yet carry packets |
 | Requests succeed | the edge, watching real traffic | A member that is up but broken |
 
-The first two decide whether a member is published. The third runs continuously
-afterwards.
+The first decides whether a member is published. The second runs continuously afterwards.
 
 Detection is reactive. A few requests fail before a member is ejected, and recovery is
 tested with real requests. A member receiving no traffic is not assessed at all, which
@@ -386,7 +403,7 @@ Locations:
   fra   members  2   healthy  2   serving
 Conditions:
   Ready               True
-  MembersResolved     True    24 claims matched
+  MembersResolved     True    24 interfaces matched
   EndpointsReachable  True
 ```
 
@@ -449,11 +466,10 @@ Whichever rule is chosen, publication must keep overwriting the keys networking 
 rather than merging them, since that is what makes the location authoritative.
 <<[/UNRESOLVED]>>
 
-**A member joins once it can serve.** A claim holds an address before its data plane is
-programmed, and is programmed before the workload behind it starts answering. Membership
-waits for both. The second half is not networking's to observe: the holder reports it on
-the claim, and membership reads that report without knowing what wrote it.
-[Draining](#draining) reads the same report for the other transition.
+**A member joins once it can serve.** An interface holds an address before its data plane
+is programmed, so membership waits for the data plane to report programmed rather than for
+allocation. For a workload that reporting happens when its sandbox is created, so a
+programmed interface already implies the thing behind it started.
 
 #### What happens when a control plane is unreachable
 
@@ -490,23 +506,23 @@ expected to carry.
 **An operator can override the computed order.** Geographic distance and network distance
 are not the same thing: peering, backbone topology and transit cost all decide which
 location an edge actually reaches fastest, and none of them are visible in a pair of
-coordinates. The platform therefore keeps a per-location preference order that replaces the
-computed one where it is set. An edge uses the row for the location it sits in.
+coordinates. The platform therefore keeps a per-location preference order that replaces
+the computed one where it is set. An edge uses the row for the location it sits in.
 
 Consumers never see this table and never write to it. It is operator-controlled platform
-data, the same as the coordinates it overrides. Where no override exists, the computed order
-stands, so the table holds only the cases where geography lies.
+data, the same as the coordinates it overrides. Where no override exists, the computed
+order stands, so the table holds only the cases where geography lies.
 
-Measured signals replace both later as the
-[Total Load Balancing](../traffic-intelligence/total-load-balancing.md) signal set matures,
-and that substitution is invisible in this API.
+Measured signals replace both later as the [Total Load
+Balancing](../traffic-intelligence/total-load-balancing.md) signal set matures, and that
+substitution is invisible in this API.
 
 <<[UNRESOLVED coordinates ]>>
 No location carries coordinates today. The field is optional on `Location` and is unset on
 all three that exist, so ranking cannot be computed until someone enters them. That is an
-operator task rather than an engineering one, and it gates the feature's headline behaviour.
-The override table does not remove the requirement: it is meant to correct a computed order,
-not to substitute for having one.
+operator task rather than an engineering one, and it gates the feature's headline
+behaviour. The override table does not remove the requirement: it is meant to correct a
+computed order, not to substitute for having one.
 <<[/UNRESOLVED]>>
 
 ### End to end: a compute workload behind a proxy
@@ -588,9 +604,10 @@ across the control plane and need measurement in the prod-fidelity environment f
 
 | Dependency | Used for | If it is unavailable |
 |---|---|---|
-| Network interface claims | The unit of membership | Membership cannot change; programmed endpoints keep serving |
-| Karmada federation | Carrying claims toward the project and endpoints out to the edges | Membership freezes, deliberately |
-| Compute | Stamping the well-known labels most consumers select on, which it does not do yet | Existing claims keep their labels |
+| Network interfaces | The unit of membership | Membership cannot change; programmed endpoints keep serving |
+| The VPC data plane | Reporting that an interface is programmed, which is what makes a member healthy | No member ever becomes healthy, so nothing serves |
+| Karmada federation | Carrying interfaces toward the project and endpoints out to the edges | Membership freezes, deliberately |
+| Compute | Stamping the well-known labels most consumers select on | Existing interfaces keep their labels |
 | Location coordinates | Ranking locations by proximity for each edge | Every location ranks equally, so nearest degrades to arbitrary. Coordinates are unset today, so this is a precondition rather than a runtime risk. |
 | Edge proxy fleet | Load balancing and health checking | Traffic is not served, which is the existing edge failure mode |
 
