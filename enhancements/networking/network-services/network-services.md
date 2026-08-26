@@ -178,21 +178,10 @@ defined set of keys. The facts worth selecting on are already present, spelled t
 way for everyone. Consumers can still get their own labels later; see [Well-known
 labels](#well-known-labels).
 
-<<[UNRESOLVED labels ]>>
-This document proposes the vocabulary but cannot assign the work. Each owning service must
-commit to stamping its keys, the compute keys especially.
-<<[/UNRESOLVED]>>
-
 **Traffic from the edge to a member crosses the public internet today.** A private
 backbone is planned, and it will shorten those hops without changing anything here. Until
 it lands, ranking locations by geography is a rough guide to latency: peering and cable
 routes mean the closest location is sometimes not the fastest.
-
-<<[UNRESOLVED endpoint resolution ]>>
-Membership selects claims. The edge needs a reachable address for each member. What
-supplies that address, and how a claim resolves to it, is the first thing to settle in
-implementation.
-<<[/UNRESOLVED]>>
 
 ### Risks and Mitigations
 
@@ -580,7 +569,7 @@ across the control plane and need measurement in the prod-fidelity environment f
 |---|---|---|
 | Network interface claims | The unit of membership | Membership cannot change; programmed endpoints keep serving |
 | Karmada federation | Carrying claims toward the project and endpoints out to the edges | Membership freezes, deliberately |
-| Compute | Stamping the well-known labels most consumers select on | Existing claims keep their labels |
+| Compute | Stamping the well-known labels most consumers select on, which it does not do yet | Existing claims keep their labels |
 | Location topology | Ranking locations by proximity for each edge | The existing ranking continues to apply |
 | Edge proxy fleet | Load balancing and health checking | Traffic is not served, which is the existing edge failure mode |
 
