@@ -57,13 +57,9 @@ and forwards. One endpoint URL per backend is right for that, and stays right fo
 whose origin is their own infrastructure.
 
 Compute changes the problem. The origin becomes a set of instances the platform places,
-replaces, scales, and moves between locations. Nobody runs one behind Datum's edge yet, which
-makes this the moment to decide how it works.
-
-One URL cannot describe that set. Left alone, the consumer does the work: enumerate every
-instance address and keep the list current, decide which location each edge prefers, and
-detect a failed location fast enough to matter. The first is tedious. The other two are easy
-to get wrong and hard to notice being wrong.
+replaces, scales, and moves between locations. One URL cannot describe that set. Describing
+it falls to the consumer: enumerate every instance address and keep it current, decide which
+location each edge prefers, and detect a failed location fast enough to matter.
 
 The platform already holds the inputs: where instances run, where the edges are, and which
 members are healthy. Solving it once is cheaper than every consumer solving it separately on
