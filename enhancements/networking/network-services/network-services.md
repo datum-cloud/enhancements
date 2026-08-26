@@ -52,19 +52,17 @@ balancer discovers compute backends as instances start and stop.
 
 ## Motivation
 
-HTTPProxy assumes one origin on the internet. The edge terminates TLS, protects the origin,
-and forwards. One endpoint URL per backend is right for that, and stays right for a customer
-whose origin is their own infrastructure.
+HTTPProxy assumes one origin on the internet: the edge terminates TLS, protects the origin,
+and forwards. One endpoint URL per backend is right for that.
 
-Compute changes the problem. The origin becomes a set of instances the platform places,
-replaces, scales, and moves between locations. One URL cannot describe that set. Describing
-it falls to the consumer: enumerate every instance address and keep it current, decide which
-location each edge prefers, and detect a failed location fast enough to matter.
+Compute makes the origin a set of instances the platform places, replaces, scales, and moves
+between locations. One URL cannot describe that set. Describing it falls to the consumer:
+enumerate every instance address and keep it current, decide which location each edge
+prefers, and detect a failed location fast enough to matter.
 
-The platform already holds the inputs: where instances run, where the edges are, and which
-members are healthy. Solving it once is cheaper than every consumer solving it separately on
-every deployment change, and whatever needs traffic spread across locations next reuses the
-answer.
+The platform already knows all three. Solving it once is cheaper than every consumer solving
+it on every deployment change, and whatever needs traffic spread across locations next
+reuses the answer.
 
 ### Goals
 
