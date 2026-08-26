@@ -189,6 +189,14 @@ confirm that a consumer cannot select claims they do not own.
 A follow-on technical design owned by the network services operator covers how the edge
 gets programmed.
 
+![Components involved in a network service, grouped by the control plane each runs in](./components.png)
+
+Four control planes carry a share of the work. A cell binds a claim and records where it is
+served. The federation hub carries a copy toward the consumer. The project resolves
+membership and turns it into endpoints. The edge translates those endpoints into localities
+and serves the request. No plane holds more than it needs, which is why the copy a consumer
+reads is smaller than the claim a cell holds.
+
 ### NetworkService
 
 ```yaml

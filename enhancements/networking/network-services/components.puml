@@ -1,0 +1,52 @@
+@startuml components
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+!include ../../datum-theme.puml
+
+LAYOUT_WITH_LEGEND()
+title Network Services - components by control plane
+
+Person(consumer, "Consumer", "Declares a service and a proxy")
+
+System_Boundary(project, "Project control plane") {
+    Component(netsvc, "NetworkService", "CRD", "Names the label and ports. Reports per-location members and health.")
+    Component(proxy, "HTTPProxy", "CRD", "References the service as a backend.")
+    Component(claimcopy, "NetworkInterfaceClaim", "published copy", "What membership selects. Carries compute's labels and the serving location.")
+    Component(nsr, "NetworkServiceReconciler", "Go", "Resolves the selector into members. Refuses a selector spanning two networks.")
+    Component(hpr, "HTTPProxyReconciler", "Go", "Turns members into endpoints carrying each member's location.")
+}
+
+System_Boundary(cell, "POP cell") {
+    Component(claim, "NetworkInterfaceClaim", "CRD", "The slot a workload holds. Source of truth.")
+    Component(nicr, "NetworkInterfaceClaimReconciler", "Go", "Allocates addresses, binds an interface, stamps the serving location.")
+    Component(wb, "WriteBackReconciler", "Go", "Publishes a copy toward the consumer.")
+}
+
+System_Boundary(hub, "Federation hub") {
+    Component(projector, "Projector", "Go", "Publishes the copy into the consumer's project.")
+    Component(gc, "ProjectionGC", "Go", "Removes a copy once nothing is published behind it.")
+}
+
+System_Boundary(edge, "Edge cluster") {
+    Component(slice, "EndpointSlice", "discovery.k8s.io", "One endpoint per member, each tagged with its location.")
+    Component(eg, "Envoy Gateway", "Go", "Translates endpoints into Envoy localities.")
+    Component(envoy, "Envoy", "C++", "Serves requests from the nearest healthy members.")
+}
+
+Rel_D(consumer, netsvc, "Declares")
+Rel_D(consumer, proxy, "Declares")
+
+Rel_R(nicr, claim, "Binds and labels")
+Rel_D(claim, wb, "Published by")
+Rel_R(wb, projector, "Copies to hub")
+Rel_R(projector, claimcopy, "Copies to project")
+Rel_L(gc, projector, "Collects behind")
+
+Rel_R(nsr, netsvc, "Writes status")
+Rel_L(nsr, claimcopy, "Selects")
+Rel_L(hpr, claimcopy, "Reads addresses")
+Rel_D(hpr, slice, "Emits")
+Rel_R(slice, eg, "Watched by")
+Rel_R(eg, envoy, "Programs", "xDS")
+
+@enduml
