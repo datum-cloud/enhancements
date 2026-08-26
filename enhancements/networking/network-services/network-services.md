@@ -52,17 +52,17 @@ balancer discovers compute backends as instances start and stop.
 
 ## Motivation
 
-HTTPProxy assumes one origin on the internet: the edge terminates TLS, protects the origin,
-and forwards. One endpoint URL per backend is right for that.
+HTTPProxy assumes one origin on the internet: the edge terminates TLS, protects the
+origin, and forwards. One endpoint URL per backend is right for that.
 
-Compute makes the origin a set of instances the platform places, replaces, scales, and moves
-between locations. One URL cannot describe that set. Describing it falls to the consumer:
-enumerate every instance address and keep it current, decide which location each edge
-prefers, and detect a failed location fast enough to matter.
+Compute makes the origin a set of instances the platform places, replaces, scales, and
+moves between locations. One URL cannot describe that set. Describing it falls to the
+consumer: enumerate every instance address and keep it current, decide which location each
+edge prefers, and detect a failed location fast enough to matter.
 
-The platform already knows all three. Solving it once is cheaper than every consumer solving
-it on every deployment change, and whatever needs traffic spread across locations next
-reuses the answer.
+The platform already knows all three. Solving it once is cheaper than every consumer
+solving it on every deployment change, and whatever needs traffic spread across locations
+next reuses the answer.
 
 ### Goals
 
@@ -76,7 +76,7 @@ reuses the answer.
 ### Non-Goals
 
 - **Modeling compute in the networking API.** A NetworkService selects network interface
-  claims. Anything that claims an interface can use it.
+  claims.
 - **How the Layer 4 load balancer is configured.** [Dani Rojas](../traffic-intelligence/l4-load-balancing-dani-rojas.md) owns that. A
   NetworkService defines the membership that load balancer consumes. Its policy belongs
   there.
@@ -86,15 +86,13 @@ reuses the answer.
 - **Consumer-controlled steering and health checks.** `Nearest` is the only strategy, and
   the platform judges members by real request outcomes. Both are expected to gain controls;
   neither has them here.
-- **An address of its own.** A virtual IP for east-west traffic is a natural extension. The
-  name accommodates it; this milestone does not deliver it.
+- **An address of its own.** A virtual IP for east-west traffic is a natural extension this
+  milestone does not deliver.
 
 ## Proposal
 
 A consumer creates a `NetworkService` naming a label and a port. The platform resolves
-that label into the endpoint set, records each member's location, and keeps both current.
-The platform handles the rest: traffic distribution has one behavior, and consumers can
-inspect the result but not change it.
+that label into the endpoint set and keeps it current.
 
 ### What a consumer writes
 
@@ -112,8 +110,6 @@ spec:
     - name: http
       port: 8080
 ```
-
-Nearest-location routing, failover, and health checking apply unasked.
 
 The proxy in front of it:
 
@@ -159,13 +155,8 @@ it returns. Priya reads about it in the morning.
 
 ### Notes/Constraints/Caveats
 
-**The platform observes a member's location.** Network members are registered with a
-reference to their location allowing the platform to know in which physical location the
-member is available in.
-
-**Membership is a query over network interface claims.** A claim belongs to the networking
-API. Anything that asks for a network interface can join a service: a compute instance
-today, a load balancer or an appliance later.
+**The platform records a member's location.** A claim is served in one location, and
+networking labels it with that location. Consumers never write it.
 
 **Selecting works without labeling anything first.** Claim-creating services stamp a
 defined set of keys. The facts worth selecting on are already present, spelled the same
@@ -195,8 +186,8 @@ confirm that a consumer cannot select claims they do not own.
 
 ## Design Details
 
-This section describes what a consumer sees and how it behaves. A follow-on technical
-design owned by the network services operator covers how the edge gets programmed.
+A follow-on technical design owned by the network services operator covers how the edge
+gets programmed.
 
 ### NetworkService
 
@@ -226,8 +217,7 @@ spec:
 
 A claim joins when it matches the selector, its interface is programmed, and its holder
 reports running. It leaves when it stops matching or goes away, ordinarily after
-[draining](#draining) rather than abruptly. A claim carries the addresses its interface
-holds and whether that interface is programmed. A selector reaches only the consumer's own
+[draining](#draining) rather than abruptly. A selector reaches only the consumer's own
 resources.
 
 **A service spans one network.** A selector matching claims across two networks is a
@@ -262,8 +252,8 @@ Networking's own key is the one to select on, because networking sets it on the 
 copy and guarantees it for claims no workload created.
 
 **Networking never interprets a compute key.** A key's prefix records which service
-guarantees the key. No service has to understand another's keys. Any service can therefore
-populate keys under its own prefix without changing networking.
+guarantees it. Any service can populate keys under its own prefix without changing
+networking.
 
 Selecting a whole application is the common case, as shown above. Narrower selections add
 keys — one placement, or one city:
@@ -276,13 +266,12 @@ networkInterfaceClaims:
       networking.datumapis.com/location: us-central-1
 ```
 
-Adding the location key restricts which claims are members; it does not steer traffic.
-Restricting a service to Dallas capacity happens here; getting Dallas users served from
-Dallas requires nothing.
+Adding the location key restricts which claims are members. It does not steer traffic:
+getting Dallas users served from Dallas requires nothing.
 
-The selector is a standard label selector. A service can span more than one value of a
-key. Spanning values lets two workloads serve one hostname, as a blue/green rollout does.
-The field allows it from the start, because adding it later would mean changing the field:
+A service can also span more than one value of a key, which lets two workloads serve one
+hostname as a blue/green rollout does. The field allows it from the start, because adding
+it later would mean changing the field:
 
 ```yaml
 networkInterfaceClaims:
@@ -393,9 +382,9 @@ out of rotation" without contacting support.
 ### Consuming a network service
 
 An HTTPProxy rule reaches a service through a `networkService` backend naming the service
-and one of its ports. The `networkService` backend sits alongside three existing forms: an
-endpoint URL, an endpoint reached through a connector, and a single instance on a tenant
-network. It generalizes that last one from one endpoint to a set.
+and one of its ports. It sits alongside three existing forms: an endpoint URL, an endpoint
+reached through a connector, and a single instance on a tenant network. It generalizes
+that last one from one endpoint to a set.
 
 Referencing by name rather than by API group and kind keeps HTTPProxy backends a curated
 set. Naming a port rather than a number lets the reference survive a port change.
@@ -408,14 +397,13 @@ for HTTP.
 ### Federation
 
 A consumer writes a NetworkService in their project. Its members are claims served in POP
-cells, which are separate clusters from the edge clusters serving traffic.
+cells, which are separate clusters from the edge clusters serving traffic. **Each control
+plane holds the minimum it needs.** A cell holds full-fidelity interfaces because
+providers there configure real NICs. The edge holds addresses, ports, locations, and
+health, because that is all a proxy needs to pick a member.
 
-**Each control plane holds the minimum it needs.** A cell holds full-fidelity interfaces
-because providers there configure real NICs. The edge holds addresses, ports, locations,
-and health, because that is all a proxy needs to pick a member.
-
-Most of the path already exists. Controllers that predate this proposal already publish
-interfaces to consumers. Membership reads a copy that is already there.
+Controllers that predate this proposal already publish interfaces to consumers, so
+membership reads a copy that is already there.
 
 | Where | What happens |
 |---|---|
@@ -435,10 +423,6 @@ reference, the network context, the attachment, and the VPC identifier.
 today, and no claim is published to the project at all. Those two gaps are the substantive
 federation work this proposal requires.
 
-Selecting claims rather than interfaces keeps that work short. Labels travel one hop, from
-where compute writes them to where a consumer reads them, instead of crossing binding and
-projection on the way.
-
 <<[UNRESOLVED label propagation ]>>
 Propagating labels blindly is the simple rule, and it lets a consumer's key collide with a
 platform one. Restricting propagation to known prefixes avoids that and makes networking
@@ -451,8 +435,7 @@ never updated today.
 programmed, and is programmed before the workload behind it starts answering. Membership
 waits for both. The second half is not networking's to observe: the holder reports it on
 the claim, and membership reads that report without knowing what wrote it.
-[Draining](#draining) needs the same report for the other transition. One mechanism covers
-both transitions.
+[Draining](#draining) reads the same report for the other transition.
 
 #### What happens when a control plane is unreachable
 
