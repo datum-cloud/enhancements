@@ -42,7 +42,7 @@ edge ranks the service's locations by distance from itself, serves the request f
 best one, and moves to the next if it fails. Consumers configure none of it.
 
 Compute is the first consumer. Others follow. A NetworkService selects network interface
-claims, networking's own resource. The API never learns what a workload is.
+claims, which belong to the networking API. Nothing in it names a workload.
 
 This proposal defines the consumer surface for
 [Zava](../traffic-intelligence/envoy-routing-zava.md) feature #1, geo-aware upstream
@@ -165,14 +165,11 @@ it returns. Priya reads about it in the morning.
 
 ### Notes/Constraints/Caveats
 
-**The platform observes a member's location.** It reads the location from where the member
-runs. The resource carries no location list, and stays correct as capacity moves. Later
-controls, such as pinning to a location or weighting across several, build on the observed
-location.
+**The platform observes a member's location.** Network members are registered with a reference to their location allowing the platform to know in which physical location the member is available in.
 
-**Membership is a query over network interface claims.** A claim is networking's own
-resource. Anything that claims an interface can be a member: a compute instance today, a
-load balancer or appliance later.
+**Membership is a query over network interface claims.** A claim belongs to the networking
+API. Anything that asks for a network interface can join a service: a compute instance
+today, a load balancer or an appliance later.
 
 **Selecting works without labeling anything first.** Claim-creating services stamp a
 defined set of keys. The facts worth selecting on are already present, spelled the same
