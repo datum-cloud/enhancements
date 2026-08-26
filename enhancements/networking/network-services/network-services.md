@@ -231,11 +231,17 @@ A NetworkService is written in one control plane and its members live in others.
 
 Every claim carries a defined set of labels, applied by whichever service created it.
 
-Networking applies these when it publishes a claim into the consumer's project:
+Networking applies this in the cell that serves the claim, where the location is known:
 
 | Label | Value | Example |
 |---|---|---|
 | `networking.datumapis.com/location` | The location serving the claim. | `us-central-1` |
+
+**The location key is authoritative, and stays that way without a webhook.** Networking
+writes it where the truth lives, and publication rewrites the keys networking owns on
+every pass, so an edit to a published copy is corrected on the next reconcile. A consumer
+can add labels of their own; they cannot durably change this one. Correction is eventual
+rather than immediate, so a wrong value survives until the next pass.
 
 Compute applies these to the claim it creates, and they travel to the published copy:
 
@@ -419,9 +425,10 @@ A published copy carries the network, interface name, MTU, addresses, and reclai
 It drops everything naming an object that does not exist where it lands: the claim
 reference, the network context, the attachment, and the VPC identifier.
 
-**Labels have to travel, and today they do not.** Compute sets no labels on the claim
-today, and no claim is published to the project at all. Those two gaps are the substantive
-federation work this proposal requires.
+**Labels have to travel.** Compute stamps its keys on the claim it creates and networking
+stamps the location in the cell, but no claim is published to the project, so nothing
+carries either to where a consumer selects. Publication is the substantive federation work
+this proposal requires.
 
 <<[UNRESOLVED label propagation ]>>
 Propagating labels blindly is the simple rule, and it lets a consumer's key collide with a
@@ -429,6 +436,9 @@ platform one. Restricting propagation to known prefixes avoids that and makes ne
 hold a list it otherwise would not. Decide which. Decide also whether a label added to a
 claim after creation is expected to reach the copy, since claims are written once and
 never updated today.
+
+Whichever rule is chosen, publication must keep overwriting the keys networking owns
+rather than merging them, since that is what makes the location authoritative.
 <<[/UNRESOLVED]>>
 
 **A member joins once it can serve.** A claim holds an address before its data plane is
@@ -467,15 +477,15 @@ expresses a matrix of locations against edges, which is what makes hand-rolled
 multi-region routing miserable.
 
 Ranking starts from each location's coordinates. Measured signals replace them as the
-[Total Load Balancing](../traffic-intelligence/total-load-balancing.md) signal set matures,
-and that substitution is invisible in this API.
+[Total Load Balancing](../traffic-intelligence/total-load-balancing.md) signal set
+matures, and that substitution is invisible in this API.
 
 <<[UNRESOLVED coordinates ]>>
 No location carries coordinates today. The field is optional on `Location` and is unset on
-all three that exist, so a ranking that reads it gets nothing everywhere and silently falls
-back. The only other topology recorded is a city code, which is a label rather than a
-position. Someone has to enter the data before ranking can work at all, which makes this an
-operator task rather than an engineering one.
+all three that exist, so a ranking that reads it gets nothing everywhere and silently
+falls back. The only other topology recorded is a city code, which is a label rather than
+a position. Someone has to enter the data before ranking can work at all, which makes this
+an operator task rather than an engineering one.
 <<[/UNRESOLVED]>>
 
 ### End to end: a compute workload behind a proxy
