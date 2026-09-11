@@ -13,17 +13,21 @@ The platform's underlay and internal infrastructure are IPv6-only. Fabric-level 
 
 ## Platform-Wide Address Pools
 
-The platform draws from three top-level IPv6 address pools. These pools are managed centrally and subdivided per PoP.
+The platform draws from four top-level IPv6 address pools. These pools are managed centrally and subdivided per PoP.
 
-| Pool                     | Block                         | Purpose                                    | Visibility                                                                                                                                 |
-|--------------------------|-------------------------------|--------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
-| VPC (ULA, default)       | `fd20::/20` (from `fd00::/8`) | Tenant overlay addressing                  | Overlay only — never leaves the overlay; see [VPC Address Space Options](#vpc-address-space-options)                                       |
-| VPC (GUA, alternative)   | `[VPC-BLOCK]` (RIR PI)        | Tenant overlay addressing                  | Overlay only — must not be advertised externally; policy enforcement required; see [VPC Address Space Options](#vpc-address-space-options) |
-| SRv6 SID locators        | `[LOCATOR-BLOCK]` (RIR PI)    | SRv6 segment identifiers                   | Per-node `/64` advertised via BGP within PoP only; `/48` aggregate for external reachability                                            |
-| Infrastructure loopbacks | `[INFRA-BLOCK]` (RIR PI)      | Router loopbacks (single address per node) | Underlay-reachable; aggregate-only to external peers                                                                                       |
+| Pool                     | Block                               | Purpose                                                                                                            | Visibility                                                                                                                                 |
+| ------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| VPC (ULA, default)       | `fd20::/20` (from `fd00::/8`)       | Tenant overlay addressing                                                                                          | Overlay only — never leaves the overlay; see [VPC Address Space Options](#vpc-address-space-options)                                       |
+| VPC (GUA, alternative)   | `[VPC-BLOCK]` (RIR PI)              | Tenant overlay addressing                                                                                          | Overlay only — must not be advertised externally; policy enforcement required; see [VPC Address Space Options](#vpc-address-space-options) |
+| SRv6 SID locators        | `[LOCATOR-BLOCK]` (RIR PI)          | SRv6 segment identifiers                                                                                           | Per-node `/64` advertised via BGP within PoP only; `/48` aggregate for external reachability                                               |
+| Infrastructure loopbacks | `[INFRA-BLOCK]` (RIR PI)            | Router loopbacks (single address per node)                                                                         | Underlay-reachable; aggregate-only to external peers                                                                                       |
+| Ingress gateway (ULA)    | `[GATEWAY-BLOCK]` (from `fd00::/8`) | Shared ingress gateways' own return-path addressing; see [Ingress Gateway Addressing](#ingress-gateway-addressing) | **Deliberately reachable from tenant VRFs**, unlike every other row here — scoped per tenant by Route Target, same as any other EVPN route |
 
 > [!NOTE]
 > The VPC pool rows (ULA and GUA) are mutually exclusive. Each PoP uses either ULA (`fd00::/8`) or a GUA block (RIR PI) for tenant overlay addressing — never both. See [VPC Address Space Options](#vpc-address-space-options).
+
+> [!NOTE]
+> The ingress gateway pool's exact prefix (`[GATEWAY-BLOCK]`) is a placeholder, same as the locator and infrastructure loopback blocks — see [Ingress Gateway Addressing](#ingress-gateway-addressing) for proposed sizing and, critically, why this pool must never be confused with the other ULA sub-ranges in `fd00::/8` despite sharing their address family.
 
 > [!NOTE]
 > Both the SRv6 locator block and the infrastructure loopback block must be Provider Independent (PI) space registered with a regional internet registry (RIR). Using Provider Aggregatable (PA) space assigned by an upstream carrier is not acceptable — it creates a hard dependency on that carrier and prevents portability. The actual prefix values are placeholders in this document; specific assignments are tracked in the IPAM service.
@@ -39,7 +43,7 @@ The platform draws from three top-level IPv6 address pools. These pools are mana
 > | LACNIC   | Latin America and the Caribbean   |
 > | AFRINIC  | Africa                            |
 
-The ULA space (`fd00::/8`) serves two separate purposes on this platform: the tenant VPC pool (`fd20::/20`, see the [Tenant Addressing Plan](tenant.md)) and each PoP's internal infrastructure `/48` (see [Fabric Addressing Plan — Internal Infrastructure Addressing](fabric.md#internal-infrastructure-addressing-ula-48)). Both are non-overlapping sub-ranges of the same RFC 4193 ULA space, tracked separately by IPAM. These prefixes are private by definition (RFC 4193 §4.1 mandates default filtering of `fc00::/7` at exterior BGP sessions) and are treated as bogon space by essentially all transit providers and IXPs, giving ULA a strong filtering backstop GUA lacks — though this is an operational convention enforced by other operators' configurations, not a structural internet guarantee, so no policy is required on this platform's side to prevent external advertisement, though outbound filtering at the PoP border remains good defense-in-depth practice.
+The ULA space (`fd00::/8`) serves three separate purposes on this platform: the tenant VPC pool (`fd20::/20`, see the [Tenant Addressing Plan](tenant.md)), each PoP's internal infrastructure `/48` (see [Fabric Addressing Plan — Internal Infrastructure Addressing](fabric.md#internal-infrastructure-addressing-ula-48)), and the ingress gateway pool (see [Ingress Gateway Addressing](#ingress-gateway-addressing)). All three are non-overlapping sub-ranges of the same RFC 4193 ULA space, tracked separately by IPAM. These prefixes are private by definition (RFC 4193 §4.1 mandates default filtering of `fc00::/7` at exterior BGP sessions) and are treated as bogon space by essentially all transit providers and IXPs, giving ULA a strong filtering backstop GUA lacks — though this is an operational convention enforced by other operators' configurations, not a structural internet guarantee, so no policy is required on this platform's side to prevent external advertisement, though outbound filtering at the PoP border remains good defense-in-depth practice.
 
 > [!NOTE]
 > The Default-Free Zone (DFZ) is the set of Internet core routers that carry a full global BGP routing table with no default route. Advertising individual `/128` loopbacks into the DFZ is operationally hostile: it bloats the global routing table, exposes internal infrastructure topology, and will be filtered by most peers regardless — IPv6 prefix length limits at the DFZ boundary are typically `/48` maximum. Aggregates only.
@@ -50,7 +54,7 @@ The SRv6 SID locator block is a globally registered PI prefix. It is a platform-
 
 ## Per-PoP Allocation
 
-Each PoP receives exactly three `/48` allocations, one from each platform pool.
+Each PoP receives exactly four `/48` allocations, one from each platform pool.
 
 > [!NOTE]
 > **Point of presence (PoP).** A geographic location where the platform deploys networking and compute infrastructure. Each PoP is an independent address allocation unit — each receives its own set of `/48` blocks from the platform pools.
@@ -60,8 +64,10 @@ Each PoP receives exactly three `/48` allocations, one from each platform pool.
 Per PoP
 ├── /48  ULA internal infrastructure (from fd00::/8)
 ├── /48  SRv6 SID locator space      (from [LOCATOR-BLOCK])
-└── /48  Infrastructure loopbacks    (from [INFRA-BLOCK])
-     └── /128  per node
+├── /48  Infrastructure loopbacks    (from [INFRA-BLOCK])
+│    └── /128  per node
+└── /48  Ingress gateway addressing  (from [GATEWAY-BLOCK])
+     └── /128  per (tenant VPC, gateway node) pair — see Ingress Gateway Addressing
 ```
 
 Tenant VPC addressing is independent of this per-PoP allocation. Each VPC receives a CIDR block (ULA, IPAM-assigned by default, or GUA) subnetted across PoPs; see [VPC Address Space Options](#vpc-address-space-options).
@@ -136,21 +142,39 @@ Internal infrastructure subnets, backbone links, SRv6 locator advertisement, and
 - **Infrastructure loopbacks** — a per-PoP RIR PI `/48` providing one `/128` per node, advertised externally as `/48` aggregate only
 - **Isolation** — fabric addresses are never reachable from tenant VRFs; enforced by prefix deny lists at VRF handoff
 
+### Ingress Gateway Addressing
+
+A shared, multi-tenant ingress gateway fleet (e.g. an Envoy-based edge proxy attaching into a tenant's VRF to reach a VPC-internal backend) needs its own stable address inside that VRF: something for the backend's reply traffic to route back to. That address cannot come from either address family already defined in this document:
+
+- **Not the tenant VPC pool.** The gateway isn't a VPC attachment and has no VPCAttachment identity to allocate one under; more fundamentally, this document's tenant pool is IPAM-issued per VPC at VPC creation, with no mechanism for a shared, cross-tenant component to request a slot inside every VPC it might ever need to serve.
+- **Not the fabric pools.** SRv6 locators and infrastructure loopbacks are explicitly walled off from tenant VRFs by the isolation property in [Isolation and Security Properties](#isolation-and-security-properties) — the opposite of what an ingress gateway address needs. Reusing fabric space here would either be silently blocked by that same isolation policy, or would require punching a tenant-reachable hole in address space whose entire purpose is to remain fabric-only, coupling a tenant-facing address to the same identity used for the node's own core underlay routing.
+
+**A fourth pool, dedicated to this purpose, is the smallest change that doesn't compromise the other three.** `[GATEWAY-BLOCK]`, sized as a `/32` (proportionate to the other per-PoP infrastructure pools, not to the tenant pool's `/20` — a `/32` yields 65,536 possible per-PoP `/48`s, far beyond any plausible PoP count), issued one `/48` per PoP as the fourth entry in [Per-PoP Allocation](#per-pop-allocation). Structurally the same governance as the tenant ULA pool (self-managed, no RIR involvement, IPAM tracks non-overlap with the other three `fd00::/8` sub-ranges) — it just isn't the tenant pool, because nothing in this address space is ever handed to a tenant's own IPAM allocation.
+
+Addresses within a PoP's `/48` are assigned per `(tenant VPC, gateway node)` pair — one `/128` per pair, not a further subnet hierarchy the way tenant/region/endpoint is, since a gateway address identifies one gateway replica's own presence in one VPC, not a routed subnet of anything. Uniqueness only needs to hold within this pool's own address space (no other allocator ever draws from it), so a deterministic derivation (e.g. hashing the VPC and node identity into the `/48`'s host bits) is sufficient — this pool does not need first-fit/marker-file allocation bookkeeping the way the tenant pool's collision-safety guarantee does, because nothing else ever contends for a specific value inside it.
+
+**Isolation is the mirror image of the fabric pools' isolation property**, not an extension of it:
+
+- Fabric addresses are unconditionally denied at every tenant VRF import.
+- The ingress gateway pool is *not* on that deny list, by design — it must be reachable from exactly the tenant VRFs a given address's own EVPN route is scoped to via Route Target, the same RT-based scoping every other tenant-VRF-imported route already uses. Nothing about this pool bypasses RT filtering; it only needs to not be swept up in a *prefix*-based deny rule the way fabric space is.
+- Whoever implements the fabric deny-list policy this document already requires (see [Isolation and Security Properties](#isolation-and-security-properties)) must scope its prefix match terms precisely to `[INFRA-BLOCK]` and the internal infrastructure `/52` — not a broader match that would incidentally net `[GATEWAY-BLOCK]` too and silently break every ingress gateway's return path.
+
 ---
 
 ## Allocation Hierarchy & Capacity Summary
 
-| Resource                       | Block      | Source                                                     | Capacity                                                                                                  |
-|--------------------------------|------------|------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| Platform ULA pool              | `fd00::/8` | RFC 4193 ULA                                               | —                                                                                                         |
-| Per-PoP fabric addressing      | 3× `/48`   | ULA + 2× RIR PI (see [Fabric Addressing Plan](fabric.md))  | One ULA infra `/48`, one SRv6 locator `/48`, one loopback `/48` per PoP                                   |
-| Per-Tenant VPC (IPv6)          | `/48`      | From tenant ULA pool (`fd20::/20`)                         | ~268.4 million; see [Tenant Addressing Plan — IPv6 Capacity Summary](tenant.md#ipv6-capacity-summary)     |
-| Per-Region subnet (IPv6)       | `/64`      | From VPC `/48`                                             | 65,536 per VPC                                                                                            |
-| Per-Endpoint (IPv6)            | `/96`      | From region `/64`                                          | ~4.29 billion per region subnet                                                                           |
-| Tenant IPv4 pool               | `/9`       | `10.128.0.0/9` (default; alternate bases available)        | Shared, fixed pool; see [Tenant Addressing Plan — IPv4 Capacity Summary](tenant.md#ipv4-capacity-summary) |
-| Per-Macro-region (IPv4)        | `/12`      | From tenant IPv4 pool                                      | 8 possible                                                                                                |
-| Per-Region site (IPv4)         | `/20`      | From macro-region `/12`                                    | 2,048 total                                                                                               |
-| Per-Endpoint (IPv4)            | `/32`      | From region site `/20`                                     | 4,092 usable                                                                                              |
+| Resource                     | Block      | Source                                                    | Capacity                                                                                                  |
+| ---------------------------- | ---------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Platform ULA pool            | `fd00::/8` | RFC 4193 ULA                                              | —                                                                                                         |
+| Per-PoP fabric addressing    | 3× `/48`   | ULA + 2× RIR PI (see [Fabric Addressing Plan](fabric.md)) | One ULA infra `/48`, one SRv6 locator `/48`, one loopback `/48` per PoP                                   |
+| Per-PoP ingress gateway pool | `/48`      | From ingress gateway pool (`[GATEWAY-BLOCK]`)             | One `/48` per PoP; see [Ingress Gateway Addressing](#ingress-gateway-addressing)                          |
+| Per-Tenant VPC (IPv6)        | `/48`      | From tenant ULA pool (`fd20::/20`)                        | ~268.4 million; see [Tenant Addressing Plan — IPv6 Capacity Summary](tenant.md#ipv6-capacity-summary)     |
+| Per-Region subnet (IPv6)     | `/64`      | From VPC `/48`                                            | 65,536 per VPC                                                                                            |
+| Per-Endpoint (IPv6)          | `/96`      | From region `/64`                                         | ~4.29 billion per region subnet                                                                           |
+| Tenant IPv4 pool             | `/9`       | `10.128.0.0/9` (default; alternate bases available)       | Shared, fixed pool; see [Tenant Addressing Plan — IPv4 Capacity Summary](tenant.md#ipv4-capacity-summary) |
+| Per-Macro-region (IPv4)      | `/12`      | From tenant IPv4 pool                                     | 8 possible                                                                                                |
+| Per-Region site (IPv4)       | `/20`      | From macro-region `/12`                                   | 2,048 total                                                                                               |
+| Per-Endpoint (IPv4)          | `/32`      | From region site `/20`                                    | 4,092 usable                                                                                              |
 
 Full detail on tenant VPC, region, and endpoint allocation: [Tenant Addressing Plan](tenant.md).
 Full detail on fabric addressing (internal infrastructure, SRv6 locators, loopbacks, backbone links): [Fabric Addressing Plan](fabric.md).
@@ -173,6 +197,6 @@ Additional SRv6 locator and infrastructure loopback blocks must be registered wi
 
 **Locator and infrastructure blocks do not overlap.** The SRv6 locator block (`[LOCATOR-BLOCK]`) and the infrastructure loopback block (`[INFRA-BLOCK]`) must be drawn from distinct, non-overlapping allocations confirmed at RIR registration time. See [Fabric Addressing Plan — Locator Block Non-Overlap](fabric.md#locator-block-non-overlap) for how routing policy distinguishes the two.
 
-**Fabric addresses are not reachable from tenant networks.** Tenant VRFs must not have routes to the infrastructure loopback block, the internal infrastructure `/52`, or backbone link `/127` subnets. This is enforced by import policy at the VRF handoff point — the `[INFRA-BLOCK]` aggregate and the internal infrastructure `/52` range must appear in a prefix deny list applied to all tenant VRF imports. See [Fabric Addressing Plan — Isolation Properties](fabric.md#isolation-properties) for full detail.
+**Fabric addresses are not reachable from tenant networks.** Tenant VRFs must not have routes to the infrastructure loopback block, the internal infrastructure `/52`, or backbone link `/127` subnets. This is enforced by import policy at the VRF handoff point — the `[INFRA-BLOCK]` aggregate and the internal infrastructure `/52` range must appear in a prefix deny list applied to all tenant VRF imports. See [Fabric Addressing Plan — Isolation Properties](fabric.md#isolation-properties) for full detail. **This deny list must not include `[GATEWAY-BLOCK]`** — see [Ingress Gateway Addressing](#ingress-gateway-addressing) for why that pool's tenant-VRF reachability is deliberate, not an oversight to be closed.
 
 **External advertisement uses aggregates only.** For PoPs with Internet transit that require loopback reachability from external paths, only the PoP-level aggregate (the `/48` covering that PoP's loopbacks) may be advertised. Individual `/128`s must never appear in the global DFZ.
