@@ -1,7 +1,7 @@
 ---
 title: NAT64 Gateway for VPC Networks
-description: RFC 6146 stateful NAT64 translation for IPv6-only Galactic VPC instances reaching the IPv4 internet, delivered by generalizing the existing, proven NAT66 tier into a single combined galactic-nat binary and CRD rather than adding a second, near-duplicate one. Paired with DNS64, tracked separately.
-updated: 2026-09-11 14:50
+description: Stateful NAT64 translation (RFC 6146, TCP and UDP) for IPv6-only Galactic VPC instances reaching the IPv4 internet, delivered by generalizing the existing NAT66 tier into a single combined galactic-nat binary and CRD rather than adding a second, near-duplicate one. Paired with DNS64, tracked separately.
+updated: 2026-09-12 08:05
 tags: [plan, srv6, nat64, nat66, dns64, evpn, ebpf, egress]
 status: provisional
 stage: alpha
@@ -25,6 +25,7 @@ latest-milestone: "TBD"
   - [Per-tenant session limits: enforcement and collection](#per-tenant-session-limits-enforcement-and-collection)
   - [The DNS64 boundary](#the-dns64-boundary)
   - [End-to-end validation](#end-to-end-validation)
+    - [A NAT66 defect this work surfaced](#a-nat66-defect-this-work-surfaced)
 
 ## Summary
 
@@ -32,15 +33,36 @@ Galactic VPC's IPv6-only instances get a private ULA address and, where
 configured, an existing stateful NAT66 tier (`galactic-nat66`) gets them
 to the IPv6 internet. Nothing today gets them to the IPv4 internet — a
 meaningful share of real-world destinations. This document designs a
-stateful, RFC 6146-compliant NAT64 translation capability, delivered by
+stateful NAT64 translation capability for TCP and UDP — RFC 6146's
+model, short of its ICMP and fragment handling (see
+[Non-Goals](#non-goals)) — delivered by
 **generalizing the existing `galactic-nat66` binary and its CRD into a
 single combined `galactic-nat`**, rather than building a second,
-near-duplicate binary alongside it. NAT64 and NAT66 perform the same
-function — stateful egress PAT, VRF-scoped session table, port
-allocation, decap/re-encap on return — for different address families;
-one implementation serving both is a stronger fit than two copies of
-nearly the same code, and it is isolated per tenant using the same SRv6
-Argument mechanism the fabric already uses to disambiguate VRFs.
+near-duplicate binary alongside it. NAT64 and NAT66 wrap the same
+*stateful* machinery — a VRF-scoped session table, port allocation, and
+decap/re-encap on return — around genuinely different translation cores,
+so one implementation owning the shared half is a stronger fit than two
+copies of it. Both are isolated per tenant using the same SRv6 Argument
+mechanism the fabric already uses to disambiguate VRFs.
+
+The distinction matters enough to state once here rather than discover
+during implementation. NAT66 is pure PAT: an IPv6 header stays an IPv6
+header and only the source address and port change. NAT64 additionally
+rewrites the network header across address families (RFC 7915) —
+synthesizing an IPv4 header, computing an IPv4 header checksum that has
+no IPv6 counterpart, and taking a checksum delta across a pseudo-header
+whose *family* changed rather than only whose values did. What is shared
+is real and worth consolidating; what is not shared is not a branch on an
+otherwise-common path.
+
+**Implementation status.** Built in
+[galactic#525](https://github.com/datum-cloud/galactic/pull/525), on the
+CRD rename in
+[network#22](https://github.com/datum-cloud/network/pull/22) (merged).
+This document has been reconciled against what was actually built; the
+notes below marked **Revised after implementation** record where the
+original design was wrong or incomplete rather than silently matching it
+to the code.
 
 ## Motivation
 
@@ -62,9 +84,21 @@ matches actual, current need rather than anticipated need.
 
 ### Goals
 
-- An IPv6-only instance reaches an IPv4-only destination with zero
-  tenant-side configuration, no NAT64 prefix handling on the instance,
-  and no client-side awareness that translation happened at all.
+- An IPv6-only instance reaches an IPv4-only destination over **TCP or
+  UDP** with zero tenant-side configuration, no NAT64 prefix handling on
+  the instance, and no client-side awareness that translation happened at
+  all.
+
+  **Revised after implementation.** This goal originally said "reaches an
+  IPv4-only destination" without qualifying the protocol, and the document
+  described itself as RFC 6146-compliant throughout. That was a larger
+  claim than intended. RFC 6146 also requires ICMP translation (§3.5) and
+  fragment handling (§3.4), each of which is a subsystem rather than a
+  branch — ICMP error translation means rewriting a full IPv4 header and
+  L4 header nested inside an ICMP payload, under the eBPF verifier. Both
+  are now explicit [non-goals](#non-goals) with their own follow-on work.
+  Until they land this is stateful NAT64 for TCP and UDP, and PMTUD across
+  the translator does not work.
 - **For the MVP, this is enabled by default for all compute
   instances** — not a per-tenant or per-region opt-in a tenant has to
   request. Availability is bounded only by where shard capacity exists,
@@ -84,7 +118,10 @@ matches actual, current need rather than anticipated need.
   identity. This applies identically to the IPv4 and IPv6 halves of the
   combined table.
 - Per-tenant NAT64 session count and configured limit are tracked as
-  local, in-datapath state. This design's concern is collection only —
+  local, in-datapath state. The limit **defaults to unlimited**: because
+  this design's scope stops at collection, a ceiling nobody explicitly
+  chose would present to a tenant as an unexplained connection failure
+  with nothing anywhere able to say why. This design's concern is collection only —
   emitting or exposing that data to any higher-layer system (telemetry,
   quota, insights, or otherwise) is out of scope. See
   [Notes/Constraints/Caveats](#notesconstraintscaveats) for what that
@@ -116,6 +153,27 @@ matches actual, current need rather than anticipated need.
   not change what NAT66 does for an existing tenant's traffic. See
   [Risks and Mitigations](#risks-and-mitigations) for how that boundary
   is kept, not just asserted.
+- **ICMP and ICMPv6 translation** (RFC 6146 §3.5), and **fragment
+  handling** (§3.4), including the PMTUD/Packet-Too-Big path that depends
+  on them.
+
+  **Added after implementation.** These were absent from the original
+  document, which is why it read as claiming full RFC 6146 compliance.
+  Each is a subsystem, not a branch: ICMP error translation requires
+  rewriting an IPv4 header and L4 header embedded inside an ICMP payload
+  under the verifier, and fragmentation requires reassembly state this
+  datapath has nowhere to keep. Deferring them is a deliberate scope cut,
+  and their absence is **counted rather than silent** — an IPv4 fragment
+  or a packet carrying IPv4 options on the return path increments its own
+  named drop counter, so "NAT64 works except for X" reads off a counter
+  instead of arriving as a support ticket. Tracked separately.
+
+- **NAT64 prefix lengths other than `/96`.** RFC 6052 defines six. A
+  `/96` is the only one placing the embedded IPv4 address in a single
+  aligned four-byte run, which is what lets the datapath extract it
+  without a bit-shuffle on the hot path. Configuration rejects any other
+  length, and any prefix with bits set below its length, at startup.
+
 - **Any form of session failover** — regional or cross-region.
   Translation state is strictly node-local; replicating it anywhere is
   out of scope entirely, not merely out of scope for now.
@@ -258,11 +316,58 @@ of hiding the same problem.
   environment first deploys this binary before ever enabling IPv4
   fields there, rather than treating the existing test suite alone as
   sufficient proof; (3) keep the IPv4 and IPv6 code paths structurally
-  separate inside the one binary (distinct table entries, distinct
-  translation functions) rather than a unified code path with
+  separate inside the one binary rather than a unified code path with
   family-conditional branches throughout, so a defect in one family's
   logic has a narrower blast radius within the shared process even
   though it shares fate at the process level.
+
+  **Revised after implementation.** Mitigation (3) originally asked for
+  "distinct table entries, distinct translation functions". Distinct
+  table entries shipped as specified — a family byte in the session key,
+  so a NAT64 row's IPv4-mapped addresses cannot alias a real IPv6 flow in
+  `::ffff:0:0/96`. Distinct *functions* turned out to be the wrong unit.
+  Both families' translation paths are force-inlined, so separate
+  functions still compile into one program, and the resulting instruction
+  count is a verifier-complexity risk this document never named. What
+  shipped instead is **separate eBPF programs behind a tail-call
+  dispatcher**: one attached program classifies a packet and tail-calls
+  one of four leaves (NAT66 forward/return, NAT64 forward/return). Each
+  leaf gets its own instruction budget, and a defect in one family's
+  translation cannot grow the other's program at all. This satisfies the
+  mitigation's intent more completely than its letter did.
+
+- **Verifier complexity, unnamed in the original design.** A single
+  program holding both families' full translation paths — each with its
+  own header synthesis, checksum handling, and an unrolled
+  port-allocation probe loop — is a real risk of rejection at load time,
+  and the mitigation above made it worse rather than better. Resolved by
+  the tail-call split; recorded here because "will the verifier accept
+  this" is a design-time question for any eBPF datapath of this size, not
+  an implementation detail to be discovered late.
+
+- **The datapath cannot keep its own session count accurate.** The
+  connection table is an LRU map: the kernel evicts rows under pressure
+  with nothing to decrement, and no datapath path ages an idle flow out.
+  Left alone the per-tenant count only ever climbs, every tenant
+  eventually reads as over limit, and a per-tenant ceiling degrades into
+  a dead shard. This was missed entirely by the original design's
+  treatment of limits below, which reasoned only about the hot path.
+  Mitigation: userspace periodically recomputes each tenant's count from
+  the connection table and writes it back. Counting forward rows alone is
+  what makes the total right — every flow owns one forward row and one
+  reverse row, and only the forward row carries a VRFID.
+
+- **A shard's public IPv4 address is not reachable by anything this
+  design controls.** The IPv6 masquerade address is made reachable by a
+  `/128` BGPAdvertisement into the EVPN fabric. That mechanism does not
+  carry over: a NAT64 reply arrives from the IPv4 internet, so the
+  underlay or an upstream announcement has to attract the address to the
+  node. A shard configured without that translates outbound traffic
+  correctly and never sees a single reply — every forward-path counter
+  healthy, zero replies. Mitigation: the address is published in
+  `EgressShard` status specifically so the prerequisite is checkable
+  rather than implicit. It remains an operator responsibility, and is the
+  most likely way a first NAT64 deployment fails.
 - **This design inherits NAT66's single-point-of-failure-per-shard
   limitation, by design.** A shard restart breaks every session it was
   servicing, for both address families now instead of one. An anycast
@@ -335,16 +440,27 @@ instead of two near-duplicates means one eBPF program, one DaemonSet,
 one CRD, and one set of counters to instrument instead of two —
 directly halving the cost of the counter-collection work this design
 already commits to doing from day one, and leaving one fewer
-independently-operated tier on every gateway-role node going forward. The real cost of combining —
-touching a proven, already-in-production binary and CRD instead of
-adding an isolated new one — is real and is addressed head-on in
-[Risks and Mitigations](#risks-and-mitigations), not minimized.
+independently-operated tier on every gateway-role node going forward.
+
+**Revised after implementation.** This paragraph originally justified the
+cost of combining as "touching a proven, already-in-production binary and
+CRD". That was wrong, and it contradicted
+[Risks and Mitigations](#risks-and-mitigations) below, which states the
+opposite correctly. `galactic-nat66` is absent from
+`config/kustomization.yaml` and has only ever run in containerlab. The
+correction cuts against this section's own argument and is worth stating
+plainly: combining does not consolidate onto something proven, it
+entangles two implementations neither of which has carried real traffic.
+The consolidation case rests on the shared machinery being genuinely
+shared — see the [Summary](#summary) on what is and is not — not on one
+side being battle-tested. What the correction does remove is the
+migration cost: no `NAT66Shard` object exists anywhere, so the CRD rename
+is a rename rather than a migration.
 
 ### Node-local NAT64, generalized into galactic-nat
 
-Same node-local, sharded architecture NAT66 already runs in production,
-with the session table and CRD generalized to cover both address
-families:
+Same node-local, sharded architecture NAT66 already implements, with the
+session table and CRD generalized to cover both address families:
 
 - `galactic-nat66` generalizes into `galactic-nat`, running on
   designated shard nodes exactly where `galactic-nat66` runs today —
@@ -355,6 +471,21 @@ families:
   isn't running in production anywhere yet, this is a clean rename, not
   a migration: no conversion path, no dual-shape reconciliation window,
   no existing objects to convert.
+
+  **Added after implementation.** The CRD lives in `datum-cloud/network`,
+  not in `galactic`, so this rename is a cross-repository change that has
+  to land and be module-bumped before the consuming change compiles. The
+  original document described the rename's data cost accurately and was
+  silent on that sequencing. It also now carries the NAT64 prefix in
+  status — see [The DNS64 boundary](#the-dns64-boundary).
+
+- **Five eBPF programs, not one.** One dispatcher is attached to the
+  uplink; it classifies a packet and tail-calls one of four translation
+  leaves. See [Risks and Mitigations](#risks-and-mitigations) for why the
+  split is load-bearing rather than stylistic. The dispatcher never
+  modifies a packet, so a tail call into an unpopulated slot during
+  startup falls through and the packet leaves untranslated rather than
+  half-translated.
 - A tenant VRF's egress route for the shared NAT64 prefix (Datum's
   operator-assigned `/96` NSP) is installed the same way
   `EgressDefaultRouteAdd` installs NAT66's `::/0` route today — at CNI
@@ -395,8 +526,25 @@ fixed function code, and the attachment's VRFID are combined into every
 attachment's own /128 SID today. This design reuses that pattern for the
 shard SID: `<locator>:<function code>:<VRFID>` — the locator component
 identifies a specific shard node, the same as NAT66's shard SIDs do
-today, with the function code distinguishing a NAT64 destination from a
-NAT66 destination on the same shard where both are configured.
+today.
+
+**Revised after implementation.** The original text had the function code
+"distinguishing a NAT64 destination from a NAT66 destination on the same
+shard where both are configured". It does not, and should not. **One SID
+serves both families**, and which translation a packet gets is decided
+from its *inner* destination: inside the NAT64 prefix, it is a NAT64
+flow; otherwise NAT66. The information is already in the packet, so
+spending a second function code to restate it would have bought nothing
+and cost real things — a second SID to allocate, advertise, and keep
+consistent per shard, and a second egress route on every tenant VRF that
+wanted IPv4 reachability. Under the shipped scheme, turning NAT64 on for
+a fabric adds no SID and no per-tenant action at all.
+
+A consequence worth stating: because dispatch reads the inner
+destination, a shard not configured for NAT64 never performs the test.
+Its packet path is the NAT66-only one instruction for instruction, which
+is what makes the "existing NAT66 behavior is unaffected"
+[goal](#goals) checkable rather than merely asserted.
 
 A gateway node decapsulating a packet destined to this SID reads the
 tenant's VRFID directly out of the packet's own destination address —
@@ -424,6 +572,21 @@ translated-session count across both address families is what's checked
 against their configured limit — both are just table entries scoped by
 the same VRFID, and there's no reason to give them separate budgets.
 
+The ceiling **defaults to unlimited**. Enforcement works, but nothing
+outside the shard can see a refusal, so a limit nobody deliberately chose
+would present to a tenant as an unexplained connection failure — the
+exact gap [Notes/Constraints/Caveats](#notesconstraintscaveats) leaves
+open, made worse by arriving without anyone asking for it.
+
+**Added after implementation.** The count above cannot stay accurate on
+its own, which this section originally missed by reasoning only about the
+hot path. The connection table is an LRU map, so evictions decrement
+nothing and no datapath path ages an idle flow out; the count only climbs
+until every tenant reads as over limit. Userspace periodically recomputes
+it from the connection table — see
+[Risks and Mitigations](#risks-and-mitigations). "Node-local state, so
+this stays simple" was true about consistency and not about accuracy.
+
 This design's responsibility stops at collection: per-tenant current
 session count and configured limit are tracked in the same node-local
 eBPF map as the limit counter itself, and nothing further. It does not
@@ -442,6 +605,15 @@ use, and stops there:
    per-tenant (see [Notes/Constraints/Caveats](#notesconstraintscaveats)).
    It's a static, documented value, not a piece of runtime state, so
    publishing it needs no emission mechanism.
+
+   **Added after implementation.** Three components must be configured
+   with the same prefix — the shards that translate for it, the CNI that
+   installs a tenant VRF's route toward it, and DNS64 that synthesizes
+   into it — and any disagreement is a blackhole with no symptom on any
+   side. Each shard therefore echoes its own configured prefix into
+   `EgressShard` status. That is not an emission mechanism and does not
+   widen this design's scope; it makes a three-way agreement checkable by
+   reading an object, rather than only by capturing packets.
 
 This design does not publish a liveness or availability signal for
 NAT64. Its scope stops at collection; publishing anything, a liveness
@@ -473,3 +645,50 @@ not where any of that logic lives.
    `galactic-nat66` today — the regression check that actually proves
    the "existing NAT66 behavior is unaffected" goal, not just the
    new-capability happy path.
+
+**Revised after implementation.** Steps 3, 4 and 5 are met, at the
+datapath level: the programs are loaded, real packets are run through
+them, and both translated checksums are verified against independent full
+recomputes rather than against the datapath's own arithmetic — a
+translation that merely agrees with itself proves nothing. Step 5 in
+particular passes with NAT66's suite unmodified.
+
+Steps 1 and 2 are **not** met and cannot be met in the existing
+containerlab topology, which is the honest limit of this plan. That lab's
+transit mesh is IPv6-only with no IPv4 upstream, so enabling NAT64 there
+would produce shards that translate correctly and then blackhole — a
+state indistinguishable, from every counter this design collects, from a
+NAT64 deployment that is simply broken. Validating them needs an
+environment with real IPv4 reachability and a DNS64 resolver, and that
+environment does not exist yet. The lab stays NAT66-only and records why.
+
+Two checks belong in this list that were not in the original plan:
+
+6. Confirm a shard with no IPv4 fields configured never reaches a NAT64
+   code path at all, for a packet addressed *into* the NAT64 prefix — the
+   stronger form of step 5, since it tests the dispatch decision rather
+   than only the absence of IPv4 configuration.
+7. Confirm that two tenants presenting an identical inner source address,
+   and one tenant's NAT66 and NAT64 flows, all occupy distinct session
+   rows. Isolation across *families* is a property this design introduced
+   and the original plan's step 3 only covered isolation across tenants.
+
+Both are covered.
+
+### A NAT66 defect this work surfaced
+
+The regression coverage added for step 5 found a pre-existing bug in the
+NAT66 forward path: the decapsulation helper widened the packet head past
+the link header and reclaimed 14 bytes, which exposes the previous
+packet's bytes at that offset rather than a link header, and never wrote
+one. Every decapsulated packet therefore left the forward path with those
+bytes as its EtherType, and the kernel dispatches an `XDP_PASS` frame on
+exactly that field — so a NAT66-translated packet reached no protocol
+handler at all.
+
+It is recorded here because it bears on this document's central argument.
+The case for generalizing rather than duplicating rested partly on NAT66
+being the proven half; it was not, and nothing had exercised its forward
+path end to end. That is an argument for the consolidation on different
+grounds — one datapath gets the scrutiny that two would have split — and
+against describing either half as battle-tested.
