@@ -1,7 +1,7 @@
 ---
 title: NAT64 Gateway for VPC Networks
 description: Stateful NAT64 translation (RFC 6146, TCP and UDP) for IPv6-only Galactic VPC instances reaching the IPv4 internet, delivered by generalizing the existing NAT66 tier into a single combined galactic-nat binary and CRD rather than adding a second, near-duplicate one. Paired with DNS64, tracked separately.
-updated: 2026-09-12 08:05
+updated: 2026-09-12 08:57
 tags: [plan, srv6, nat64, nat66, dns64, evpn, ebpf, egress]
 status: provisional
 stage: alpha
@@ -22,7 +22,7 @@ latest-milestone: "TBD"
   - [Where translation lives in the data plane](#where-translation-lives-in-the-data-plane)
   - [Node-local NAT64, generalized into galactic-nat](#node-local-nat64-generalized-into-galactic-nat)
   - [Per-tenant isolation via the SRv6 Argument field](#per-tenant-isolation-via-the-srv6-argument-field)
-  - [Per-tenant session limits: enforcement and collection](#per-tenant-session-limits-enforcement-and-collection)
+  - [Per-tenant session limits, and why they are not in the MVP](#per-tenant-session-limits-and-why-they-are-not-in-the-mvp)
   - [The DNS64 boundary](#the-dns64-boundary)
   - [End-to-end validation](#end-to-end-validation)
     - [A NAT66 defect this work surfaced](#a-nat66-defect-this-work-surfaced)
@@ -117,11 +117,10 @@ matches actual, current need rather than anticipated need.
   Argument field already used elsewhere in the fabric to carry per-VRF
   identity. This applies identically to the IPv4 and IPv6 halves of the
   combined table.
-- Per-tenant NAT64 session count and configured limit are tracked as
-  local, in-datapath state. The limit **defaults to unlimited**: because
-  this design's scope stops at collection, a ceiling nobody explicitly
-  chose would present to a tenant as an unexplained connection failure
-  with nothing anywhere able to say why. This design's concern is collection only —
+- ~~Per-tenant NAT64 session count and configured limit are tracked as
+  local, in-datapath state.~~ **Dropped from the MVP after
+  implementation** — see [Non-Goals](#non-goals). Isolation itself remains
+  a goal; only the accounting built on top of it is gone. This design's concern is collection only —
   emitting or exposing that data to any higher-layer system (telemetry,
   quota, insights, or otherwise) is out of scope. See
   [Notes/Constraints/Caveats](#notesconstraintscaveats) for what that
@@ -168,6 +167,12 @@ matches actual, current need rather than anticipated need.
   named drop counter, so "NAT64 works except for X" reads off a counter
   instead of arriving as a support ticket. Tracked separately.
 
+- **Per-tenant session limits.** Built and then removed — the isolation
+  they depend on is not wired end to end, so what shipped was a per-shard
+  ceiling wearing per-tenant clothes. See
+  [Per-tenant session limits, and why they are not in the MVP](#per-tenant-session-limits-and-why-they-are-not-in-the-mvp).
+  Tracked separately, behind the route-installation fix it depends on.
+
 - **NAT64 prefix lengths other than `/96`.** RFC 6052 defines six. A
   `/96` is the only one placing the embedded IPv4 address in a single
   aligned four-byte run, which is what lets the datapath extract it
@@ -184,9 +189,8 @@ matches actual, current need rather than anticipated need.
   shared fabric-wide. Per-tenant *isolation* is a hard goal; per-tenant
   prefix *choice* is not offered.
 - **Any metrics emission, export, or tenant-facing surface for session
-  data.** This design only collects: per-tenant session count, limit,
-  admission-failure cause, and port-allocation exhaustion are tracked as
-  local datapath state and nothing more. Publishing any of it —
+  data.** This design only collects: port-allocation exhaustion and the
+  other drop causes are tracked as local datapath state and nothing more. Publishing any of it —
   to a higher-layer platform system (telemetry, quota, insights), a
   tenant-facing dashboard, or anywhere else — is out of scope for this
   document.
@@ -241,10 +245,9 @@ even knowing translation happened.
 
 #### Story 2
 
-As an operator of this gateway, I want per-tenant NAT64 session count
-and configured limit tracked accurately as local datapath state, so the
-collected data is correct and trustworthy regardless of how or whether
-it's ever read.
+As an operator of this gateway, I want the causes of a translation
+failure tracked accurately as local datapath state, so the collected data
+is correct and trustworthy regardless of how or whether it's ever read.
 
 ### Notes/Constraints/Caveats
 
@@ -272,7 +275,7 @@ each other, even though #791 and #792's language ("the tenant's NAT64
 prefix") can read that way at first glance: every tenant's synthesized
 addresses are drawn from the *same* prefix; what's tenant-specific is
 never the prefix, only the session-table entry and the SRv6 Argument that
-scopes a given flow against the right tenant's session count. DNS64
+scopes a given flow against the right tenant's session-table rows. DNS64
 needs to know only the one shared prefix value plus a liveness signal —
 it does not need, and must never be given, a per-tenant prefix to
 configure.
@@ -345,17 +348,14 @@ of hiding the same problem.
   this" is a design-time question for any eBPF datapath of this size, not
   an implementation detail to be discovered late.
 
-- **The datapath cannot keep its own session count accurate.** The
+- **A session count kept in the datapath cannot stay accurate.** The
   connection table is an LRU map: the kernel evicts rows under pressure
-  with nothing to decrement, and no datapath path ages an idle flow out.
-  Left alone the per-tenant count only ever climbs, every tenant
-  eventually reads as over limit, and a per-tenant ceiling degrades into
-  a dead shard. This was missed entirely by the original design's
-  treatment of limits below, which reasoned only about the hot path.
-  Mitigation: userspace periodically recomputes each tenant's count from
-  the connection table and writes it back. Counting forward rows alone is
-  what makes the total right — every flow owns one forward row and one
-  reverse row, and only the forward row carries a VRFID.
+  with nothing to decrement, and no datapath path ages an idle flow out,
+  so any count maintained there only ever climbs. This was missed entirely
+  by the original design's treatment of limits, which reasoned only about
+  the hot path, and it was resolved with a userspace resync before limits
+  were dropped for the unrelated reason above. Recorded because it applies
+  to any future counter kept in that table, not only to limits.
 
 - **A shard's public IPv4 address is not reachable by anything this
   design controls.** The IPv6 masquerade address is made reachable by a
@@ -378,11 +378,10 @@ of hiding the same problem.
   today has demonstrated a need for. This is an accepted, documented
   tradeoff, not planned as follow-on work; revisit if this limitation
   proves to matter in practice.
-- **Per-flow limit enforcement on the hot path.** Checking a per-tenant
-  session count against a limit on every new flow risks adding latency
-  to connection setup. Mitigation: keep the live counter in a per-VRF,
-  node-local eBPF map, checked synchronously — there's no shared or
-  regional state to stay consistent with, so this stays simple.
+- ~~**Per-flow limit enforcement on the hot path.**~~ Moot: limits are
+  not in the MVP. The approach was sound in itself — a per-VRF node-local
+  map checked synchronously, with no shared state to stay consistent
+  with — and is the starting point if limits return.
 - **DNS64 bypass is inherent, not fixable here.** An application that
   hardcodes an IPv4 literal, or resolves through a DNS server outside
   the platform's control, never touches DNS64 and has no path through
@@ -551,49 +550,45 @@ tenant's VRFID directly out of the packet's own destination address —
 no separate lookup is needed to learn which tenant a flow belongs to,
 the same property the existing decapsulation path already relies on for
 ordinary VRF traffic. Both the session-table key and the per-tenant
-session counter (next section) are scoped by that VRFID — and, within
+session-table rows are scoped by that VRFID — and, within
 the combined table, by address family — so two tenants can never
 collide even if their instances happen to share an identical inner ULA
 source address, and a tenant's NAT64 usage can never be confused with
 their own NAT66 usage.
 
-### Per-tenant session limits: enforcement and collection
+### Per-tenant session limits, and why they are not in the MVP
 
-Enforcement happens at flow-creation time, in the datapath, before a new
-session is admitted: a per-VRF counter (a node-local eBPF map) is
-checked against a configured default limit. A tenant at their limit has
-the triggering SYN or first UDP packet dropped — RFC 6146's own guidance
-for exhaustion behavior — rather than any existing session being evicted
-to make room. One tenant hitting its own ceiling can never affect
-another tenant's sessions, and can never even evict its own established
-sessions to admit a new one. NAT64 and NAT66 usage count against one
-shared per-tenant limit, not two separate ones: a tenant's total
-translated-session count across both address families is what's checked
-against their configured limit — both are just table entries scoped by
-the same VRFID, and there's no reason to give them separate budgets.
+**Removed after implementation.** This section previously specified a
+per-tenant session ceiling enforced in the datapath at flow-creation time,
+against one budget shared across both address families, with the refusal
+counted against the tenant. It was built, and then removed.
 
-The ceiling **defaults to unlimited**. Enforcement works, but nothing
-outside the shard can see a refusal, so a limit nobody deliberately chose
-would present to a tenant as an unexplained connection failure — the
-exact gap [Notes/Constraints/Caveats](#notesconstraintscaveats) leaves
-open, made worse by arriving without anyone asking for it.
+It did not work per tenant, and could not have. A tenant VRF's egress route
+is installed with the operator-configured shard SID **verbatim**: nothing
+rewrites the Argument with that attachment's VRFID. Every tenant therefore
+encapsulates to the same destination, the datapath reads the same Argument
+for all of them, and they share one accounting bucket. Confirmed on the
+wire in the containerlab environment — three tenants in three VPCs all
+encapsulating to one address, one counter absorbing all of them.
 
-**Added after implementation.** The count above cannot stay accurate on
-its own, which this section originally missed by reasoning only about the
-hot path. The connection table is an LRU map, so evictions decrement
-nothing and no datapath path ages an idle flow out; the count only climbs
-until every tenant reads as over limit. Userspace periodically recomputes
-it from the connection table — see
-[Risks and Mitigations](#risks-and-mitigations). "Node-local state, so
-this stays simple" was true about consistency and not about accuracy.
+What that produced was a per-*shard* ceiling presented as a per-tenant one.
+Set it to any finite value and the first tenant to reach it locks out every
+other tenant on that shard — the precise failure the limit exists to
+prevent, inverted. Shipping the machinery for a guarantee it cannot make is
+worse than shipping neither.
 
-This design's responsibility stops at collection: per-tenant current
-session count and configured limit are tracked in the same node-local
-eBPF map as the limit counter itself, and nothing further. It does not
-build any emission mechanism, control-plane sweep, or tenant-facing
-API/CRD — getting that data out of the datapath and into anything that
-can act on it is out of scope for this document. This data is tracked
-but not observable outside the shard it lives on.
+This does not weaken the isolation [goal](#goals), which is about the
+session table rather than about accounting, and which the session key's
+family byte and tenant Argument still serve correctly wherever a correct
+Argument arrives. The datapath honors whatever Argument it is given; the
+gap is in route installation, upstream of it.
+
+Restoring limits requires threading the attachment's Argument into the
+installed egress route first. That needs a decision this document does not
+make: which Argument a shard SID should carry, given that shard-SID
+Argument space is per-shard-locator while attachment Arguments are
+allocated per BGPRouter. Until then, a shard's only ceiling is its
+port-allocation range, and exhausting that is counted per shard.
 
 ### The DNS64 boundary
 
@@ -634,11 +629,9 @@ not where any of that logic lives.
 2. The instance connects using that synthesized address; confirm the
    connection completes through a `galactic-nat` shard.
 3. A second tenant's identical inner source address, on a different VRF,
-   is confirmed to never appear in the first tenant's session count or
-   collide in the session table.
-4. A tenant at their configured session limit has a new connection
-   attempt fail closed, without affecting any other tenant's sessions or
-   their own already-established ones.
+   is confirmed to never collide in the session table.
+4. ~~A tenant at their configured session limit has a new connection
+   attempt fail closed.~~ Removed with the limit feature itself.
 5. Run NAT66's existing test/regression suite, unmodified, against the
    generalized `galactic-nat` binary with no IPv4 fields configured;
    confirm it passes identically to how it passes against
