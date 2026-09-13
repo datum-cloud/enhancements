@@ -1,7 +1,7 @@
 ---
 title: NAT64 Gateway for VPC Networks
 description: Stateful NAT64 translation (RFC 6146, TCP and UDP) for IPv6-only Galactic VPC instances reaching the IPv4 internet, delivered by generalizing the existing NAT66 tier into a single combined galactic-nat binary and CRD rather than adding a second, near-duplicate one. Paired with DNS64, tracked separately.
-updated: 2026-09-12 08:57
+updated: 2026-09-13 08:48
 tags: [plan, srv6, nat64, nat66, dns64, evpn, ebpf, egress]
 status: provisional
 stage: alpha
@@ -115,7 +115,15 @@ matches actual, current need rather than anticipated need.
 - No tenant's translation table or session load can degrade another
   tenant's — enforced structurally, not by convention, via the SRv6
   Argument field already used elsewhere in the fabric to carry per-VRF
-  identity. This applies identically to the IPv4 and IPv6 halves of the
+  identity.
+
+  **Partially met as implemented.** A flow's session key composes the
+  encapsulation source with the Argument, which makes the guarantee hold
+  for tenants on different nodes. It does not yet hold for two tenants on
+  the *same* node, because nothing writes a per-tenant Argument into a
+  shard SID — so the Argument half of that pair is currently a constant.
+  Tracked as
+  [galactic#538](https://github.com/datum-cloud/galactic/issues/538). This applies identically to the IPv4 and IPv6 halves of the
   combined table.
 - ~~Per-tenant NAT64 session count and configured limit are tracked as
   local, in-datapath state.~~ **Dropped from the MVP after
@@ -587,8 +595,10 @@ Restoring limits requires threading the attachment's Argument into the
 installed egress route first. That needs a decision this document does not
 make: which Argument a shard SID should carry, given that shard-SID
 Argument space is per-shard-locator while attachment Arguments are
-allocated per BGPRouter. Until then, a shard's only ceiling is its
-port-allocation range, and exhausting that is counted per shard.
+allocated per BGPRouter. Tracked as
+[galactic#538](https://github.com/datum-cloud/galactic/issues/538). Until
+then, a shard's only ceiling is its port-allocation range, and exhausting
+that is counted per shard.
 
 ### The DNS64 boundary
 
