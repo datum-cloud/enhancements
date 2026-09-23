@@ -20,7 +20,8 @@ Per PoP (fabric)
 │    ├── /52   Internal infrastructure subnets
 │    └── /127  Backbone links
 ├── /48  SRv6 SID locator space       (from [LOCATOR-BLOCK], RIR PI)
-│    └── /64   per node
+│    └── /52   per service
+│         └── /64   per node running that service
 └── /48  Infrastructure loopbacks     (from [INFRA-BLOCK], RIR PI)
      └── /128  per node
 ```
@@ -78,16 +79,17 @@ Each PoP receives a `/48` from the platform's registered SRv6 locator block. Thi
 
 ```
 SRv6 locator /48  (uSID Block, per PoP)
-└── /64   per node  ([uSID Block][Node-ID]::/64)
+└── /52   per service  ([uSID Block][Svc]::/52)
+     └── /64   per node running that service  ([uSID Block][Svc][Node index]::/64)
 ```
 
-The PoP's `/48` uSID Block is subdivided into per-node `/64` locators. Each node within the PoP is assigned a unique 16-bit Node-ID (Locator-Node), which forms the node's `/64` locator prefix. Underlay routing resolves packets based on this `/64` prefix to deliver them to the exact node.
+The PoP's `/48` uSID Block is subdivided into one `/52` per service, and each `/52` into per-node `/64` locators. A 16-bit Node-ID (Locator-Node) identifies one datapath identity, not one node: its top 4 bits select the service (tenant delivery, NAT egress shard, edge ingress gateway) and its low 12 bits are the node's index, which is the same for every service a node runs. A node running two services therefore holds two Node-IDs and two `/64` locators. See [SRv6 uSID Plan — Node-ID Allocation](srv6.md#node-id-allocation) for the service assignments and why the services cannot share a Node-ID. Underlay routing resolves packets based on each `/64` prefix to deliver them to the exact node and service.
 
 The Node-ID embedded in the `/64` locator corresponds to the 16-bit Active uSID (bits 49–64, using 1-based, MSB-first bit numbering — see [SRv6 uSID Plan — SID Structure](srv6.md#sid-structure-usid-carrier)). The next 16-bit slot (bits 65–80) is the shared Next uSID block carrying the 4-bit Function code (FL = 4) and the 12-bit Instance ID (AL = 12) as Argument. SID structure, function code registry, and VRF / EVI ID semantics are defined in the [SRv6 uSID Plan](srv6.md).
 
 ### Underlay Advertisement
 
-Each node *must* advertise its unique `/64` locator via BGP IPv6 Unicast. Advertising only the aggregate `/48` would create an anycast route: the underlay ECMP could steer encapsulated packets to any node within the PoP, causing uSID stepping failures when the packet lands on a node that does not own the target VRF or behavior context. Per-node `/64` advertisement ensures unicast delivery to the exact egress node identified by the Node-ID.
+Each node *must* advertise every `/64` locator it holds, one per service, via BGP IPv6 Unicast. Advertising only the aggregate `/48` would create an anycast route: the underlay ECMP could steer encapsulated packets to any node within the PoP, causing uSID stepping failures when the packet lands on a node that does not own the target VRF or behavior context. Per-node `/64` advertisement ensures unicast delivery to the exact egress node identified by the Node-ID.
 
 The `/48` itself is never advertised as an aggregate route inside the PoP. Because upstream peers accept only `/48` or larger, the `/64` locator is PoP-internal and must never be advertised to external peers — see [PoP Boundary Aggregation Policy](#pop-boundary-aggregation-policy).
 
@@ -103,7 +105,7 @@ This is a deliberate departure from typical Segment Routing operational practice
 
 The SRv6 locator block must not overlap with the ULA pool or the infrastructure loopback block. Both are confirmed non-overlapping at RIR registration time. Routing policy must be able to distinguish them unambiguously.
 
-In a uSID deployment, the `/48` uSID Block is the shared registration and filtering unit for all nodes within a PoP. The Active uSID slot (bits 49–64) and Instance ID slot (bits 65–80) are opaque to underlay routing and do not affect prefix reachability or filtering — routing policy still only needs to key off the covering `/48` for isolation purposes.
+In a uSID deployment, the `/48` uSID Block is the shared registration and filtering unit for all nodes within a PoP. The Active uSID slot (bits 49–64) and Instance ID slot (bits 65–80) are opaque to underlay routing and do not affect prefix reachability — routing policy only needs to key off the covering `/48` for isolation purposes. Policy that should apply to one service only, such as limiting which sources may reach NAT egress shard locators, keys off that service's `/52` instead.
 
 ---
 
@@ -134,14 +136,15 @@ External advertisement — required for Internet transit PoPs — uses the cover
 
 ## Capacity Summary
 
-| Resource                            | Prefix | Source                      | Capacity                                                       |
-|-------------------------------------|--------|-----------------------------|----------------------------------------------------------------|
-| Per-PoP ULA internal infrastructure | `/48`  | From `fd00::/8`             | One per PoP                                                    |
-| Per-PoP internal infra subnets      | `/52`  | From PoP ULA `/48`          | `/64` per compute node, per management subnet, plus reserved   |
-| Per-PoP backbone link subnets       | `/127` | From PoP ULA `/48`          | Effectively unlimited per PoP                                  |
-| Per-PoP SRv6 locator (uSID Block)   | `/48`  | RIR PI block                | One per PoP; additional blocks required as the platform scales |
-| Per-Node SRv6 locator               | `/64`  | uSID Block + 16-bit Node-ID | 57,343 usable Node-IDs per uSID Block (GIB `0x0001–0xDFFF`)    |
-| Per-PoP loopback block              | `/48`  | RIR PI (infra loopback)     | One per PoP; additional blocks required as the platform scales |
-| Per-Node loopback                   | `/128` | From PoP loopback `/48`     | One per node                                                   |
+| Resource                            | Prefix | Source                              | Capacity                                                                                |
+|-------------------------------------|--------|-------------------------------------|-----------------------------------------------------------------------------------------|
+| Per-PoP ULA internal infrastructure | `/48`  | From `fd00::/8`                     | One per PoP                                                                             |
+| Per-PoP internal infra subnets      | `/52`  | From PoP ULA `/48`                  | `/64` per compute node, per management subnet, plus reserved                            |
+| Per-PoP backbone link subnets       | `/127` | From PoP ULA `/48`                  | Effectively unlimited per PoP                                                           |
+| Per-PoP SRv6 locator (uSID Block)   | `/48`  | RIR PI block                        | One per PoP; additional blocks required as the platform scales                          |
+| Per-Service SRv6 locators           | `/52`  | uSID Block + 4-bit service selector | 13 usable services per uSID Block; see [Node-ID Allocation](srv6.md#node-id-allocation) |
+| Per-Node, per-Service SRv6 locator  | `/64`  | Service `/52` + 12-bit node index   | 4,096 nodes per service; 57,343 usable Node-IDs per uSID Block (GIB `0x0001–0xDFFF`)    |
+| Per-PoP loopback block              | `/48`  | RIR PI (infra loopback)             | One per PoP; additional blocks required as the platform scales                          |
+| Per-Node loopback                   | `/128` | From PoP loopback `/48`             | One per node                                                                            |
 
 Additional SRv6 locator and infrastructure loopback blocks must be registered with a RIR before existing allocations are exhausted.
