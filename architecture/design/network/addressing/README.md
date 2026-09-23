@@ -48,7 +48,7 @@ The ULA space (`fd00::/8`) serves three separate purposes on this platform: the 
 > [!NOTE]
 > The Default-Free Zone (DFZ) is the set of Internet core routers that carry a full global BGP routing table with no default route. Advertising individual `/128` loopbacks into the DFZ is operationally hostile: it bloats the global routing table, exposes internal infrastructure topology, and will be filtered by most peers regardless — IPv6 prefix length limits at the DFZ boundary are typically `/48` maximum. Aggregates only.
 
-The SRv6 SID locator block is a globally registered PI prefix. It is a platform-registered RIR PI block, subdivided per PoP. Within a PoP, each node advertises its own `/64` locator via BGP IPv6 Unicast — the `/48` itself is never advertised as an aggregate route inside the PoP, since that would create an anycast route ambiguous as to which node owns a given SID (see [Fabric Addressing Plan — SRv6 Locator /48](fabric.md#srv6-locator-48)). Because upstream peers accept only `/48` or larger, the `/64` locator is PoP-internal and must never be advertised to external peers. The `/48` remains the unit of RIR registration and of any inter-PoP or external advertisement. It must not overlap with the ULA pool or the infrastructure loopback block.
+The SRv6 SID locator block is a globally registered PI prefix. It is a platform-registered RIR PI block, subdivided per PoP. Within a PoP, each node advertises its own `/64` locator for each service it runs via BGP IPv6 Unicast — the `/48` itself is never advertised as an aggregate route inside the PoP, since that would create an anycast route ambiguous as to which node owns a given SID (see [Fabric Addressing Plan — SRv6 Locator /48](fabric.md#srv6-locator-48)). Because upstream peers accept only `/48` or larger, the `/64` locator is PoP-internal and must never be advertised to external peers. The `/48` remains the unit of RIR registration and of any inter-PoP or external advertisement. It must not overlap with the ULA pool or the infrastructure loopback block.
 
 ---
 
@@ -138,7 +138,7 @@ The platform tracks tenant prefix and MAC assignments by association (VPC ↔ lo
 Internal infrastructure subnets, backbone links, SRv6 locator advertisement, and infrastructure loopbacks are defined in the [Fabric Addressing Plan](fabric.md). Key properties:
 
 - **Internal infrastructure** — a per-PoP ULA `/48` carved into a `/52` for platform-owned subnets (compute, management, reserved) plus `/127` backbone links
-- **SRv6 locators** — a per-PoP RIR PI `/48` subdivided into per-node `/64` locators, advertised within the PoP only and summarized to `/48` at the boundary
+- **SRv6 locators** — a per-PoP RIR PI `/48` subdivided into one `/52` per service and one `/64` per node running that service (see [SRv6 uSID Plan — Node-ID Allocation](srv6.md#node-id-allocation)), advertised within the PoP only and summarized to `/48` at the boundary
 - **Infrastructure loopbacks** — a per-PoP RIR PI `/48` providing one `/128` per node, advertised externally as `/48` aggregate only
 - **Isolation** — fabric addresses are never reachable from tenant VRFs; enforced by prefix deny lists at VRF handoff
 

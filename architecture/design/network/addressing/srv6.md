@@ -30,31 +30,92 @@ SIDs within a PoP's `/48` block follow the compressed SRv6 segment list encoding
                           (LNL=16)         (FL=4, AL=12)
 ```
 
-| Field                 | Bits | Description                                                                                      |
-|-----------------------|------|--------------------------------------------------------------------------------------------------|
-| uSID Block            | 48   | Identifies the PoP domain; drawn from the SRv6 locator block.                                    |
-| Node ID (Active uSID) | 16   | Identifies the specific node (Locator-Node / LNL = 16) within the PoP domain.                    |
-| Function + Instance   | 16   | Shared slot (Next uSID) containing a 4-bit Function (FL = 4) and a 12-bit Instance ID (AL = 12). |
-| Padding               | 48   | Zero; this carrier has only one Next uSID slot, so there is never a further C-SID to shift in.   |
+| Field                 | Bits | Description                                                                                                          |
+|-----------------------|------|----------------------------------------------------------------------------------------------------------------------|
+| uSID Block            | 48   | Identifies the PoP domain; drawn from the SRv6 locator block.                                                        |
+| Node ID (Active uSID) | 16   | Identifies one datapath identity on a node (Locator-Node / LNL = 16); see [Node-ID Allocation](#node-id-allocation). |
+| Function + Instance   | 16   | Shared slot (Next uSID) containing a 4-bit Function (FL = 4) and a 12-bit Instance ID (AL = 12).                     |
+| Padding               | 48   | Zero; this carrier has only one Next uSID slot, so there is never a further C-SID to shift in.                       |
 
 This layout is referred to elsewhere in the platform's documentation (e.g. the Addressing Plan) as the `uFMT 48+16` (F4816) carrier format with a shared service slot. Bit positions cited in absolute terms (e.g. "bits 49–64") are 1-based and numbered from the most-significant bit of the 128-bit container — bit 1 is the first bit of the uSID Block, bit 49 is the first bit of the Node ID, and so on.
 
 The uSID components correspond to RFC 9800's own Locator-Node (LNL), Function (FL), and Argument (AL) length parameters. The platform's parameters are:
 
-| Component                    | Bits | Range         | Purpose                                                             |
-|------------------------------|------|---------------|-----------------------------------------------------------------------|
-| Node-ID (Locator-Node / LNL) | 16   | 0x0001-0xDFFF | Identifies the target node (GIB / Locator-Node).                    |
-| Function (FL)                | 4    | 0xE-0xF       | Selects the behavior universe (in LIB).                             |
-| Instance ID (Argument / AL)  | 12   | 0x001-0xFFF   | Identifies VRF ID (for 0xE) or EVI ID (for 0xF). 0x000 is reserved. |
+| Component                    | Bits | Range         | Purpose                                                                |
+|------------------------------|------|---------------|------------------------------------------------------------------------|
+| Node-ID (Locator-Node / LNL) | 16   | 0x0001-0xDFFF | Identifies the target service identity on a node (GIB / Locator-Node). |
+| Function (FL)                | 4    | 0xE-0xF       | Selects the behavior universe (in LIB).                                |
+| Instance ID (Argument / AL)  | 12   | 0x001-0xFFF   | Identifies VRF ID (for 0xE) or EVI ID (for 0xF). 0x000 is reserved.    |
 
 The 16-bit C-SID space is partitioned into a Global ID Block (GIB) for Node-IDs (`0x0001–0xDFFF`) and a Local ID Block (LIB) for local endpoint functions (`0xE000–0xFFFF`). For the 16-bit Next uSID slot, this is partitioned into a 4-bit Function field (supporting L3 overlay `0xE` and future L2 overlay `0xF`) and a 12-bit Instance ID field (supporting up to 4,095 dynamic VRF/EVI IDs per node), preventing forwarding loops during C-SID shift operations.
 
-The uSID block is PoP-scoped, which allows clean per-PoP filtering and isolation in the underlay. Each node individually advertises its own `/64` locator prefix (`[uSID Block][Node-ID]::/64`) into the underlay IGP and BGP IPv6 Unicast. Underlay routing resolves packets based on this `/64` prefix to deliver them to the exact egress node.
+The uSID block is PoP-scoped, which allows clean per-PoP filtering and isolation in the underlay. Each node individually advertises one `/64` locator prefix (`[uSID Block][Node-ID]::/64`) per service identity it holds into the underlay IGP and BGP IPv6 Unicast. Underlay routing resolves packets based on this `/64` prefix to deliver them to the exact egress node and service.
 
 Per RFC 9800 §5.3 ("Recommended Installation of CSIDs in FIB"), the node installs a FIB/local-SID-table entry that matches only its own `/64` locator: `[uSID Block][Node-ID]::/64` via longest-prefix match. Function here always selects a terminal endpoint behavior (`uEnd.DT46` / `uEnd.DT2`), and RFC 9800 §4.2.7 states that no NEXT-CSID counterpart is defined for `End.DT`/`End.DX`-family behaviors — they instead run RFC 8986 §4.4–4.11's original decapsulation procedure under the REPLACE-CSID flavor, with the Argument value ignored by the SR segment endpoint node. RFC 9800 defines no destination-address shift or rewrite for this case at all: the shift/rewrite pseudocode in §4.1 (NEXT-CSID) and in §4.2.1 (REPLACE-CSID's own `End`/`End.X` forwarding case) only applies when there's a further C-SID to expose for a subsequent segment endpoint, which never happens here. The node therefore reads Function (bits 65–68) and Instance ID (bits 69–80) directly from the unmutated destination address to execute the local endpoint behavior (e.g. L3 routing table lookup or L2 MAC lookup) and select the correct tenant VRF or Bridge Domain table.
 
 > [!NOTE]
 > **This is RFC 9800 §4.2.7's own behavior, not a deviation from it.** NEXT-CSID (§4.1) and REPLACE-CSID's `End`/`End.X` forwarding case (§4.2.1) both shift the destination address to expose the *next* C-SID for a subsequent segment endpoint — but RFC 9800 explicitly carves out `End.DT`/`End.DX`-family behaviors as having no such shift step: per §4.2.7, they run RFC 8986's original procedure directly, ignoring the Argument bits for FIB purposes. Since Function here always selects one of these terminal behaviors (`uEnd.DT46` / `uEnd.DT2`), there is no further C-SID to advance to, and no shift is ever prescribed. (A literal 128-bit left-shift, had one been required, would in any case have corrupted the uSID Block in bits 1–48 — its low 32 bits would be overwritten by the Node-ID — which never squares with the uSID Block reappearing unchanged; reading Function/Instance ID directly at their fixed offsets was always the only coherent reading, and RFC 9800 §4.2.7 confirms it's also the RFC-prescribed one.)
+
+---
+
+## Node-ID Allocation
+
+A Node-ID identifies one datapath identity, not one physical node. A node that runs more than one SRv6 service endpoint — tenant delivery and a NAT egress shard, for example — holds one Node-ID, and therefore one `/64` locator, per service.
+
+### One Node-ID per Identity
+
+A node decides that an arriving packet belongs to it on the uSID Block and Node-ID: the full 64-bit locator (see [SID Structure](#sid-structure-usid-carrier)). The decision cannot be made on anything narrower. The Argument (bits 69–80) differs per tenant, and many tenants share one service SID with different Arguments, so ownership has to be settled above bit 64.
+
+Two services on one node that share a Node-ID therefore both claim the same packets. Whichever datapath inspects the packet first takes it — on Linux hosts a NAT shard's XDP program runs ahead of the uSID decapsulation program at TC — and the other service's traffic disappears with no error at either end. The two services would also originate the same `/64` from one node, giving one prefix two owners.
+
+### Service-Classed Node-IDs
+
+The 16-bit Node-ID is split into a 4-bit service selector (bits 49–52) and a 12-bit node index (bits 53–64). The split mirrors the 4/12 shape the Function and Instance ID already use at bits 65–80.
+
+```
+|<------ 48 ------>|<- 4 ->|<--- 12 --->|<- 4 ->|<--- 12 --->|<----- 48 ----->|
+  uSID Block         Svc     Node index   Func    Instance     Padding
+  bits 1-48          49-52   53-64        65-68   69-80        81-128
+                    |<------ Node-ID ----->|<--- Next uSID --->|
+```
+
+| Service     | Node-ID range   | Identities | Assignment                                                                   |
+|-------------|-----------------|------------|------------------------------------------------------------------------------|
+| `0x0`       | `0x0001–0x0FFF` | 4,095      | Reserved. One short, because Node-ID `0x0000` is invalid.                    |
+| `0x1`       | `0x1000–0x1FFF` | 4,096      | Tenant delivery: the `uEnd.DT46` / `uEnd.DT2` endpoints for tenant services. |
+| `0x2`       | `0x2000–0x2FFF` | 4,096      | NAT egress shard.                                                            |
+| `0x3`       | `0x3000–0x3FFF` | 4,096      | Edge ingress gateway.                                                        |
+| `0x4`–`0xD` | —               | 4,096 each | Unassigned.                                                                  |
+| `0xE`–`0xF` | `0xE000–0xFFFF` | —          | Local ID Block (Function space). Never a Node-ID.                            |
+
+4,095 + 13 × 4,096 = 57,343, the full GIB. The split gives up no Node-IDs.
+
+A node uses one node index for every service it runs. A service's Node-ID is its selector followed by that index. For node index `0x007`:
+
+```
+[uSID Block]:1007::/64    node 0x007, tenant delivery
+[uSID Block]:2007::/64    node 0x007, NAT egress shard
+```
+
+IPAM allocates the node index once per node per uSID Block, from `0x001`–`0xFFF`.
+
+**The split is allocation policy, not forwarding behavior.** Nothing in the forwarding path parses the sub-fields: the underlay routes on the `/64`, and endpoint ownership keys on all 64 locator bits. The service selector exists so that IPAM and routing policy can treat each service as one prefix.
+
+### Why the Service Selector Comes First
+
+The alternative puts the node index first, `[node index (12)][service (4)]`, so each node's identities form one `/60`.
+
+|                            | Service first (selected)      | Node index first                          |
+|----------------------------|-------------------------------|-------------------------------------------|
+| Each service is one prefix | Yes — one `/52` per service   | No — spread across every node's `/60`     |
+| Each node is one prefix    | No                            | Yes — one `/60` per node                  |
+| Underlay routes per node   | One per service the node runs | One                                       |
+| Maximum nodes              | 4,096 per service             | 3,584 (the index must stay below `0xE00`) |
+| Maximum services           | 13                            | 16                                        |
+
+Service first is selected because services need different reachability policy. Delivery locators must be reachable from every PoP. A NAT shard's locators only ever receive traffic from nodes hosting tenant workloads. "Shard locators accept traffic only from these source ranges" is one prefix-list entry when each service is a `/52`, and cannot be written as a prefix at all when a service is spread across every node. The same holds for any IPAM query over one service. Service first also leaves more room on the axis that grows (nodes), and keeps the one-`/64`-per-locator rule the underlay already relies on (see [Fabric Addressing Plan — SRv6 Locator /48](fabric.md#srv6-locator-48)).
+
+Node index first saves one underlay route per extra service on a node. At PoP scale that is a tiebreaker, not a reason to choose it.
 
 ---
 
@@ -188,7 +249,7 @@ LNL and FL are reported separately because they carry different semantics per RF
 
 Because the 12-bit Instance ID is excluded from the FIB match key (see [VRF / EVI ID (Argument)](#vrf-evi-id-argument)) and instead read directly by the endpoint behavior, a single `/48` uSID block provides **4,095 usable VRF IDs** under the `0xE___` universe and **4,095 usable EVI IDs** under the `0xF___` universe. This limit applies per uSID Block, not per node or per PoP — all nodes within a PoP share the same Instance ID namespaces under a given locator block, but a PoP with more than one uSID Block (see [Scaling Beyond 4k Instances](#scaling-beyond-4k-instances)) has a multiple of this capacity.
 
-This is a distinct ceiling from the Node-ID (Locator-Node) space: the GIB range `0x0001–0xDFFF` yields **57,343 usable Node-IDs per uSID Block**, bounding the number of physical nodes a single locator block can address, independent of how many tenant VRF/EVI instances those nodes host.
+This is a distinct ceiling from the Node-ID (Locator-Node) space: the GIB range `0x0001–0xDFFF` yields **57,343 usable Node-IDs per uSID Block**, bounding the number of datapath identities a single locator block can address, independent of how many tenant VRF/EVI instances those identities host. Under the [service-classed split](#service-classed-node-ids), that is at most **4,096 nodes per service** per uSID Block.
 
 ### Scaling Beyond 4k Instances
 
