@@ -162,6 +162,11 @@ organization, the domain cybercorp.com will no longer be available for "Cyber
 Corp, Inc." to use in our system. This is an example of a domain hijacking
 attempt. 
 
+> [!NOTE]
+> [Hosted zone claims and ownership by
+> delegation](hosted-zone-ownership/README.md) adds a way for the rightful owner
+> to take a hijacked name back: a contest, resolved by TXT or HTTP proof.
+
 ### Domain Name Health
 
 - As a service provider, I want to monitor the health of customer domains through WHOIS checks so that I can proactively identify and address potential issues
@@ -457,6 +462,13 @@ metadata:
 ```
 
 ### Domain Ownership Verification
+
+> [!NOTE]
+> For domains whose DNS is hosted on Datum, this section is amended by [Hosted
+> zone claims and ownership by delegation](hosted-zone-ownership/README.md). A
+> domain delegated to Datum and served by the project's zone is verified without
+> a TXT record. The TXT record flow below remains the path for domains hosted
+> elsewhere, and for contested names.
 
 With a domain added, we can start a DNS TXT record based verification process.
 Suggest that we use the methodology described in
