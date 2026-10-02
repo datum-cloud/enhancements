@@ -1,0 +1,46 @@
+@startuml claim-states
+' Datum brand colors, from ../../datum-theme.puml. That theme is C4-only, so it
+' isn't included here.
+!$DATUM_MIDNIGHT_FJORD = "#0C1D31"
+!$DATUM_PINE_FORGE = "#4D6356"
+!$DATUM_BG_EXT_SYSTEM = "#E0E8EC"
+
+hide empty description
+hide stereotype
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam nodesep 70
+skinparam ranksep 60
+skinparam ArrowColor $DATUM_MIDNIGHT_FJORD
+skinparam ArrowFontColor $DATUM_MIDNIGHT_FJORD
+skinparam ArrowFontSize 11
+skinparam state {
+  BackgroundColor $DATUM_BG_EXT_SYSTEM
+  BorderColor $DATUM_PINE_FORGE
+  FontColor $DATUM_MIDNIGHT_FJORD
+  BackgroundColor<<event>> #FFFFFF
+  BorderColor<<event>> $DATUM_PINE_FORGE
+  LineStyle<<event>> dashed
+  FontStyle<<event>> italic
+}
+
+state "Zone created" as Created <<event>>
+state "Holder\n<size:11>served</size>" as Holder #D5F5E0;line:0C1D31;line.bold
+state "Held\n<size:11>not served</size>" as Held
+state "Displaced\n<size:11>not served</size>" as Displaced
+state "Contested\n<size:11>not served</size>" as Contested
+state "Name released" as Released <<event>>
+
+Created -down-> Holder : name\nfree
+Created -down-> Contested : name already\nclaimed
+
+Holder -down-> Held : deleted while\ndelegated to Datum
+Held -up-> Holder : same project\nrecreates it
+
+Holder -down-> Displaced : another project\nproves ownership
+Displaced -right-> Contested : contests\nback
+Contested -up-> Holder : proves\nownership
+
+Holder -[dashed,#4D6356]left-> Released : deleted, not\ndelegated to Datum
+Held -[dashed,#4D6356]up-> Released : delegation leaves,\nor support releases
+@enduml
