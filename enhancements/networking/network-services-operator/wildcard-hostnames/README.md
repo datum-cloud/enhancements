@@ -124,16 +124,38 @@ certificates, so users can choose DNS-based issuance for any custom hostname.
 
 **CLI experience:**
 
+The `datumctl alb` plugin covers the same flow:
+
 ```bash
-# Add the wildcard to an existing ALB
-datumctl apply -f s3-proxy.yaml
+# Create the load balancer and attach the wildcard
+datumctl alb create s3 --endpoint https://storage.internal.example.com
+datumctl alb hostname add s3 '*.s3.example.com'
 
-# See which step the hostname is waiting on
-datumctl describe httpproxy s3
+# Each custom hostname with its ownership, DNS and certificate state,
+# and the records left to publish
+datumctl alb describe s3
 
-# Read the DNS records the certificate needs
-datumctl get tlscertificate s3 -o yaml
+# Domain verification state
+datumctl get domains
 ```
+
+`hostname add` does not wait for the certificate; it returns once the hostname
+is attached. `describe` is where the user watches progress: each custom hostname
+carries a checklist of available, DNS and certificate status, and with this
+proposal it also lists the records still to publish. For a zone hosted on Datum
+DNS, the `datumctl dns` plugin manages the zone and the platform publishes the
+records itself.
+
+For the CLI to support wildcards, the plugin changes in phase 2:
+
+- **Wildcards accepted**: The plugin applies the platform's hostname rules, so
+  it rejects wildcards today and accepts them once the platform does
+- **Records in `describe`**: `describe` lists the required records, including
+  the certificate's delegation CNAME
+- **A custom hostname like any other**: `hostname list` and `describe` show the
+  wildcard alongside exact custom hostnames
+- **Next steps that point at the record**: When DNS is not delegated, the hint
+  names the certificate record to publish, not only `datumctl dns`
 
 **Records to publish:**
 
@@ -400,8 +422,9 @@ unchanged.
    consumption behind the flag. In flight: milo-os/certificates#1 and #2,
    datum-cloud/infra#6622 and #6624, datum-cloud/network-services-operator#526.
 2. **Wildcards**: Wildcard admission, subtree-exclusive claims, DNS-only
-   verification for wildcards, zero-touch records for Datum DNS zones, and
-   required records in the portal.
+   verification for wildcards, zero-touch records for Datum DNS zones, required
+   records in the portal, and the datumctl alb plugin surfacing required
+   records.
 3. **Production**: Production enablement, after the Milo authorizer's
    subresource fix lands.
 
@@ -429,8 +452,8 @@ certificates. Future phases will expand on it based on customer feedback:
 **Platform:**
 
 - **Domains in Milo**: Move Domains alongside the certificate service
-- **Portal records**: Show required records, with copy buttons, everywhere a
-  hostname appears
+- **Portal and CLI records**: Show required records, with copy buttons in the
+  portal and in `datumctl alb describe`
 
 ## Dependencies
 
@@ -442,6 +465,8 @@ Wildcard hostnames build on other platform services:
 - **Datum DNS**: Hosts the delegation zone and, for zones on Datum, publishes
   the user's records automatically.
 - **cert-manager**: Places and renews orders with the certificate authority.
+- **datumctl alb plugin**: The CLI for load balancers; shows hostname and
+  certificate state and the records to publish.
 - **Milo multicluster runtime**: Lets the certificate service reconcile every
   project control plane.
 - **Milo authorizer subresource fix**: Stops tenants from writing certificate
