@@ -278,7 +278,7 @@ all custom hostnames?
 | Another project obtains the certificate | Random, project-bound delegation targets |
 | Tenant forges status to steer issuance | Status rebuilt every pass; platform-only writers |
 | Shared Let's Encrypt rate limits | Limits are per registered domain; monitor and alert on issuance failures |
-| Wildcard keys exposed at the edge | Keys reach only edges serving the name; dedicated issuer credentials |
+| Wildcard keys exposed at the edge | Same distribution path as existing custom-hostname certificates |
 | Stale ownership after a domain changes hands | Tracked as future work: re-verification and claim expiry |
 
 ## Design Details
