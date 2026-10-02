@@ -1,0 +1,24 @@
+@startuml architecture-context
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+!include ../../../datum-theme.puml
+
+
+Person(user, "Project user", "Serves many subdomains from one ALB")
+Person(visitor, "End user", "Visits bucket.s3.example.com")
+
+System(alb, "ALB", "Accepts wildcard and exact hostnames, reports each step in status")
+System(certs, "Certificates", "Issues and renews certificates through DNS or HTTP challenges")
+
+System_Ext(domains, "Domains", "Proves ownership by DNS TXT record or Datum DNS zone")
+System_Ext(dns, "Customer DNS", "Routing and certificate records")
+System_Ext(ca, "Let's Encrypt", "Certificate authority")
+
+Rel_D(user, alb, "Adds *.s3.example.com")
+Rel(user, dns, "Publishes two CNAMEs")
+Rel_D(visitor, alb, "HTTPS")
+Rel_D(alb, domains, "Checks ownership")
+Rel_R(alb, certs, "Requests certificate")
+Rel_D(certs, ca, "Completes DNS challenge")
+Rel_R(ca, dns, "Follows delegation CNAME")
+@enduml
