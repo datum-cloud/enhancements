@@ -149,7 +149,8 @@ status:
   requiredDNSRecords:
     - name: _acme-challenge.s3.example.com
       type: CNAME
-      value: k3f9q2x7.acme-dns.staging.env.datum.net
+      content: k3f9q2x7.acme-dns.staging.env.datum.net
+      purpose: Certificate
   secretRef:
     name: s3-tls
   notAfter: "2027-01-01T00:00:00Z"
