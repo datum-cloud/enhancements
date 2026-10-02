@@ -93,7 +93,8 @@ user which DNS records it needs.
 
 **Portal workflow:**
 
-- **Verify the domain** by DNS TXT record or by hosting the zone on Datum DNS.
+- **Verify the domain** by DNS TXT record, or by delegating it to a zone you
+  host on Datum DNS.
 - **Add the hostname** `*.s3.example.com` to the ALB.
 - **Publish the records** the portal lists; on Datum DNS the platform publishes
   them itself.
@@ -147,9 +148,11 @@ certificate error.
 ### Security
 
 **Ownership proof.** A wildcard requires its base, or a parent, to be verified
-by DNS TXT record or a Datum DNS zone. HTTP-token verification does not qualify:
-serving a token from one host under the wildcard, such as a bucket, is exactly
-what an attacker can do.
+by DNS TXT record, or by a Datum DNS zone that Datum serves for the domain and
+that the domain's registry delegates to Datum. A zone alone proves nothing,
+because any project can create a zone for any domain. HTTP-token verification
+does not qualify: serving a token from one host under the wildcard, such as a
+bucket, is exactly what an attacker can do.
 
 **Subtree reservation.** Hostname claims become subtree-aware, because the edge
 prefers an exact match over a wildcard:
@@ -158,6 +161,13 @@ prefers an exact match over a wildcard:
 - Another project's later claim under the wildcard is refused
 - A wildcard is refused while other projects hold names beneath it, and the
   refusal names them
+
+Hostname claims and zone claims in
+[hosted zone claims and ownership by delegation](https://github.com/datum-cloud/enhancements/pull/917)
+reserve subtrees for the same reason, so they share one definition of when
+claims conflict and how a rightful owner overrides one. A rightful owner who
+proves the domain at DNS level takes a name back from a project that claimed it
+first, the same way as for a zone.
 
 Domain verification stays non-exclusive: two projects may verify the same
 domain, and only the hostname claim decides who serves a name.
@@ -202,7 +212,7 @@ the default for exact hostnames; DNS-01 is an explicit choice.
 | Another project obtains the certificate | Random, project-bound delegation targets |
 | Forged status steers issuance | Platform-only writers; status rebuilt each reconcile |
 | Shared Let's Encrypt rate limits | No order until DNS is ready; alert on issuance failures |
-| Stale ownership after a domain changes hands | Re-verification and claim expiry (future work) |
+| Stale ownership after a domain changes hands | Delegation re-check shared with zone claims (future work) |
 
 ## Design Details
 
@@ -259,6 +269,11 @@ type, value, purpose, who manages it, and whether it is in place. The portal
 and `datumctl alb describe` read that list and nothing else, so they never
 depend on how certificates are named or stored.
 
+A record counts as present only when it takes effect on the Internet. For a
+zone on Datum DNS, that requires the zone to be the one Datum serves for the
+domain. A record written into a zone that is held back or displaced stays
+missing, and the status says the zone is not served.
+
 ```yaml
 status:
   hostnameStatuses:
@@ -288,7 +303,9 @@ platform's own domains.
 
 **Verification:**
 
-- **Re-verification and claim expiry**: Release claims when ownership lapses
+- **Re-verification and claim expiry**: Release claims when ownership lapses,
+  using the delegation re-check and grace period of zone claims so one design
+  serves both
 
 **Platform:**
 
@@ -303,6 +320,9 @@ platform's own domains.
 - **Domains**: Records which domains a project has verified, and how.
 - **Datum DNS**: Hosts the delegation zone and publishes records for zones on
   Datum.
+- **Hosted zone claims and ownership by delegation**: Defines when a Datum zone
+  proves ownership, when claims conflict, how an owner overrides one, and when
+  delegation is re-checked.
 - **cert-manager**: Places and renews certificate orders.
 - **datumctl alb plugin**: Shows hostname and certificate state and the records
   to publish.
