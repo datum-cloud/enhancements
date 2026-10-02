@@ -159,16 +159,13 @@ prefers an exact match over a wildcard:
 - A wildcard is refused while other projects hold names beneath it, and the
   refusal names them
 
-<<[UNRESOLVED]>>
-Should Domain verification become cross-project exclusive?
-<<[/UNRESOLVED]>>
+Domain verification stays non-exclusive: two projects may verify the same
+domain, and only the hostname claim decides who serves a name.
 
 **Who can write status.** Only platform identities can write certificate status,
 and the service rebuilds it every reconcile.
 
-<<[UNRESOLVED]>>
-Should wildcards be a per-project entitlement?
-<<[/UNRESOLVED]>>
+Wildcards are available to every project; there is no entitlement gate.
 
 ### Certificate Issuance
 
@@ -267,7 +264,6 @@ platform's own domains.
 
 **Verification:**
 
-- **Cross-project exclusive domains**: Only one project may verify a domain
 - **Re-verification and claim expiry**: Release claims when ownership lapses
 
 **Platform:**
