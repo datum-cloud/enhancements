@@ -19,11 +19,9 @@ latest-milestone: "v0.x"
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
-  - [Building on the Certificate Service](#building-on-the-certificate-service)
   - [Certificate Service](#certificate-service)
   - [ALB Integration](#alb-integration)
-  - [Infrastructure](#infrastructure)
-  - [Rollout](#rollout)
+  - [Delegation Zone](#delegation-zone)
 - [Future Work](#future-work)
 - [Dependencies](#dependencies)
 - [Implementation History](#implementation-history)
@@ -118,7 +116,7 @@ datumctl get domains
 ```
 
 `hostname add` does not wait; `describe` shows each custom hostname's available,
-DNS and certificate status and the records still to publish. In phase 2 the
+DNS and certificate status and the records still to publish. With this proposal the
 plugin accepts wildcards, lists required records including the delegation CNAME,
 and points its "DNS not delegated" hint at the certificate record.
 
@@ -214,22 +212,15 @@ Should DNS-01 become the default for all custom hostnames once stable?
 
 ## Design Details
 
-### Building on the Certificate Service
-
-Certificates live in a new Milo foundation service rather than inside the ALB
-controller:
-
-- **Ownership stays with the ALB**: The ALB decides which names a project may
-  serve; the certificate service only proves them to the certificate authority
-- **Bring-your-own has a home**: Uploaded certificates can later land on the
-  same resource
-- **Other TLS services reuse it**: Any future service that terminates TLS
-  requests certificates the same way
-
 ### Certificate Service
 
-The service, `milo-os/certificates`, serves `TLSCertificate` in
-`certificates.miloapis.com`:
+Certificates move out of the ALB controller into a new Milo foundation service,
+`milo-os/certificates`, which serves `TLSCertificate` in
+`certificates.miloapis.com`. The ALB decides which names a project may serve;
+the certificate service proves them to the certificate authority and reports
+what the user still has to publish. Any future service that terminates TLS
+requests certificates the same way, and bring-your-own certificates later land
+on the same resource.
 
 ```yaml
 apiVersion: certificates.miloapis.com/v1alpha1
@@ -240,64 +231,40 @@ spec:
   dnsNames:
     - "*.s3.example.com"
   issuance: DNS01
-  secretName: s3-tls
 status:
-  issuance: DNS01
-  delegationTarget: k3f9q2x7.acme-dns.staging.env.datum.net
+  delegationTarget: k3f9q2x7.acme-dns.example.net
   requiredDNSRecords:
     - name: _acme-challenge.s3.example.com
       type: CNAME
-      content: k3f9q2x7.acme-dns.staging.env.datum.net
+      content: k3f9q2x7.acme-dns.example.net
       purpose: Certificate
   secretRef:
     name: s3-tls
-  notAfter: "2027-01-01T00:00:00Z"
-  renewalTime: "2026-12-02T00:00:00Z"
   conditions:
-    - type: Accepted
-      status: "True"
     - type: DNSDelegationReady
       status: "True"
-    - type: Issuing
-      status: "False"
     - type: Ready
       status: "True"
 ```
 
-It reconciles every project control plane through Milo's multicluster runtime
-and issues through cert-manager on the infra control plane. It places no order
-until the delegation CNAME resolves, then writes the Secret into the project and
-keeps a service-side copy for distribution. It does not verify ownership;
-callers request only names they have claimed.
+The service reconciles every project control plane, places no order until the
+delegation CNAME resolves, and delivers the certificate as a Secret in the
+project. Only platform identities can write its status, and it does not verify
+ownership: callers request only names they have claimed.
 
 ### ALB Integration
 
-Behind a feature flag, the Network Services Operator:
+The ALB requests a certificate for each hostname it has claimed, serves HTTP-01
+challenges for those names, and distributes the issued certificate to the edge.
+Hostname claims become subtree-aware, and wildcards are admitted only on
+DNS-level verification. Existing certificates are not reissued when the
+integration is enabled, and `*.datumproxy.net` names are unchanged.
 
-- Creates a certificate per claimed listener instead of issuing one itself
-- Serves HTTP-01 challenges only for hostnames it has claimed
-- Mirrors the issued certificate to edges from the service-side copy
-- Maps certificate conditions onto ALB status
+### Delegation Zone
 
-Enabling the flag does not reissue existing certificates.
-
-### Infrastructure
-
-- **Dedicated issuer** that can write only the delegation zone
-  (`acme-dns.staging.env.datum.net` in staging, against the Let's Encrypt
-  staging endpoint)
-- **Dedicated DNS writer identity** for that zone
-- **Denylist** of platform domains the service refuses to issue for
-
-### Rollout
-
-1. **Certificate service** in staging, consumed by the ALB behind the flag:
-   milo-os/certificates#1, #2; datum-cloud/infra#6622, #6624;
-   datum-cloud/network-services-operator#526.
-2. **Wildcards**: admission, subtree-exclusive claims, DNS-only verification,
-   zero-touch Datum DNS records, and required records in the portal and
-   `datumctl alb`.
-3. **Production** enablement, after the Milo authorizer's subresource fix.
+A platform-owned DNS zone receives every DNS-01 challenge. Its issuer
+credential can write only that zone, and the service refuses to issue for the
+platform's own domains.
 
 ## Future Work
 
