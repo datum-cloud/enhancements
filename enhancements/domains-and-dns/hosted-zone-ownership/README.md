@@ -140,7 +140,7 @@ rightful owner take the name back.
 
 ## Nomenclature
 
-It's easy to confuse the many noun under the DNS umbrella. So for clarity:
+It's easy to confuse the many nouns under the DNS umbrella. So for clarity:
 
 - **domain**: a name like `datum.net` registered with a registrar.
 - **registrar**: a company that registers domains for customers. For example,
@@ -230,6 +230,7 @@ CNAME. I prove ownership with a TXT or HTTP record, as I do today.
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | **Dangling delegation:** a domain still delegated to Datum with no zone can be claimed by anyone, who then receives its traffic. Vercel carries the same exposure. | A deleted zone's name stays held while the domain is delegated to Datum, which closes the case where a zone existed. A domain that was delegated to Datum but never had a zone stays exposed, and this proposal accepts that risk. | Closed. A new zone gets new nameservers, so a stale delegation never matches it. |
 | **Contest trap:** the rightful owner of a squatted domain who has already delegated to Datum can't publish a TXT record, because Datum serves the squatter's zone. | A support path: support verifies ownership out of band and releases the name. This is expected to be rare.                                                                                                                         | Closed. Delegation itself identifies the owner.                                  |
+| **Subdomain takeover:** another project creates a zone under your zone, and Datum's nameservers answer for that part of your domain from its zone.                 | Claims cover subtrees, so the other project's zone is Contested and never served.                                                                                                                                                  | Closed. Parent and child zones never share an address.                           |
 | **Removing the verification gate** makes every zone currently waiting for verification start serving at once.                                                      | Before enabling in production, list every waiting zone whose domain is already delegated to Datum and review it, because those zones are the takeover case above.                                                                  | Not applicable                                                                   |
 | **A registry lookup failure** looks like a delegation change and revokes verification.                                                                             | Failed lookups never count as a change. The 5-day grace period starts only from a confirmed change.                                                                                                                                | Same                                                                             |
 
