@@ -1,0 +1,40 @@
+@startuml architecture
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include ../../../datum-theme.puml
+
+LAYOUT_LEFT_RIGHT()
+
+title Wildcard hostnames on ALBs - Containers
+
+Person(user, "Project user", "Attaches *.s3.example.com to an ALB")
+System_Ext(extdns, "Customer DNS", "Routing and certificate CNAMEs")
+System_Ext(le, "Let's Encrypt", "ACME certificate authority")
+
+System_Boundary(project, "Project control plane") {
+    Container(proxy, "HTTPProxy", "Networking API", "Wildcard or exact hostnames; status shows each step")
+    Container(domain, "Domain", "Networking API", "Ownership proof: DNS TXT or Datum DNS zone")
+    Container(cert, "TLSCertificate", "certificates.miloapis.com", "Names, issuance mode, required DNS records")
+}
+
+System_Boundary(infra, "Datum infrastructure") {
+    Container(nso, "Network Services Operator", "Controller", "Admits hostnames, enforces subtree-exclusive claims")
+    Container(certsvc, "Certificate service", "Milo service", "Reconciles certificates across every project")
+    Container(cm, "cert-manager", "Infra control plane", "Dedicated DNS-01 issuer")
+    ContainerDb(delegation, "Delegation zone", "Datum DNS", "Random per-certificate challenge targets")
+    Container(edge, "Edge proxies", "Envoy", "Serve every name under the wildcard")
+}
+
+Rel(user, proxy, "Adds hostname")
+Rel(user, extdns, "Publishes CNAMEs")
+Rel(nso, domain, "Checks DNS-level verification")
+Rel(nso, proxy, "Claims hostname, reports status")
+Rel(nso, cert, "Requests certificate for claimed names")
+Rel_U(certsvc, cert, "Writes status and Secret")
+Rel(certsvc, cm, "Issues via")
+Rel(cm, delegation, "Writes challenge TXT")
+Rel(cm, le, "ACME order")
+Rel(le, extdns, "Follows _acme-challenge CNAME")
+Rel(nso, edge, "Mirrors issued certificate and routes")
+
+@enduml
