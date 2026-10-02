@@ -254,6 +254,30 @@ Hostname claims become subtree-aware, and wildcards are admitted only on
 DNS-level verification. Existing certificates are not reissued when the
 integration is enabled, and `*.datumproxy.net` names are unchanged.
 
+The ALB publishes one list of DNS records per hostname on its status: name,
+type, value, purpose, who manages it, and whether it is in place. The portal
+and `datumctl alb describe` read that list and nothing else, so they never
+depend on how certificates are named or stored.
+
+```yaml
+status:
+  hostnameStatuses:
+    - hostname: "*.s3.example.com"
+      dnsRecords:
+        - name: "*.s3.example.com"
+          type: CNAME
+          content: ruth-fourth-hrkgk.datumproxy.net
+          purpose: Routing
+          managedBy: User
+          state: Missing
+        - name: _acme-challenge.s3.example.com
+          type: CNAME
+          content: k3f9q2x7.acme-dns.example.net
+          purpose: Certificate
+          managedBy: User
+          state: Present
+```
+
 ### Delegation Zone
 
 A platform-owned DNS zone receives every DNS-01 challenge. Its issuer
