@@ -186,11 +186,8 @@ users never grant write access to their DNS. Its target is random per
 certificate, because a target derived from the hostname would let a second
 project asking for the same name obtain the first project's certificate.
 
-Renewal needs no user action while the CNAME stays in place.
-
-<<[UNRESOLVED]>>
-Should DNS-01 become the default for all custom hostnames once stable?
-<<[/UNRESOLVED]>>
+Renewal needs no user action while the CNAME stays in place. HTTP-01 stays
+the default for exact hostnames; DNS-01 is an explicit choice.
 
 ### Notes/Constraints/Caveats
 
@@ -272,10 +269,6 @@ platform's own domains.
 
 - **Cross-project exclusive domains**: Only one project may verify a domain
 - **Re-verification and claim expiry**: Release claims when ownership lapses
-
-**Certificates:**
-
-- **DNS-01 as the default** for every custom hostname
 
 **Platform:**
 
