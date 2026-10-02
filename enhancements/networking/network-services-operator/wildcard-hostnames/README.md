@@ -46,23 +46,16 @@ place before traffic moves from another provider.
 
 ## Motivation
 
-Tenant-based services need to serve many subdomains through one ALB. Today each
-hostname requires a separate entry, which makes these workloads impractical.
-Common scenarios include:
+Tenant-based services need to serve many subdomains through one ALB, but today
+each hostname needs its own entry:
 
-- **Bucket-per-subdomain storage**: An object store gives every bucket its own
-  name, such as `photos.s3.example.com`. Buckets come and go by the minute; the
-  ALB should not have to change with them.
-- **Multi-tenant SaaS**: A SaaS product gives each customer
-  `acme.app.example.com`. Onboarding a customer should be a database row, not an
-  infrastructure change.
-- **Zero-downtime migration**: A team moving `www.example.com` from another
-  provider needs a valid certificate on Datum before traffic arrives. Today the
-  certificate can only issue after the name points at Datum, which risks a
-  window of broken HTTPS.
-
-These use cases share a need for one listener that covers a whole namespace of
-names, and for a certificate that does not wait on traffic.
+- **Bucket-per-subdomain storage**: Every bucket in an object store gets its own
+  name, and buckets come and go faster than anyone should edit an ALB.
+- **Multi-tenant SaaS**: Onboarding a customer at `acme.app.example.com` should
+  be a database row, not an infrastructure change.
+- **Zero-downtime migration**: A site moving from another provider cannot get a
+  Datum certificate until it points at Datum, which risks a window of broken
+  HTTPS.
 
 ### Goals
 
@@ -86,17 +79,13 @@ names, and for a certificate that does not wait on traffic.
 
 ## Proposal
 
-Users add a wildcard to an ALB the same way they add any custom hostname today.
-The platform checks that the project owns the domain at the DNS level, reserves
-the subtree for that project, and issues a wildcard certificate through a DNS
-challenge. Status on the ALB walks the user through each step until the
-certificate is ready.
+Users add a wildcard to an ALB like any custom hostname. The platform checks
+DNS-level ownership, reserves the subtree for the project, and issues the
+certificate through a DNS challenge.
 
-Certificates move out of the ALB controller into a new platform certificate
-service. The ALB asks for a certificate covering the names it has claimed; the
-certificate service decides how to obtain it, tells the user which DNS records
-it needs, and delivers the result. The same service issues exact-hostname
-certificates, so users can choose DNS-based issuance for any custom hostname.
+Certificates move into a new platform certificate service. The ALB asks for a
+certificate for the names it has claimed; the service obtains it and tells the
+user which DNS records it needs.
 
 <p align="center">
   <img src="./architecture-context.png" alt="System Context" />
@@ -104,27 +93,16 @@ certificates, so users can choose DNS-based issuance for any custom hostname.
 
 ### User Experience
 
-> [!NOTE]
-> The exact portal UX for wildcard hostnames is still being worked through. This
-> section outlines the high-level flow.
-
 **Portal workflow:**
 
-- **Verify the domain**: The user adds `example.com` under Domains and verifies
-  it with a DNS TXT record, or hosts the zone on Datum DNS. Verification by HTTP
-  token is not enough for a wildcard.
-- **Add the hostname**: On the ALB, the user adds `*.s3.example.com` alongside
-  any exact hostnames.
-- **Publish the records**: The portal lists the records the user needs to
-  publish, with a copy button for each. For a zone hosted on Datum DNS, the
-  platform publishes them itself and the step completes on its own.
-- **Watch progress**: The ALB shows a checklist of ownership, delegation,
-  hostname claim, routing record and certificate, with the step it is waiting on
-  highlighted.
+- **Verify the domain** by DNS TXT record or by hosting the zone on Datum DNS.
+- **Add the hostname** `*.s3.example.com` to the ALB.
+- **Publish the records** the portal lists; on Datum DNS the platform publishes
+  them itself.
+- **Watch progress** on the ALB's checklist of ownership, delegation, claim,
+  routing and certificate.
 
 **CLI experience:**
-
-The `datumctl alb` plugin covers the same flow:
 
 ```bash
 # Create the load balancer and attach the wildcard
@@ -139,27 +117,12 @@ datumctl alb describe s3
 datumctl get domains
 ```
 
-`hostname add` does not wait for the certificate; it returns once the hostname
-is attached. `describe` is where the user watches progress: each custom hostname
-carries a checklist of available, DNS and certificate status, and with this
-proposal it also lists the records still to publish. For a zone hosted on Datum
-DNS, the `datumctl dns` plugin manages the zone and the platform publishes the
-records itself.
+`hostname add` does not wait; `describe` shows each custom hostname's available,
+DNS and certificate status and the records still to publish. In phase 2 the
+plugin accepts wildcards, lists required records including the delegation CNAME,
+and points its "DNS not delegated" hint at the certificate record.
 
-For the CLI to support wildcards, the plugin changes in phase 2:
-
-- **Wildcards accepted**: The plugin applies the platform's hostname rules, so
-  it rejects wildcards today and accepts them once the platform does
-- **Records in `describe`**: `describe` lists the required records, including
-  the certificate's delegation CNAME
-- **A custom hostname like any other**: `hostname list` and `describe` show the
-  wildcard alongside exact custom hostnames
-- **Next steps that point at the record**: When DNS is not delegated, the hint
-  names the certificate record to publish, not only `datumctl dns`
-
-**Records to publish:**
-
-For a zone hosted outside Datum, the user publishes:
+**Records to publish** for a zone hosted outside Datum:
 
 - **Routing**: Name `*.s3.example.com`, Type `CNAME`, Value
   `<canonical>.datumproxy.net`
@@ -168,144 +131,88 @@ For a zone hosted outside Datum, the user publishes:
 - **Ownership** (once per domain): Name `datum-custom-hostname.example.com`,
   Type `TXT`, Value the token shown on the Domain
 
-The certificate record's value is shown in the certificate's status. It is
-random per certificate and cannot be guessed from the hostname.
-
-The goal is for a wildcard to go live within one DNS propagation of the user
-publishing their records, with clear status at each step and no need to contact
-support.
-
 ### User Stories
 
 #### Attach a Wildcard
 
-As the operator of a bucket-per-subdomain object store, I want to attach
-`*.s3.example.com` to one ALB so every bucket is reachable over HTTPS. I verify
-`example.com` once, add the wildcard, publish the two CNAMEs the portal shows
-me, and every new bucket works without touching the ALB again.
+As the operator of a bucket-per-subdomain object store, I verify `example.com`
+once, attach `*.s3.example.com` to one ALB, and publish two CNAMEs. Every new
+bucket then works over HTTPS without touching the ALB.
 
-#### Migrate a Hostname with the Certificate Ahead of Cutover
+#### Migrate with the Certificate Ahead of Cutover
 
-As a team moving `www.example.com` from another provider, I want a Datum
-certificate in place before I move traffic. I add the hostname with DNS-based
-issuance and publish only the certificate CNAME. Once the ALB reports the
-certificate ready, I switch the routing record, and visitors never see a
+As a team moving `www.example.com` from another provider, I add the hostname
+with DNS-based issuance and publish only the certificate CNAME. Once the
+certificate is ready, I switch the routing record, and visitors never see a
 certificate error.
-
-#### Keep a Subtree Reserved
-
-As the owner of `*.s3.example.com`, I want no other project to serve a name
-beneath it. If another project tries to claim `login.s3.example.com`, the
-platform refuses it, so my traffic cannot be taken from under my wildcard.
-
-#### See What I'm Waiting On
-
-As a user setting up a wildcard, I want to know exactly what is left to do. The
-ALB tells me whether it is waiting on domain verification, the certificate
-CNAME, the routing record, or the certificate authority, and what to publish
-next.
 
 ### Security
 
-A wildcard grants a project every name under a domain, so the bar for proving
-ownership is higher than for an exact hostname.
+**Ownership proof.** A wildcard requires its base, or a parent, to be verified
+by DNS TXT record or a Datum DNS zone. HTTP-token verification does not qualify:
+serving a token from one host under the wildcard, such as a bucket, is exactly
+what an attacker can do.
 
-**Ownership proof.** A wildcard requires the domain for its base, or a parent of
-it, to be verified by a DNS TXT record or by hosting the zone on Datum DNS. Both
-prove control of the zone itself. Verification by HTTP token does not qualify.
-Serving a token from one host under the wildcard, such as a bucket whose owner
-controls its content, is exactly what an attacker has, and it proves nothing
-about the rest of the subtree.
-
-**Subtree reservation.** Hostname claims are unique across the platform and
-become subtree-aware:
+**Subtree reservation.** Hostname claims become subtree-aware, because the edge
+prefers an exact match over a wildcard:
 
 - A wildcard claim reserves every name beneath it, at any depth
-- A later claim from another project for a name under the wildcard is refused
+- Another project's later claim under the wildcard is refused
 - A wildcard is refused while other projects hold names beneath it, and the
   refusal names them
 
-Exclusivity matters because the edge prefers an exact match over a wildcard. If
-another project could claim `login.s3.example.com`, it would silently take that
-traffic from the wildcard owner.
-
-Domain verification is not cross-project exclusive today: two projects can
-verify the same domain. Subtree-exclusive claims make that acceptable for this
-feature, because only one project can hold a given subtree.
-
-<<[UNRESOLVED cross-project domain verification]>>
-Should Domain verification become cross-project exclusive, rather than relying
-on subtree-exclusive hostname claims?
+<<[UNRESOLVED]>>
+Should Domain verification become cross-project exclusive?
 <<[/UNRESOLVED]>>
 
-**Who can write certificates.** Users can read their certificates and the
-records they need, but only platform identities can change certificate status.
-The certificate service rebuilds status from the request and its own state on
-every pass, so a forged status cannot steer issuance.
+**Who can write status.** Only platform identities can write certificate status,
+and the service rebuilds it every reconcile.
 
-<<[UNRESOLVED wildcard entitlement]>>
-Should wildcards be a per-project entitlement rather than available to every
-project?
+<<[UNRESOLVED]>>
+Should wildcards be a per-project entitlement?
 <<[/UNRESOLVED]>>
 
 ### Certificate Issuance
 
-Users choose how a certificate is issued. The choice is a trade-off between
-setup and timing:
+- **HTTP-01 (today's default)**: No extra record, but the hostname must already
+  point at Datum and cannot be a wildcard.
+- **DNS-01**: Covers wildcards and issues before traffic moves, at the cost of
+  one CNAME.
+- **Auto**: DNS-01 for wildcards, HTTP-01 otherwise.
 
-- **HTTP-01 (today's default)**: The certificate authority fetches a token over
-  HTTP from the hostname. No extra DNS record is needed, but the hostname must
-  already point at Datum, and it cannot cover a wildcard.
-- **DNS-01**: The certificate authority checks a TXT record under the hostname.
-  It covers wildcards and issues before traffic moves, at the cost of one extra
-  CNAME.
-- **Auto**: The platform picks DNS-01 for wildcards and HTTP-01 otherwise.
+Pick DNS-01 for any wildcard and for any hostname that must not see a gap during
+migration.
 
-Pick DNS-01 for any wildcard, and for any exact hostname that is serving traffic
-elsewhere and must not see a gap. HTTP-01 remains the simplest choice for a
-brand-new hostname.
+The certificate CNAME delegates `_acme-challenge.<base>` to a Datum-run zone, so
+users never grant write access to their DNS. Its target is random per
+certificate, because a target derived from the hostname would let a second
+project asking for the same name obtain the first project's certificate.
 
-**The delegation CNAME.** Users never give Datum write access to their DNS.
-Instead they publish one CNAME from `_acme-challenge.<base>` to a name in a
-Datum-run delegation zone, and the platform answers challenges there. The target
-is random per certificate, not derived from the hostname. A predictable target
-would be the same for every project asking for the same name, letting a second
-project complete the challenge and obtain the first project's certificate.
+Renewal needs no user action while the CNAME stays in place.
 
-**Renewal.** The CNAME stays in place, so renewals complete without user action.
-The certificate's status shows its expiry and next renewal time.
-
-<<[UNRESOLVED default issuance]>>
-Once DNS-based issuance is stable, should it replace HTTP-01 as the default for
-all custom hostnames?
+<<[UNRESOLVED]>>
+Should DNS-01 become the default for all custom hostnames once stable?
 <<[/UNRESOLVED]>>
 
 ### Notes/Constraints/Caveats
 
-- **Single-label wildcards only**: `*.s3.example.com` is accepted;
-  `*.*.example.com` is not.
-- **One label of coverage**: A wildcard certificate covers one label.
-  `a.b.s3.example.com` routes through the wildcard but is not covered by its
-  certificate. AWS behaves the same way.
-- **Name limit**: A certificate covers at most 8 names.
-- **Platform names unchanged**: `*.datumproxy.net` names keep their shared
-  platform certificate.
+- **Single-label wildcards only.**
+- **One label of coverage**: `a.b.s3.example.com` routes through
+  `*.s3.example.com` but is not covered by its certificate, as on AWS.
+- **At most 8 names per certificate.**
 
 ### Risks and Mitigations
 
 | Risk | Mitigation |
 |------|------------|
-| Another project hijacks a name under a wildcard | Subtree-exclusive claims refuse it |
-| Wildcard granted on weak proof | Only DNS TXT or Datum DNS zones qualify |
+| Hijack of a name under a wildcard | Subtree-exclusive claims |
+| Wildcard granted on weak proof | DNS-level verification only |
 | Another project obtains the certificate | Random, project-bound delegation targets |
-| Tenant forges status to steer issuance | Status rebuilt every pass; platform-only writers |
-| Shared Let's Encrypt rate limits | Limits are per registered domain; monitor and alert on issuance failures |
-| Wildcard keys exposed at the edge | Same distribution path as existing custom-hostname certificates |
-| Stale ownership after a domain changes hands | Tracked as future work: re-verification and claim expiry |
+| Forged status steers issuance | Platform-only writers; status rebuilt each reconcile |
+| Shared Let's Encrypt rate limits | No order until DNS is ready; alert on issuance failures |
+| Stale ownership after a domain changes hands | Re-verification and claim expiry (future work) |
 
 ## Design Details
-
-This section covers the technical architecture and implementation approach.
 
 <p align="center">
   <img src="./architecture.png" alt="Container Architecture" />
@@ -313,30 +220,20 @@ This section covers the technical architecture and implementation approach.
 
 ### Building on the Certificate Service
 
-Rather than growing certificate handling inside the ALB controller, wildcard
-hostnames build on a new Milo certificate service. Certificates are a
-provider-agnostic foundation in the same way billing, DNS and IPAM are: many
-services need them, and none should own them.
+Certificates live in a new Milo foundation service rather than inside the ALB
+controller:
 
-This approach:
-
-- **Separates concerns**: The ALB controller decides which names a project may
-  serve; the certificate service decides how to prove them to a certificate
-  authority
-- **Keeps the interface narrow**: For HTTP-01 the contract is "the certificate
-  service publishes the challenge in status; the ALB serves it"
-- **Leaves room to grow**: A certificate resource is the natural home for
-  bring-your-own certificates later
-- **Serves other services**: Any future service that terminates TLS can request
-  a certificate the same way
-
-Domains may move into Milo later for the same reason.
+- **Ownership stays with the ALB**: The ALB decides which names a project may
+  serve; the certificate service only proves them to the certificate authority
+- **Bring-your-own has a home**: Uploaded certificates can later land on the
+  same resource
+- **Other TLS services reuse it**: Any future service that terminates TLS
+  requests certificates the same way
 
 ### Certificate Service
 
-The certificate service, `milo-os/certificates`, serves `TLSCertificate` in
-`certificates.miloapis.com`. A certificate lives in the project, next to the ALB
-that requested it:
+The service, `milo-os/certificates`, serves `TLSCertificate` in
+`certificates.miloapis.com`:
 
 ```yaml
 apiVersion: certificates.miloapis.com/v1alpha1
@@ -371,106 +268,72 @@ status:
       status: "True"
 ```
 
-The service reconciles certificates across every project control plane through
-Milo's multicluster runtime:
-
-1. **Accepts** the request and picks the issuance mode
-2. **Waits** for the delegation CNAME to resolve before placing any order, so a
-   missing record never burns a rate-limited attempt
-3. **Issues** through cert-manager on the infra control plane
-4. **Delivers** the issued Secret into the project, and keeps a service-side
-   copy that platform components distribute
-
-The service does not verify ownership. Callers request only names they have
-already verified and claimed.
-
-This model provides:
-
-- **Status users can trust**: Status is rebuilt from the request and service
-  state on every reconcile, and a webhook limits writers to platform identities
-- **Clear next steps**: The required records and conditions say exactly what the
-  user must do
-- **Quota protection**: No order is placed until DNS is ready
+It reconciles every project control plane through Milo's multicluster runtime
+and issues through cert-manager on the infra control plane. It places no order
+until the delegation CNAME resolves, then writes the Secret into the project and
+keeps a service-side copy for distribution. It does not verify ownership;
+callers request only names they have claimed.
 
 ### ALB Integration
 
-The Network Services Operator consumes the certificate service behind a feature
-flag. With the flag on, it:
+Behind a feature flag, the Network Services Operator:
 
 - Creates a certificate per claimed listener instead of issuing one itself
 - Serves HTTP-01 challenges only for hostnames it has claimed
 - Mirrors the issued certificate to edges from the service-side copy
 - Maps certificate conditions onto ALB status
 
-Hostname claims become subtree-aware as described under Security, and wildcards
-are admitted only on DNS-level verification. Enabling the flag does not reissue
-certificates already in place, and platform `*.datumproxy.net` names are
-unchanged.
+Enabling the flag does not reissue existing certificates.
 
 ### Infrastructure
 
-- **Dedicated issuer**: A DNS-01 issuer that can write only the platform
-  delegation zone. Staging uses `acme-dns.staging.env.datum.net` and the Let's
-  Encrypt staging endpoint.
-- **DNS writer identity**: A dedicated identity for that zone, separate from any
-  other DNS credentials.
-- **Denylist**: The service refuses to issue for platform domains.
+- **Dedicated issuer** that can write only the delegation zone
+  (`acme-dns.staging.env.datum.net` in staging, against the Let's Encrypt
+  staging endpoint)
+- **Dedicated DNS writer identity** for that zone
+- **Denylist** of platform domains the service refuses to issue for
 
 ### Rollout
 
-1. **Certificate service**: The service, its staging deployment, and ALB
-   consumption behind the flag. In flight: milo-os/certificates#1 and #2,
-   datum-cloud/infra#6622 and #6624, datum-cloud/network-services-operator#526.
-2. **Wildcards**: Wildcard admission, subtree-exclusive claims, DNS-only
-   verification for wildcards, zero-touch records for Datum DNS zones, required
-   records in the portal, and the datumctl alb plugin surfacing required
-   records.
-3. **Production**: Production enablement, after the Milo authorizer's
-   subresource fix lands.
+1. **Certificate service** in staging, consumed by the ALB behind the flag:
+   milo-os/certificates#1, #2; datum-cloud/infra#6622, #6624;
+   datum-cloud/network-services-operator#526.
+2. **Wildcards**: admission, subtree-exclusive claims, DNS-only verification,
+   zero-touch Datum DNS records, and required records in the portal and
+   `datumctl alb`.
+3. **Production** enablement, after the Milo authorizer's subresource fix.
 
 ## Future Work
 
-The first release focuses on single-label wildcards with platform-issued
-certificates. Future phases will expand on it based on customer feedback:
-
 **Verification:**
 
-- **Cross-project exclusive domains**: Allow only one project to verify a given
-  domain
-- **Re-verification and claim expiry**: Recheck ownership periodically and
-  release claims when it lapses, so a domain that changes hands does not keep
-  its old claims
+- **Cross-project exclusive domains**: Only one project may verify a domain
+- **Re-verification and claim expiry**: Release claims when ownership lapses
 
 **Certificates:**
 
-- **Bring-your-own certificates**: Upload a certificate on the same resource
-- **DNS-01 as the default**: Issue every custom hostname through DNS once it is
-  proven stable
-- **Multi-label wildcards**: Revisit if customers need coverage deeper than one
-  label
+- **DNS-01 as the default** for every custom hostname
 
 **Platform:**
 
-- **Domains in Milo**: Move Domains alongside the certificate service
-- **Portal and CLI records**: Show required records, with copy buttons in the
-  portal and in `datumctl alb describe`
+- **Domains in Milo**, alongside the certificate service
+- **Portal and CLI records**: Copy buttons in the portal and in `datumctl alb
+  describe`
 
 ## Dependencies
 
-Wildcard hostnames build on other platform services:
-
-- **Network Services Operator**: Admits hostnames, enforces claims, and serves
+- **Network Services Operator**: Admits hostnames, enforces claims, serves
   certificates at the edge.
 - **Domains**: Records which domains a project has verified, and how.
-- **Datum DNS**: Hosts the delegation zone and, for zones on Datum, publishes
-  the user's records automatically.
-- **cert-manager**: Places and renews orders with the certificate authority.
-- **datumctl alb plugin**: The CLI for load balancers; shows hostname and
-  certificate state and the records to publish.
+- **Datum DNS**: Hosts the delegation zone and publishes records for zones on
+  Datum.
+- **cert-manager**: Places and renews certificate orders.
+- **datumctl alb plugin**: Shows hostname and certificate state and the records
+  to publish.
 - **Milo multicluster runtime**: Lets the certificate service reconcile every
-  project control plane.
-- **Milo authorizer subresource fix**: Stops tenants from writing certificate
-  status; required before production.
+  project.
+- **Milo authorizer subresource fix**: Stops tenants writing certificate status;
+  required before production.
 
 ## Implementation History
 
@@ -480,41 +343,37 @@ Wildcard hostnames build on other platform services:
 
 ### Delegation Record on the Domain
 
-Publish the challenge delegation once per verified Domain instead of per
-certificate.
+Publish the challenge delegation once per Domain instead of per certificate.
 
-**Rejected because:** The record is keyed on the wildcard base, such as
-`_acme-challenge.s3.example.com`. The Domain cannot know that base before a
-hostname is requested.
+**Rejected because:** The record is keyed on the wildcard base, which the Domain
+cannot know before a hostname is requested.
 
 ### Hash-Derived Delegation Target
 
 Derive the delegation target from a hash of the hostname.
 
-**Rejected because:** The target would be identical across projects. A second
-project asking for the same name would complete the challenge through the first
-project's record and obtain its certificate.
+**Rejected because:** The target would be identical across projects, letting a
+second project obtain the certificate.
 
 ### Coexistence with Most-Specific-Wins
 
 Let other projects claim exact names under a wildcard, with the exact name
-taking precedence.
+winning.
 
-**Rejected because:** The edge prefers an exact match, so another project could
-hijack the wildcard owner's traffic by claiming one name.
+**Rejected because:** Any project could hijack the wildcard owner's traffic by
+claiming one name.
 
 ### Issue Inside the ALB Controller
 
-Keep issuing certificates from the ALB controller and add DNS-01 there.
+Add DNS-01 to the ALB controller's existing issuance.
 
-**Rejected because:** It ties certificates to one consumer, leaves no home for
-bring-your-own certificates, and makes every future TLS-terminating service
-rebuild the same flow.
+**Rejected because:** It leaves no home for bring-your-own certificates and
+makes every future TLS service rebuild the same flow.
 
 ### Solve DNS-01 in Customer Zones
 
-Write challenge records directly into customer zones hosted on Datum DNS.
+Write challenge records directly into customer zones on Datum DNS.
 
 **Rejected because:** It needs platform-wide write credentials across customer
-zones. The delegation zone keeps the issuer's reach to one zone the platform
-owns.
+zones.
+
