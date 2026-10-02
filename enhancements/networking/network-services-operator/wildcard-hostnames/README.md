@@ -116,9 +116,9 @@ datumctl get domains
 ```
 
 `hostname add` does not wait; `describe` shows each custom hostname's available,
-DNS and certificate status and the records still to publish. With this proposal the
-plugin accepts wildcards, lists required records including the delegation CNAME,
-and points its "DNS not delegated" hint at the certificate record.
+DNS and certificate status and the records still to publish. With this proposal
+the plugin accepts wildcards, lists required records including the delegation
+CNAME, and points its "DNS not delegated" hint at the certificate record.
 
 **Records to publish** for a zone hosted outside Datum:
 
