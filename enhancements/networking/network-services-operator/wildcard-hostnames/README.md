@@ -214,10 +214,6 @@ Should DNS-01 become the default for all custom hostnames once stable?
 
 ## Design Details
 
-<p align="center">
-  <img src="./architecture.png" alt="Container Architecture" />
-</p>
-
 ### Building on the Certificate Service
 
 Certificates live in a new Milo foundation service rather than inside the ALB
