@@ -20,6 +20,7 @@ latest-milestone: "v0.x"
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
   - [Certificate Service](#certificate-service)
+  - [Wildcard Entitlement](#wildcard-entitlement)
   - [ALB Integration](#alb-integration)
   - [Delegation Zone](#delegation-zone)
 - [Future Work](#future-work)
@@ -175,7 +176,8 @@ domain, and only the hostname claim decides who serves a name.
 **Who can write status.** Only platform identities can write certificate status,
 and the service rebuilds it every reconcile.
 
-Wildcards are available to every project; there is no entitlement gate.
+Wildcards are gated per project by a quota entitlement until hosted zone claims
+land; see [Wildcard Entitlement](#wildcard-entitlement).
 
 ### Certificate Issuance
 
@@ -209,6 +211,7 @@ the default for exact hostnames; DNS-01 is an explicit choice.
 |------|------------|
 | Hijack of a name under a wildcard | Subtree-exclusive claims |
 | Wildcard granted on weak proof | DNS-level verification only |
+| Trusted wildcard for a victim subdomain via the zone-claim hole | Quota entitlement per project until zone claims land |
 | Another project obtains the certificate | Random, project-bound delegation targets |
 | Forged status steers issuance | Platform-only writers; status rebuilt each reconcile |
 | Shared Let's Encrypt rate limits | No order until DNS is ready; alert on issuance failures |
@@ -255,6 +258,65 @@ The service reconciles every project control plane, places no order until the
 delegation CNAME resolves, and delivers the certificate as a Secret in the
 project. Only platform identities can write its status, and it does not verify
 ownership: callers request only names they have claimed.
+
+### Wildcard Entitlement
+
+Until hosted zone claims land, a tenant can obtain a trusted wildcard for a
+victim's subdomain through the zone-claim hole, because a zone proves ownership
+only by delegation. Every project therefore needs an entitlement to request a
+wildcard, and the hostname claim alone does not decide.
+
+- **Quota limit**: `networking.datumapis.com/wildcard-hostnames`, consumed by
+  Projects with a default of 0, registered in the networking service catalog
+  configuration
+- **Grant**: Staff create one `ResourceGrant` of amount 1 per project in the
+  Milo root namespace `milo-system`
+- **Check**: The Network Services Operator controller reads the project's
+  `AllowanceBucket` before creating the `TLSCertificate` for a wildcard.
+  Available above 0 allows it; a missing bucket or a read error denies it.
+  Exact hostnames are never checked.
+- **Enforcement**: In the controller only, with no admission webhook and no
+  claim policy. Quota claim admission runs on create only, so an update to an
+  existing hostname could bypass it.
+- **Denial**: The per-hostname certificate condition reports reason
+  `WildcardNotEntitled`
+- **Revocation**: Deleting the grant deletes the `TLSCertificate` and its
+  mirrored Secrets, so the keys stop being served
+- **Rollout**: Staging only until hosted zone claims land. Removing the gate is
+  the exit criterion once they ship.
+
+Implemented in
+[network-services-operator#542](https://github.com/datum-cloud/network-services-operator/pull/542).
+
+**User-visible API.** Staff enable a project:
+
+```yaml
+apiVersion: quota.miloapis.com/v1alpha1
+kind: ResourceGrant
+metadata:
+  name: acme-wildcard-hostnames
+  namespace: milo-system
+spec:
+  consumerRef:
+    kind: Project
+    name: acme
+  allowances:
+    - resourceType: networking.datumapis.com/wildcard-hostnames
+      buckets:
+        - amount: 1
+```
+
+A project without the grant sees the denial on the hostname:
+
+```yaml
+status:
+  hostnameStatuses:
+    - hostname: "*.s3.example.com"
+      conditions:
+        - type: CertificateReady
+          status: "False"
+          reason: WildcardNotEntitled
+```
 
 ### ALB Integration
 
@@ -303,6 +365,7 @@ platform's own domains.
 
 **Verification:**
 
+- **Remove the wildcard entitlement gate** once zone claims ship
 - **Re-verification and claim expiry**: Release claims when ownership lapses,
   using the delegation re-check and grace period of zone claims so one design
   serves both
@@ -323,6 +386,7 @@ platform's own domains.
 - **Hosted zone claims and ownership by delegation**: Defines when a Datum zone
   proves ownership, when claims conflict, how an owner overrides one, and when
   delegation is re-checked.
+- **Milo quota**: Holds the wildcard entitlement limit, grants and buckets.
 - **cert-manager**: Places and renews certificate orders.
 - **datumctl alb plugin**: Shows hostname and certificate state and the records
   to publish.
@@ -334,6 +398,7 @@ platform's own domains.
 ## Implementation History
 
 - 2026-10-01: Provisional proposal.
+- 2026-10-05: Gate wildcards by quota entitlement until zone claims land.
 
 ## Alternatives
 
