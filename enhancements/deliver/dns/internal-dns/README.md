@@ -181,23 +181,23 @@ not require a separate DNS deployment.
 flowchart LR
   W[Workloads in a consumer VPC] -->|DNS queries| G[Galactic private access]
   G -->|Authorized VPC context| D[Internal DNS service]
-  P[Compute and Network Services Operator] -->|Resource names, addresses, and availability| D
+  P["Product services such as Compute and Connect"] -->|Publish DNS records| D
   U[Zone owners] -->|Private zones, records, and VPC associations| D
   D -->|Public name resolution| R[Public DNS]
 ```
 
-DNS owns private zones, naming, record publication, and resolution. It uses
-resource information from product services rather than discovering resources
-independently across the platform.
+DNS manages private zones and resolves records published by product services
+and zone owners. It does not discover resources independently across the
+platform.
 
 Galactic owns access to the DNS service, VPC identification, and network delivery.
 DNS uses that VPC context to select the permitted zones and keep answers and
 cached data isolated.
 
-Compute owns instance addresses and lifecycle, service endpoint eligibility, and
-workload DNS configuration. The Network Services Operator (NSO) owns the
-corresponding information for Connectors and network services. Zone owners manage
-custom records and decide which VPCs can resolve a zone.
+Product services, such as Compute and Connect, publish and maintain DNS records
+for their resources and services. They update those records as addresses,
+availability, and resource lifecycle change. Zone owners manage custom records
+and decide which VPCs can resolve a zone.
 
 ### Query flow
 
@@ -211,10 +211,10 @@ its destination.
 
 ### Record lifecycle
 
-When a supported resource becomes available, its product service supplies DNS
-with its identity, reachable addresses, and relevant availability information.
-DNS assigns the automatic name and maintains its records. Products update this
-information when addresses change or resources are deleted.
+When a supported resource becomes available, its product service publishes its
+DNS records. The DNS service makes accepted records available in the associated
+VPCs. Product services update or remove their records when resources change or
+are deleted.
 
 Instance names follow instance and address lifecycle. Service discovery names
 also follow endpoint health reported by the owning service. For a service with
@@ -222,7 +222,7 @@ a stable address, the service handles backend health behind that address.
 Connector exports publish services reachable from the consumer VPC; connecting
 a Connector does not automatically publish every service behind it.
 
-Resource creation can finish before DNS publication completes. Compute and NSO
+Resource creation can finish before DNS publication completes. Product services
 show DNS readiness separately from resource readiness, so consumers can tell
 when a name is usable.
 
@@ -250,9 +250,9 @@ requires a rollout plan that preserves workload DNS configuration and public
 resolution. Disabling internal DNS can interrupt applications that use private
 names; consumers need a clear description of that effect.
 
-The initial release must identify which Compute, Connector, and network service
-types support automatic names and which support health-aware discovery. Those
-capabilities appear in product status and documentation.
+The initial release must identify which product resources support automatic
+names and which support health-aware discovery. Those capabilities appear in
+product status and documentation.
 
 ## Production readiness review questionnaire
 
@@ -275,8 +275,8 @@ DNS readiness and failure reasons on their resources.
 
 ### Dependencies
 
-Confirm DNS, Galactic, Compute, Connector, and network service dependencies and
-how their outages affect consumers.
+Confirm DNS, Galactic, and product service dependencies and how their outages
+affect consumers.
 
 ### Scalability
 
