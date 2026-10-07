@@ -171,8 +171,88 @@ checks.
 
 ## Design details
 
-Deferred to a subsequent proposal update. API and implementation design are
-outside the scope of this product proposal.
+### System boundaries
+
+The DNS service runs in its own VPC. Consumer VPCs reach it through Galactic
+private endpoints. Shared DNS capacity serves multiple VPCs; creating a VPC does
+not require a separate DNS deployment.
+
+```mermaid
+flowchart LR
+  W[Workloads in a consumer VPC] -->|DNS queries| G[Galactic private access]
+  G -->|Authorized VPC context| D[Internal DNS service]
+  P[Compute and Network Services Operator] -->|Resource names, addresses, and availability| D
+  U[Zone owners] -->|Private zones, records, and VPC associations| D
+  D -->|Public name resolution| R[Public DNS]
+```
+
+DNS owns private zones, naming, record publication, and resolution. It uses
+resource information from product services rather than discovering resources
+independently across the platform.
+
+Galactic owns access to the DNS service, VPC identification, and network delivery.
+DNS uses that VPC context to select the permitted zones and keep answers and
+cached data isolated.
+
+Compute owns instance addresses and lifecycle, service endpoint eligibility, and
+workload DNS configuration. The Network Services Operator (NSO) owns the
+corresponding information for Connectors and network services. Zone owners manage
+custom records and decide which VPCs can resolve a zone.
+
+### Query flow
+
+A workload sends queries to its configured resolver. Galactic delivers each query
+with its authorized VPC context. DNS resolves private names from the zones
+associated with that VPC and resolves public names through the same service.
+
+DNS does not search another VPC's zones when a private name is missing or a
+private zone is unavailable. Resolving a name does not grant network access to
+its destination.
+
+### Record lifecycle
+
+When a supported resource becomes available, its product service supplies DNS
+with its identity, reachable addresses, and relevant availability information.
+DNS assigns the automatic name and maintains its records. Products update this
+information when addresses change or resources are deleted.
+
+Instance names follow instance and address lifecycle. Service discovery names
+also follow endpoint health reported by the owning service. For a service with
+a stable address, the service handles backend health behind that address.
+Connector exports publish services reachable from the consumer VPC; connecting
+a Connector does not automatically publish every service behind it.
+
+Resource creation can finish before DNS publication completes. Compute and NSO
+show DNS readiness separately from resource readiness, so consumers can tell
+when a name is usable.
+
+### Distributed updates and availability
+
+Multiple product control planes use the same DNS integration boundaries. DNS
+distributes accepted changes to the serving locations for associated VPCs and
+preserves record ownership during failures and recovery. Delayed updates cannot
+restore deleted records or replace another VPC's records.
+
+A control plane outage can delay changes. Serving continues only while the
+required data and authorization remain valid. DNS removes service discovery
+endpoints when their reported health information expires. If no usable endpoints
+remain, the name returns no endpoint addresses. If DNS cannot safely resolve a
+private zone, queries fail rather than return another VPC's answers.
+
+Cached answers can outlast record updates until their cache lifetime expires.
+Publication and endpoint withdrawal have documented time limits; applications
+still need connection retries.
+
+### Adoption and release scope
+
+The proposed default enables automatic DNS for new VPCs. Existing VPC adoption
+requires a rollout plan that preserves workload DNS configuration and public
+resolution. Disabling internal DNS can interrupt applications that use private
+names; consumers need a clear description of that effect.
+
+The initial release must identify which Compute, Connector, and network service
+types support automatic names and which support health-aware discovery. Those
+capabilities appear in product status and documentation.
 
 ## Production readiness review questionnaire
 
