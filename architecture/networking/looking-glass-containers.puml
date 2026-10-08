@@ -18,7 +18,7 @@ Container_Ext(router_agents, "Fabric router agents", "gRPC / edge", "Read routin
 
 Rel_R(customer, client, "Uses")
 Rel_R(client, project_api, "Creates session", "HTTPS")
-Rel_D(project_api, controller, "Session events", "Kubernetes API")
+Rel_R(project_api, controller, "Session events", "Kubernetes API")
 Rel_R(controller, karmada, "Cell-bound session", "Kubernetes API")
 Rel_D(karmada, gateway, "Cell copy and status", "Kubernetes API")
 Rel_D(client, endpoint, "Live results", "Iroh / QUIC")
