@@ -171,77 +171,32 @@ checks.
 
 ## Design details
 
-### System boundaries
-
 The DNS service runs in its own VPC. Consumer VPCs reach it through Galactic
 private endpoints. Shared DNS capacity serves multiple VPCs; creating a VPC does
-not require a separate DNS deployment.
+not require a separate DNS deployment. Workloads inherit resolver configuration
+from their network.
 
 ```mermaid
 flowchart LR
   W[Workloads in a consumer VPC] -->|DNS queries| G[Galactic private access]
-  G -->|Authorized VPC context| D[Internal DNS service]
+  G -->|Authorized DNS context| D[Internal DNS service]
   P["Product services such as Compute and Connect"] -->|Publish DNS records| D
   U[Zone owners] -->|Private zones, records, and VPC associations| D
   D -->|Public name resolution| R[Public DNS]
 ```
 
-DNS manages private zones and resolves records published by product services
-and zone owners. It does not discover resources independently across the
-platform.
+The networking integration connects each VPC to an isolated DNS context and
+configures workload access. DNS manages zones and resolution. Product services,
+such as Compute and Connect, publish and maintain their records. Zone owners
+manage custom records and decide which VPCs can resolve a zone.
 
-Galactic owns access to the DNS service, VPC identification, and network delivery.
-DNS uses that VPC context to select the permitted zones and keep answers and
-cached data isolated.
+DNS readiness requires both published records and a working resolver path.
+Resource creation can finish before DNS is ready; an assigned name alone does
+not confirm that workloads can resolve it.
 
-Product services, such as Compute and Connect, publish and maintain DNS records
-for their resources and services. They update those records as addresses,
-availability, and resource lifecycle change. Zone owners manage custom records
-and decide which VPCs can resolve a zone.
-
-### Query flow
-
-A workload sends queries to its configured resolver. Galactic delivers each query
-with its authorized VPC context. DNS resolves private names from the zones
-associated with that VPC and resolves public names through the same service.
-
-DNS does not search another VPC's zones when a private name is missing or a
-private zone is unavailable. Resolving a name does not grant network access to
-its destination.
-
-### Record lifecycle
-
-When a supported resource becomes available, its product service publishes its
-DNS records. The DNS service makes accepted records available in the associated
-VPCs. Product services update or remove their records when resources change or
-are deleted.
-
-Instance names follow instance and address lifecycle. Service discovery names
-also follow endpoint health reported by the owning service. For a service with
-a stable address, the service handles backend health behind that address.
-Connector exports publish services reachable from the consumer VPC; connecting
-a Connector does not automatically publish every service behind it.
-
-Resource creation can finish before DNS publication completes. Product services
-show DNS readiness separately from resource readiness, so consumers can tell
-when a name is usable.
-
-### Distributed updates and availability
-
-Multiple product control planes use the same DNS integration boundaries. DNS
-distributes accepted changes to the serving locations for associated VPCs and
-preserves record ownership during failures and recovery. Delayed updates cannot
-restore deleted records or replace another VPC's records.
-
-A control plane outage can delay changes. Serving continues only while the
-required data and authorization remain valid. DNS removes service discovery
-endpoints when their reported health information expires. If no usable endpoints
-remain, the name returns no endpoint addresses. If DNS cannot safely resolve a
-private zone, queries fail rather than return another VPC's answers.
-
-Cached answers can outlast record updates until their cache lifetime expires.
-Publication and endpoint withdrawal have documented time limits; applications
-still need connection retries.
+The [internal DNS architecture](../../../../architecture/deliver/dns/internal-dns/README.md)
+defines DNS contexts, Galactic integration, query and record flows, and failure
+behavior. API and implementation details belong in the component repositories.
 
 ### Adoption and release scope
 
