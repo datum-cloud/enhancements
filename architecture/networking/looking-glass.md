@@ -52,14 +52,6 @@ only its cell's session copy.
 
 [PlantUML source](./looking-glass-containers.puml)
 
-| Container | Deployed in | Responsibility |
-| --- | --- | --- |
-| Portal / `datumctl` | Customer browser or device | Creates sessions and displays results. |
-| Project API and looking glass controller | Project control plane | Authorizes sessions, binds a cell, reflects status, and records activity. |
-| Karmada hub | Federation control plane | Delivers the cell copy and returns cell status. |
-| Datum Connect endpoint and looking glass gateway | Selected edge cell | Accepts the client stream, authenticates the session, and runs diagnostics. |
-| Galactic fabric gateway and router agents | Selected edge cell, with agents beside fabric routers | Fans out queries and collects routing observations or probes. |
-
 The cell gateway needs no project or hub credentials, and the Datum Connect
 endpoint has no Kubernetes credentials. Galactic's internal calls use mTLS
 gRPC.
