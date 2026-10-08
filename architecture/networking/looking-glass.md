@@ -1,83 +1,141 @@
+---
+status: provisional
+stage: alpha
+latest-milestone: "v0.x"
+---
+
 # Looking glass system architecture
 
-## Overview
+## Summary
 
-Looking glass owns the customer-facing diagnostic session. The project control
-plane authorizes a request and reports its lifecycle; a cell service runs it
-and sends results directly to the client. Galactic remains the provider of
-fabric router diagnostics through its existing gRPC service. The proposed
-service can live in `milo-os/looking-glass`, with its project controller and
-cell gateway in one repository. The [product proposal](../../enhancements/networking/looking-glass/README.md)
-defines the user experience and scope.
+Looking glass lets a project member run a live diagnostic from a named Datum
+edge location. The project control plane authorizes and records the session;
+the selected cell runs it and streams results to the client. The proposed
+`milo-os/looking-glass` service owns this customer-facing path. Galactic
+supplies fabric router observations through its existing gRPC service. The
+[product proposal](../../enhancements/networking/looking-glass/README.md)
+defines the experience and initial scope.
 
-```text
-Client -- create session / watch status --> Project control plane
-                                               |
-                                               | session copy via hub / Karmada
-                                               v
-Client -- Iroh --> Datum Connect endpoint --> Cell session gateway
-                                                | gRPC
-                                                v
-                                       Galactic fabric diagnostics
+## Motivation
 
-Cell status -- Karmada / hub --> Project control plane
-Cell session gateway -- result stream --> Client
+The project control plane knows who a customer is and what they may access.
+The edge cell has the network vantage point and router state. The service
+needs both without granting customers node access or routing every result
+through the control plane.
+
+### Goals
+
+- Authorize and audit each diagnostic in its project.
+- Stream results from the chosen cell to the portal and CLI.
+- Reuse Galactic's bounded fabric diagnostics and permit other vantage points
+  behind the same user workflow later.
+
+### Non-goals
+
+- An arbitrary shell on Datum infrastructure.
+- Treating a fabric router probe as a test from a customer VPC or workload.
+- Persisting complete session output in the project API.
+
+## Proposal
+
+The customer creates one short-lived session for one location and diagnostic.
+The project control plane admits it and binds it to a cell. The client then
+connects through Datum Connect with a key generated for that session. The cell
+starts the diagnostic only after the client authenticates. This follows the
+[Compute instance shell pattern](https://github.com/datum-cloud/compute/blob/main/docs/enhancements/instance-shell-sessions/README.md):
+project authority, a direct client-to-cell stream, and an agent that reads
+only its cell's session copy.
+
+### Container view
+
+![C4 container diagram of the client, project API, looking glass controller, Karmada, cell gateway, Datum Connect endpoint, and Galactic fabric diagnostics](./looking-glass-containers.png)
+
+[PlantUML source](./looking-glass-containers.puml)
+
+The project API serves the session. The looking glass controller binds it to
+a cell and reflects its status. Karmada delivers the cell copy and returns
+status; the cell gateway needs no project or hub credentials. The Datum
+Connect endpoint carries client bytes and has no Kubernetes credentials.
+The gateway authenticates and executes the request. Galactic's fabric gateway
+fans it out to router agents over mTLS gRPC.
+
+### Risks and mitigations
+
+- Active probes could scan or load other networks. Admission and the cell
+  both enforce destination, traffic, time, concurrency, and output limits.
+- Route results can reveal platform topology. Customer access to BGP details
+  needs an explicit visibility policy before launch.
+- Endpoint reachability is not authorization. The gateway checks the session
+  key, bound cell, current state, and single-use claim before execution.
+
+## Design details
+
+### Consumer-facing API
+
+The proposed `LookingGlassSession` is a project-scoped resource. This example
+is illustrative; the API version and field names remain provisional:
+
+```yaml
+apiVersion: network.datumapis.com/v1alpha1
+kind: LookingGlassSession
+metadata:
+  generateName: edge-trace-
+spec:
+  location: us-central-1
+  vantagePoint: FabricEdge
+  diagnostic:
+    type: Traceroute
+    target: 1.1.1.1
+  clientPublicKey: "<ephemeral-public-key>"
 ```
 
-## Session path
+Creating a session requires a dedicated project permission. The spec is
+immutable, and deletion revokes the session. Portal and CLI clients use the
+same API to create it and watch status, and keep the private key in memory.
+Status reports pending, connectable, connected, or terminal state. Once
+connectable, it carries the endpoint ID, relay URLs, connection target, and
+connection deadline. Terminal status carries an ending reason and coverage
+counts, rather than raw probe output. The project activity log records the
+requester, location, diagnostic, start, and outcome.
 
-1. The client generates a temporary key pair and creates a project-scoped,
-   immutable session naming one location, vantage point, diagnostic, target,
-   and its public key. Project admission checks permissions and policy.
-2. The control plane binds the session to an eligible cell and propagates it
-   there. Only that cell may publish a connection endpoint or terminal status.
-   The cell gateway claims the session when its endpoint is ready.
-3. The client reads the endpoint and connects through Datum Connect. It proves
-   possession of the private key and consumes the single-use session. The
-   gateway checks the current session state again before starting work.
-4. After connection, the gateway invokes the diagnostic backend. For the
-   fabric vantage point, it fans out to Galactic's gRPC service and forwards
-   each completed router observation to the client. It sends a final status
-   with coverage and typed errors.
-5. The cell writes lifecycle status to its local session copy. Federation
-   reflects it to the project control plane for the client and activity log.
-   Revocation, expiry, disconnect, and cell loss end the session.
+One session targets one location; clients may create several to compare
+locations. Admission checks project access to the chosen location and vantage
+point. The selected cell is fixed before connection details are exposed, and
+status from another cell cannot redirect the client.
 
-The project control plane is the authority for *who may run what*. The Iroh
-endpoint identifies the cell and carries bytes; its address is not an access
-grant. The cell holds no project or federation-hub credentials. The client
-private key stays in client memory, as it does for [Compute instance shells](https://github.com/datum-cloud/compute/blob/main/docs/enhancements/instance-shell-sessions/README.md).
+### Execution and result stream
 
-## Execution boundary
+The cell gateway checks the live session when the client connects, consumes
+its single use, then calls a typed diagnostic backend. For `FabricEdge`, it
+calls Galactic's cell fabric gateway, which fans out to router agents. The
+looking glass stream identifies each router and sample time, reports each
+completed observation, and ends with coverage and typed errors. Galactic's
+current gRPC calls return completed operations; live per-hop traceroute
+output would require a streaming backend contract.
 
-The cell gateway exposes typed operations, not a shell. For fabric queries it
-uses Galactic's existing gRPC contract, validation, budgets, and router-local
-readers. The first stream can report session progress and each router's final
-observation. Live ping replies or traceroute hops would require a streaming
-backend contract; Iroh alone does not make a completed gRPC call incremental.
+Galactic's debug gRPC endpoint uses operator-oriented credentials today. The
+looking glass service needs a dedicated service identity and scoped policy at
+that gateway, rather than inheriting broad operator access. A future VPC
+vantage point needs a worker in that VPC's network context behind the same
+session API.
 
-A future VPC vantage point needs a separate worker in that VPC's network
-context. It must not be represented as a fabric probe. If later diagnostics
-need user-supplied programs, their execution belongs in an isolated runtime
-with its own resource and network policy, behind the same session gateway.
+### Lifecycle and failure handling
 
-## Limits and failure handling
+The cell advertises a session only when its endpoint is ready. No probe
+starts until the client connects. An unclaimed session ends after a deadline;
+disconnect, expiry, and revocation cancel in-flight work. Cell status returns
+through Karmada, and the project API records the outcome and audit event. A
+detached diagnostic that runs without a client would be a separate mode with
+stored results.
 
-- Admission and the cell both validate the operation, target, vantage point,
-  and project scope. The cell enforces destination policy and hard execution,
-  traffic, concurrency, and output limits even if upstream validation fails.
-- Sessions have a short connection window. No probe starts until a client
-  authenticates. Disconnect cancels in-flight work; timeout and revocation
-  close the stream. A detached, asynchronous diagnostic would be a separate
-  mode with stored results.
-- The gateway reports which routers were selected, answered, failed, or were
-  omitted. A missing cell endpoint ends clearly rather than waiting without
-  a deadline. Audit records outlive the short-lived session resource.
-- Datum Connect endpoint pods have no cluster credentials and may reach only
-  their paired gateway. Endpoint readiness includes a client-path check so a
-  gateway does not advertise a session that users cannot reach.
+## Alternatives
 
-This follows Compute's [project-to-cell session pattern](https://github.com/datum-cloud/compute/pull/387)
-and [Datum Connect endpoint deployment](https://github.com/datum-cloud/compute/blob/main/config/components/shell-agent/endpoint.yaml).
-Galactic's [fabric API](https://github.com/datum-cloud/galactic/pull/792) remains
-the first diagnostic backend, not the customer session authority.
+An asynchronous query resource suits saved results but does not offer a live
+session. An HTTPS proxy through the control plane could stream results without
+a native Iroh client, but would put every diagnostic response on that path.
+The portal and CLI should share the session contract even if their transport
+implementations differ.
+
+Galactic's [fabric API](https://github.com/datum-cloud/galactic/pull/792) and
+Compute's [cell session implementation](https://github.com/datum-cloud/compute/pull/390)
+are the backend and transport precedents.
