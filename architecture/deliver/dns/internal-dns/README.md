@@ -180,33 +180,3 @@ endpoints return no endpoint addresses. Unsafe private resolution fails.
 Cached answers can persist until their DNS time to live (TTL) expires.
 Publication, withdrawal, freshness, and access targets remain release decisions.
 Product status distinguishes record readiness from resolver access readiness.
-
-## Deployment status
-
-The local prototype passed 53 checks for tenant isolation, overlapping names,
-private zones, Galactic packet translation, controller takeover, withdrawal,
-expiration, and recreation. It used two consumer APIs and one platform API,
-with location networking scoped inside that platform API. Karmada and an
-independent edge API were not part of the test. The fixture supplies some network
-statuses and addresses and uses a Compute-style publisher.
-
-Existing infra provides
-[Milo project discovery](https://github.com/datum-cloud/infra/blob/5cc5caba5b7f886ca00e7c3ed90726834dac7fac/apps/dns-operator/control-plane/staging/config.yaml),
-[NSO's Karmada connection](https://github.com/datum-cloud/infra/blob/5cc5caba5b7f886ca00e7c3ed90726834dac7fac/apps/network-services-operator/control-plane/staging/config.yaml),
-and [NetworkContext propagation](https://github.com/datum-cloud/infra/blob/5cc5caba5b7f886ca00e7c3ed90726834dac7fac/apps/network-services-operator/downstream/federated/clusterpropagationpolicy.yaml).
-The [DNS platform-project installation](https://github.com/datum-cloud/infra/blob/5cc5caba5b7f886ca00e7c3ed90726834dac7fac/apps/dns-operator/control-plane/staging/platform-project-dns.yaml)
-currently targets `datum-cloud`; the separate DNS service project is proposed.
-
-Remaining deployment work:
-
-- Map DNS coordination to the service project and validate Karmada projections
-  with an independent edge API. Replace the local resolver annotation with typed
-  networking settings.
-- Complete normal address and route lifecycle, readiness, real Compute guest
-  configuration, and actual product publication.
-- Release API dependencies and staging-lab configuration; qualify durable
-  allocation, safe reclamation, reload availability, broker resilience, capacity,
-  and regional failures.
-
-The new integration paths default to disabled. The enhancement owns release
-scope, adoption, rollback, and availability targets.
