@@ -89,16 +89,72 @@ spec:
 Creating a session requires a dedicated project permission. The spec is
 immutable, and deletion revokes the session. Portal and CLI clients use the
 same API to create it and watch status, and keep the private key in memory.
-Status reports pending, connectable, connected, or terminal state. Once
-connectable, it carries the endpoint ID, relay URLs, connection target, and
-connection deadline. Terminal status carries an ending reason and coverage
-counts, rather than raw probe output. The project activity log records the
-requester, location, diagnostic, start, and outcome.
+The project activity log records the requester, location, diagnostic, start,
+and outcome.
 
 One session targets one location; clients may create several to compare
 locations. Admission checks project access to the chosen location and vantage
 point. The selected cell is fixed before connection details are exposed, and
 status from another cell cannot redirect the client.
+
+### Session status and client behavior
+
+The project API exposes output-only `status` for discovery and lifecycle. It
+does not store the diagnostic stream. The proposed fields are:
+
+| Field | Client use |
+| --- | --- |
+| `observedGeneration` | Ignore a condition for an older spec generation. |
+| `cell` | Show the cell selected for the location; the control plane accepts status only from that cell. |
+| `connection.endpointID`, `relayURLs`, `target` | Dial the Datum Connect endpoint. These values are not credentials. |
+| `connectBefore` | Stop trying to connect after this deadline. |
+| `startedAt`, `finishedAt` | Show when execution began and ended. |
+| `coverage.expected`, `successful`, `failed`, `omitted` | Explain how many routers were observed at the end. |
+| `conditions[type=Ready]` | Drive the portal and CLI state and explain the ending. |
+
+A connectable status has this shape:
+
+```yaml
+status:
+  observedGeneration: 1
+  cell: us-central-1-a
+  connection:
+    endpointID: "<iroh-endpoint-id>"
+    relayURLs: ["<relay-url>"]
+    target: "<cell-gateway-host:port>"
+  connectBefore: "<RFC3339 timestamp>"
+  conditions:
+    - type: Ready
+      status: "True"
+      reason: SessionReady
+      message: "Connect before the deadline."
+      observedGeneration: 1
+      lastTransitionTime: "<RFC3339 timestamp>"
+```
+
+`Ready` follows Compute's session condition shape. Each condition includes a
+`status`, `reason`, plain-language `message`, `observedGeneration`, and
+`lastTransitionTime`.
+
+| `Ready` | Reason | Portal / CLI behavior |
+| --- | --- | --- |
+| `Unknown` | `Pending` | Show that the session is being placed; keep watching. |
+| `True` | `SessionReady` | Connect immediately, provided `connectBefore` has not passed. |
+| `True` | `Connected` | Show live observations from the stream. |
+| `False` | `Succeeded` or `PartialResults` | Show the final coverage and any results already received; stop reconnecting. |
+| `False` | `Rejected`, `Unavailable`, `NoNodesAvailable`, `ExecutionFailed`, `DeadlineExceeded`, `NotConnected`, `Revoked`, `Disconnected`, or `AgentLost` | Show the reason and a plain-language message; stop reconnecting. |
+
+A terminal `Ready=False` reason does not change. `PartialResults` means at
+least one router answered and others failed, timed out, or were omitted;
+`ExecutionFailed` means none answered. On any terminal state, clients retain
+observations already received on the stream and show coverage if available.
+Packet loss and an unanswered traceroute hop remain observations, not session
+failures. Connection details may remain in status for diagnosis, but clients
+may use them only while the condition is `SessionReady`. If a live stream
+drops, the client watches status
+for the final reason; the single-use session does not reconnect. Status may
+lag the stream because it returns through Karmada, so stream frames drive
+live output and the terminal condition provides the final API outcome.
 
 ### Execution and result stream
 
