@@ -8,9 +8,9 @@ latest-milestone: "v0.x"
 
 ## Summary
 
-Looking glass lets a customer ask what Datum's network sees from a chosen edge
-location. From the Cloud Portal, CLI, or API, they can run a bounded diagnostic
-and watch results from the edge without obtaining access to infrastructure.
+Looking glass lets customers ask what Datum's network sees from a chosen edge
+location. They can run a bounded diagnostic from the Cloud Portal, CLI, or API
+and watch results without gaining access to infrastructure.
 The first release covers fabric routing observations and ping or traceroute from
 the fabric edge. Other vantage points can follow under the same experience.
 
@@ -39,7 +39,7 @@ source.
 
 The project records who started a session, its location and diagnostic, and
 how it ended. Closing the client or revoking the session stops new work.
-Session output is available to the connected client; saving a full diagnostic
+The connected client receives session output. Retaining a full diagnostic
 history is a separate product decision.
 
 ## Boundaries
@@ -62,8 +62,8 @@ history is a separate product decision.
 A project member with permission can run a diagnostic from a named edge
 location in the portal or CLI, understand which routers answered, and distinguish
 a network observation from a platform failure. Support can use the same result
-to investigate the incident without granting node access. Session setup time,
-completion rate, and partial coverage are measured before wider rollout.
+to investigate the incident without granting node access. The team measures
+session setup time, completion rate, and partial coverage before wider rollout.
 
 ## Open product decisions
 

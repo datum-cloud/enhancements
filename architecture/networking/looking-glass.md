@@ -39,9 +39,10 @@ through the control plane.
 ## Proposal
 
 The customer creates one short-lived session for one location and diagnostic.
-The project control plane admits it and binds it to a cell. The client then
-connects through Datum Connect with a key generated for that session. The cell
-starts the diagnostic only after the client authenticates. This follows the
+The client generates an ephemeral key pair and submits its public key with
+the session. The project control plane admits the session and binds it to a
+cell. The client then connects through Datum Connect. The cell starts the
+diagnostic only after the client authenticates. This follows the
 [Compute instance shell pattern](https://github.com/datum-cloud/compute/blob/main/docs/enhancements/instance-shell-sessions/README.md):
 project authority, a direct client-to-cell stream, and an agent that reads
 only its cell's session copy.
@@ -94,23 +95,24 @@ and outcome.
 
 One session targets one location; clients may create several to compare
 locations. Admission checks project access to the chosen location and vantage
-point. The selected cell is fixed before connection details are exposed, and
-status from another cell cannot redirect the client.
+point. The control plane fixes the selected cell before it exposes connection
+details. It rejects status from another cell.
 
 ### Session status and client behavior
 
 The project API exposes output-only `status` for discovery and lifecycle. It
-does not store the diagnostic stream. The proposed fields are:
+does not store the diagnostic stream. Clients use these status fields:
 
-| Field | Client use |
-| --- | --- |
-| `observedGeneration` | Ignore a condition for an older spec generation. |
-| `cell` | Show the cell selected for the location; the control plane accepts status only from that cell. |
-| `connection.endpointID`, `relayURLs`, `target` | Dial the Datum Connect endpoint. These values are not credentials. |
-| `connectBefore` | Stop trying to connect after this deadline. |
-| `startedAt`, `finishedAt` | Show when execution began and ended. |
-| `coverage.expected`, `successful`, `failed`, `omitted` | Explain how many routers were observed at the end. |
-| `conditions[type=Ready]` | Drive the portal and CLI state and explain the ending. |
+- `observedGeneration`: Ignore status from an older spec generation.
+- `cell`: Show the selected cell. The control plane accepts status only from
+  that cell.
+- `connection.endpointID`, `relayURLs`, and `target`: Connect to the Datum
+  Connect endpoint. These values do not grant access.
+- `connectBefore`: Stop connection attempts after this deadline.
+- `startedAt` and `finishedAt`: Show when execution began and ended.
+- `coverage.expected`, `successful`, `failed`, and `omitted`: Show how many
+  routers answered, failed, or were omitted.
+- `conditions[type=Ready]`: Show the session state and final outcome.
 
 A connectable status has this shape:
 
@@ -132,29 +134,42 @@ status:
       lastTransitionTime: "<RFC3339 timestamp>"
 ```
 
-`Ready` follows Compute's session condition shape. Each condition includes a
-`status`, `reason`, plain-language `message`, `observedGeneration`, and
-`lastTransitionTime`.
+`Ready` follows Compute's session condition shape. Each condition includes
+`status`, `reason`, a plain-language `message`, `observedGeneration`, and
+`lastTransitionTime`. Clients handle its states as follows:
 
-| `Ready` | Reason | Portal / CLI behavior |
-| --- | --- | --- |
-| `Unknown` | `Pending` | Show that the session is being placed; keep watching. |
-| `True` | `SessionReady` | Connect immediately, provided `connectBefore` has not passed. |
-| `True` | `Connected` | Show live observations from the stream. |
-| `False` | `Succeeded` or `PartialResults` | Show the final coverage and any results already received; stop reconnecting. |
-| `False` | `Rejected`, `Unavailable`, `NoNodesAvailable`, `ExecutionFailed`, `DeadlineExceeded`, `NotConnected`, `Revoked`, `Disconnected`, or `AgentLost` | Show the reason and a plain-language message; stop reconnecting. |
+- `Unknown` with reason `Pending`: Show that placement is in progress and keep
+  watching status.
+- `True` with reason `SessionReady`: Connect before `connectBefore`.
+- `True` with reason `Connected`: Show live observations from the stream.
+- `False` with reason `Succeeded`: Show the completed result and coverage.
+- `False` with reason `PartialResults`: Show the observations and incomplete
+  coverage. At least one router answered, but others failed, timed out, or
+  were omitted.
+- `False` with a failure reason: Show its message and any observations already
+  received. Stop connection attempts.
 
-A terminal `Ready=False` reason does not change. `PartialResults` means at
-least one router answered and others failed, timed out, or were omitted;
-`ExecutionFailed` means none answered. On any terminal state, clients retain
-observations already received on the stream and show coverage if available.
-Packet loss and an unanswered traceroute hop remain observations, not session
-failures. Connection details may remain in status for diagnosis, but clients
-may use them only while the condition is `SessionReady`. If a live stream
-drops, the client watches status
-for the final reason; the single-use session does not reconnect. Status may
-lag the stream because it returns through Karmada, so stream frames drive
-live output and the terminal condition provides the final API outcome.
+Failure reasons identify where the session stopped:
+
+- `Rejected`: The project API denied the request.
+- `Unavailable`: The selected cell could not serve the request.
+- `NoNodesAvailable`: The cell had no eligible routers.
+- `ExecutionFailed`: No router answered the diagnostic.
+- `DeadlineExceeded`: The session or diagnostic exceeded its deadline.
+- `NotConnected`: No client connected before `connectBefore`.
+- `Revoked`: The project control plane revoked the session.
+- `Disconnected`: The client connection closed during execution.
+- `AgentLost`: The cell lost the agent running the diagnostic.
+
+A terminal `Ready=False` reason does not change. Clients retain observations
+already received and show coverage when available. Packet loss and an
+unanswered traceroute hop are observations, not session failures.
+
+Clients may use connection details only while the condition is
+`SessionReady`. If a live stream drops, the client watches status for the
+final reason; the single-use session does not reconnect. Status may lag the
+stream because it returns through Karmada. Stream frames drive live output,
+and the terminal condition gives the final API outcome.
 
 ### Execution and result stream
 
