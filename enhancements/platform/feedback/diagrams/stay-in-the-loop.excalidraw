@@ -24,10 +24,10 @@
       "roundness": null,
       "seed": 1077818016,
       "version": 2,
-      "versionNonce": 2054131575,
+      "versionNonce": 910857626,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "text": "Stay in the loop",
@@ -63,7 +63,7 @@
       },
       "seed": 877350632,
       "version": 2,
-      "versionNonce": 1370261369,
+      "versionNonce": 428255494,
       "isDeleted": false,
       "boundElements": [
         {
@@ -75,7 +75,7 @@
           "id": "staff->everywhere"
         }
       ],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false
     },
@@ -100,10 +100,10 @@
       "roundness": null,
       "seed": 851318916,
       "version": 2,
-      "versionNonce": 1390184599,
+      "versionNonce": 643355226,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "text": "Datum moves an item\nPlanning -> On deck ->\nIn progress -> Shipped\nor links a changelog post",
@@ -139,7 +139,7 @@
       },
       "seed": 1643154796,
       "version": 2,
-      "versionNonce": 1031745625,
+      "versionNonce": 639080518,
       "isDeleted": false,
       "boundElements": [
         {
@@ -155,7 +155,7 @@
           "id": "everywhere->email"
         }
       ],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false
     },
@@ -180,10 +180,10 @@
       "roundness": null,
       "seed": 1286185502,
       "version": 2,
-      "versionNonce": 1099783607,
+      "versionNonce": 453080858,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "text": "Status updates everywhere\nwebsite, portal,\ndatumctl, Patch",
@@ -219,7 +219,7 @@
       },
       "seed": 895756827,
       "version": 2,
-      "versionNonce": 1858714937,
+      "versionNonce": 692625286,
       "isDeleted": false,
       "boundElements": [
         {
@@ -239,16 +239,16 @@
           "id": "email->examples"
         }
       ],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false
     },
     {
       "id": "email-t",
       "type": "text",
-      "x": 836.90625,
+      "x": 829.125,
       "y": 110,
-      "width": 146.1875,
+      "width": 161.75,
       "height": 60,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -264,14 +264,14 @@
       "roundness": null,
       "seed": 929257791,
       "version": 2,
-      "versionNonce": 161910487,
+      "versionNonce": 1689748442,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
-      "text": "Followers get an email\nvoters, submitters,\nmerged duplicates",
-      "originalText": "Followers get an email\nvoters, submitters,\nmerged duplicates",
+      "text": "Followers get a digest\nemail: voters, submitters,\nmerged duplicates",
+      "originalText": "Followers get a digest\nemail: voters, submitters,\nmerged duplicates",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
@@ -303,7 +303,7 @@
       },
       "seed": 2133552661,
       "version": 2,
-      "versionNonce": 888122905,
+      "versionNonce": 123125446,
       "isDeleted": false,
       "boundElements": [
         {
@@ -315,7 +315,7 @@
           "id": "email->unsub"
         }
       ],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false
     },
@@ -340,10 +340,10 @@
       "roundness": null,
       "seed": 1009778747,
       "version": 2,
-      "versionNonce": 364682231,
+      "versionNonce": 1301149850,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "text": "Unfollow one item\nor all updates",
@@ -379,7 +379,7 @@
       },
       "seed": 1148134090,
       "version": 2,
-      "versionNonce": 652509945,
+      "versionNonce": 350156294,
       "isDeleted": false,
       "boundElements": [
         {
@@ -391,7 +391,7 @@
           "id": "email->examples"
         }
       ],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false
     },
@@ -416,10 +416,10 @@
       "roundness": null,
       "seed": 1940107304,
       "version": 2,
-      "versionNonce": 164889879,
+      "versionNonce": 1698157914,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "text": "\"Bare Metal Infrastructure service is now In progress\"\n\"Wildcard hostnames shipped in Hedy 2.0\" (links to the\nchangelog post)",
@@ -455,10 +455,10 @@
       },
       "seed": 974785981,
       "version": 2,
-      "versionNonce": 824949721,
+      "versionNonce": 182338886,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "points": [
@@ -509,10 +509,10 @@
       },
       "seed": 961684937,
       "version": 2,
-      "versionNonce": 358697527,
+      "versionNonce": 1292376602,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "points": [
@@ -563,10 +563,10 @@
       },
       "seed": 1135204307,
       "version": 2,
-      "versionNonce": 1675155641,
+      "versionNonce": 2058464390,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "points": [
@@ -617,7 +617,7 @@
       },
       "seed": 1455952782,
       "version": 2,
-      "versionNonce": 88664919,
+      "versionNonce": 66176730,
       "isDeleted": false,
       "boundElements": [
         {
@@ -625,7 +625,7 @@
           "id": "email->examples-label"
         }
       ],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "points": [
@@ -674,10 +674,10 @@
       "roundness": null,
       "seed": 1473285847,
       "version": 2,
-      "versionNonce": 9394585,
+      "versionNonce": 1108749254,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791466351821,
+      "updated": 1791466459607,
       "link": null,
       "locked": false,
       "text": "for example",

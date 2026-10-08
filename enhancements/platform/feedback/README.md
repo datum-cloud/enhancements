@@ -19,7 +19,6 @@ latest-milestone: "v0.1"
   - [Staff review and insights](#staff-review-and-insights)
   - [Product rules](#product-rules)
 - [Rollout](#rollout)
-- [Open Questions](#open-questions)
 - [Alternatives](#alternatives)
 
 ## Summary
@@ -76,6 +75,8 @@ service means one experience and one set of data.
   Enhancements project.
 - Real-time bug fixing or support SLAs. This is not a support channel.
 - Exporting feedback to the CRM in the first version.
+- Turning Patch's capability-gap reports into submissions. Those stay a
+  separate signal for the teams that own each service.
 
 ## Proposal
 
@@ -143,14 +144,17 @@ Nothing a user submits is ever published automatically.
 
 ![Status changes reach every surface and email followers](./diagrams/stay-in-the-loop.svg)
 
-People who voted for or submitted an item follow it. They get an email when:
+People who voted for or submitted an item follow it. Updates arrive as a
+digest email that covers everything that changed since the last one, so a
+busy week of planning doesn't mean a flood of emails. An item is included
+when:
 
 - the item changes status (for example, moves to In progress);
 - it ships in a release or is referenced in a changelog post;
 - their submission is approved, merged or declined.
 
-Edits, label changes and GitHub comments don't send email. Every email can
-unfollow that item or all feedback updates.
+Edits, label changes and GitHub comments aren't included. Every digest links
+to unfollow an item or all feedback updates.
 
 ### Staff review and insights
 
@@ -173,6 +177,8 @@ by demand where they already plan.
   after approval.
 - **Votes.** The count shown is Datum upvotes plus GitHub 👍 reactions. A
   person is counted once where we can match their Datum and GitHub accounts.
+  Someone who 👍s on GitHub without a linked Datum account and also votes in
+  Datum is counted twice; we accept that.
 - **Voter avatars** are only shown for users who opt in. Counts are always
   shown.
 - **Statuses**: None (not yet triaged), Backlog, Planning, On deck, In
@@ -192,19 +198,6 @@ by demand where they already plan.
 3. **Submit.** Similar-feedback suggestions, submissions and the staff review
    queue.
 4. **Everywhere.** Portal widget, datumctl commands, Patch, staff insights.
-
-## Open Questions
-
-<<[UNRESOLVED]>>
-- **Patch capability gaps.** Patch already records when it can't do
-  something a user asked. Should those become submissions in the same review
-  queue, or stay separate?
-- **Email cadence.** One email per change, or a digest when several followed
-  items move at once?
-- **Double counting.** People who 👍 on GitHub without a linked Datum
-  account can't be matched, so they may be counted twice if they also vote
-  in Datum. Is that acceptable?
-<<[/UNRESOLVED]>>
 
 ## Alternatives
 
