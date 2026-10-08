@@ -50,7 +50,7 @@ propagation contract does not carry source status. DNS publications follow their
 own delivery path.
 
 The networking integration preserves canonical project DNS references when
-establishing edge access. The [Private Service Connect design](../../network/private-service-connect/README.md)
+establishing edge access. The [Private Service Connect design](../../../networking/private-service-connect/README.md)
 defines endpoint authorization, local VPC identities, and network programming.
 
 ## Contexts and regional access

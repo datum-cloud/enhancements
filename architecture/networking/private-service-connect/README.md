@@ -146,7 +146,7 @@ destination for the network's DNS context. Galactic enforces the private path;
 DNS interprets the destination and isolates zones and answers.
 
 DNS contexts, record publication, health-aware discovery, and resolver leases
-belong to the [internal DNS architecture](../../dns/internal-dns/README.md).
+belong to the [internal DNS architecture](../../deliver/dns/internal-dns/README.md).
 The generic private-service path does not interpret DNS resources.
 
 ## Operations and remaining work
