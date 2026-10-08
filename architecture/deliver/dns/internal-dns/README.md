@@ -99,17 +99,43 @@ the Private Service Connect path is ready. The workload runtime applies those
 settings inside the guest. DNS serving and network readiness are separate gates.
 
 ```mermaid
-sequenceDiagram
-  participant W as Workload
-  participant G as Galactic
-  participant D as Shared DNS fleet
-  Note over W,D: Authorization and network paths are ready
-  W->>G: Query the inherited resolver address
-  G->>D: Forward to the authorized destination
-  Note over D: Select context<br/>Resolve its zones
-  D-->>G: DNS response
-  G-->>W: DNS response through the private endpoint
+flowchart LR
+  subgraph A[Consumer VPC A]
+    WA["Workload: 10.0.0.5<br/>Query: api.internal"]
+    RA[Common resolver<br/>address]
+    WA --> RA
+  end
+  subgraph B[Consumer VPC B]
+    WB["Workload: 10.0.0.5<br/>Query: api.internal"]
+    RB[Common resolver<br/>address]
+    WB --> RB
+  end
+  I[Trusted networking integration]
+  subgraph G[Galactic: trusted network identity]
+    GA["Trusted attachment A<br/>Live VPC A identity"]
+    GB["Trusted attachment B<br/>Live VPC B identity"]
+  end
+  RA -->|Attachment ingress| GA
+  RB -->|Attachment ingress| GB
+  I -.->|Program access for VPC A| GA
+  I -.->|Program access for VPC B| GB
+  subgraph S[DNS service VPC: shared serving fleet]
+    D["Shared dnsdist<br/>Destination selects context"]
+    CA["DNS context A<br/>api.internal → 10.0.0.10"]
+    CB["DNS context B<br/>api.internal → 10.0.0.20"]
+    D -->|Destination A| CA
+    D -->|Destination B| CB
+  end
+  GA -->|Authorized destination A| D
+  GB -->|Authorized destination B| D
 ```
+
+Both VPCs can use the same client address, resolver address, and query name.
+Galactic identifies each packet through its trusted attachment and live VPC
+identity, then applies the authorized destination mapping. Source IP alone does
+not identify the DNS context. Contexts are logical scopes within the shared
+fleet; they do not require per-VPC deployments. The names and answer addresses
+above are illustrative.
 
 The service-side destination selects the DNS context. Consumer DNS metadata
 cannot select another context. The final well-known resolver addresses and
