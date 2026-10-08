@@ -195,8 +195,9 @@ Resource creation can finish before DNS is ready; an assigned name alone does
 not confirm that workloads can resolve it.
 
 The [internal DNS architecture](../../../../architecture/deliver/dns/internal-dns/README.md)
-defines DNS contexts, Galactic integration, query and record flows, and failure
-behavior. API and implementation details belong in the component repositories.
+defines DNS contexts, Galactic integration, resource placement across control
+planes, query and record flows, and failure behavior. API and implementation
+details belong in the component repositories.
 
 ### Adoption and release scope
 

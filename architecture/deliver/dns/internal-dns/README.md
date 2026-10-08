@@ -33,6 +33,149 @@ Record publication and workload resolver configuration are separate paths. The
 DNS control plane accepts DNS context, access, and publication contracts. The VPC
 integration translates network intent into those contracts.
 
+## Control-plane architecture
+
+The proposal separates four API boundaries. A resource's authoritative API is
+the place where its owner records intent or accepted state. Controllers can run
+in a management cluster while using credentials for those APIs; the location of
+a controller Pod does not determine where its resources live.
+
+| Control plane | Resources and state | Writers |
+| --- | --- | --- |
+| Consumer project's control plane | Network intent; private zones, records, and associations; DNS contexts and access bindings; registrations, grants, and contributions | Consumers manage permitted intent. Product publishers write their declarations. Trusted networking and DNS controllers manage protected integration resources and status. |
+| DNS-service-owned project's control plane | Compiled publications, publication ownership, delivery progress, internal resolver assignments, and DNS allocation state; the DNS service's own network intent | DNS controllers and trusted service infrastructure controllers |
+| Federation control plane (Karmada) | Network and workload projections, location placement, propagation policies, and selected edge observations | Networking and product federation controllers; authorized edge write-back controllers |
+| Edge control plane | Local network contexts and interfaces; consumer and producer VPCs and attachments; private service endpoints and policies; shared serving workloads and local checkpoints | Edge networking controllers, Galactic, DNS serving agents, and platform deployment automation |
+
+The DNS service's project is a provider-owned project. It can hold state for
+many consumer projects. A consumer's zones and publications retain their trusted
+project and source identities when DNS compiles them into that shared state.
+
+```mermaid
+flowchart TB
+  P["Consumer project API<br/>Network intent + DNS declarations"]
+  D["DNS service project API<br/>Committed publications + serving assignments"]
+  K["Karmada API<br/>Network and workload placement"]
+  E["Edge API and serving processes<br/>Local VPC paths + shared DNS fleet"]
+  T[DNS publication transport]
+  P -->|DNS reconciliation| D
+  P -->|Network and workload projection| K
+  K -->|Placed network and workload state| E
+  D -->|Committed DNS updates| T
+  T -->|Records and resolver configuration| E
+  E -->|Verified serving acknowledgments| D
+  E -->|Selected network and workload observations| K
+  K -->|Product status projection| P
+  D -->|DNS status projection| P
+```
+
+### Consumer project
+
+`DNSResolverContext` and `DNSResolverAccessBinding` live beside the private
+`DNSZone`, `DNSRecordSet`, and `DNSZoneAssociation` resources in the consumer's
+project API. `DNSManagedNamespace` exposes automatic naming, and
+`DNSNamingPolicy` controls additional names. Product services publish through
+`DNSRegistration`, `DNSContributionGrant`, and `DNSRecordContribution`.
+
+The trusted networking integration creates the context and manages access
+binding specifications and renewals. DNS writes their status. Keeping these
+objects in a consumer project preserves local references and project-scoped
+authorization. It does not give product publishers or consumers permission to
+grant resolver access.
+
+Consumers choose a network. The integration creates access for that network's
+locations; consumers do not specify a region on an access binding themselves.
+DNS controllers discover project APIs through the platform's project discovery
+and credential lifecycle. One shared controller fleet can reconcile many
+projects.
+
+### DNS service project
+
+The proposed home for DNS-owned coordination state is a project managed by the
+DNS service. `DNSPublicationOwnership` records the current publication owner.
+`DNSPublicationManifest` and `DNSPublicationChunk` hold committed zone content.
+`DNSTransportOutbox` records delivery work. Internal `DNSResolverBinding` objects
+hold regional serving assignments compiled from consumer access bindings.
+Address claims and serving-plan ownership also belong to DNS-owned storage.
+Networking-side service destination allocation remains state owned by the VPC
+integration; DNS retains separate claims to reject conflicting destinations.
+
+The service's own network intent belongs here and follows the normal networking
+path to its regional VPCs. This project owns the shared service; it does not own
+consumer network lifetimes or replace their project APIs.
+
+DNS controllers read authorized consumer declarations and commit derived state
+here. Regional delivery workers distribute that state and persist serving
+acknowledgments independently of customer status projection. Product services
+do not write compiled publications, serving assignments, or delivery state.
+DNS controller replicas share an authoritative store for each publication and
+serving-plan ownership domain. Regional transport and serving replicas can act
+independently once they have received valid committed state. Assigning the same
+ownership domain to independent API stores would require an additional design.
+
+### Federation control plane
+
+Karmada carries the networking and workload projections needed at the selected
+locations. A networking `NetworkContext` describes a network's presence in a
+location. It is distinct from `DNSResolverContext`, which defines DNS scope.
+
+The networking integration should include desired resolver settings and the
+canonical DNS context and access references in the location's networking
+projection. Fields required at the edge must be propagated as desired state;
+placing them only in a source object's status would not fit the existing
+`NetworkContext` propagation contract.
+
+Karmada places the projection and carries selected edge observations back to the
+owning product controllers. Those controllers project customer status. Karmada
+does not become the authoritative store for DNS grants, records, publication
+ownership, or serving acknowledgments. DNS publications use the DNS delivery
+path shown above. Fleet infrastructure may be installed through the existing
+edge deployment automation; it does not require duplicating DNS publication
+state in Karmada.
+
+### Edge control plane
+
+Edge networking controllers consume the location's desired network state and
+allocate interfaces, VPCs, and attachments. The VPC integration resolves the
+actual local consumer VPC and creates its `ServiceEndpoint` and
+`ServiceRoutePolicy`. The endpoint can select DNS producer attachments in the
+service project's edge namespace. The consumer policy and endpoint descriptor
+live together in the consumer VPC's namespace.
+
+Local objects have their own API-assigned identities. The integration must pin
+the live edge VPC identity when creating a policy and preserve explicit
+references to the canonical project DNS context and access binding. Copying a
+source UID into a propagated object's metadata does not preserve its lifetime.
+
+Galactic programs the private path from these local objects. DNS agents receive
+compiled publications through the DNS transport, apply them to the shared
+fleet, and persist local checkpoints and expiration deadlines. They report
+verified DNS revisions through the DNS acknowledgment path. Networking readiness
+and DNS serving readiness remain separate signals that the integration combines
+before advertising a usable resolver.
+
+### Existing infrastructure and prototype placement
+
+The checked infra configuration already provides
+[Milo project discovery for DNS](https://github.com/datum-cloud/infra/blob/5cc5caba5b7f886ca00e7c3ed90726834dac7fac/apps/dns-operator/control-plane/staging/config.yaml),
+[NSO access to Karmada](https://github.com/datum-cloud/infra/blob/5cc5caba5b7f886ca00e7c3ed90726834dac7fac/apps/network-services-operator/control-plane/staging/config.yaml),
+and [location-scoped NetworkContext propagation](https://github.com/datum-cloud/infra/blob/5cc5caba5b7f886ca00e7c3ed90726834dac7fac/apps/network-services-operator/downstream/federated/clusterpropagationpolicy.yaml).
+These are integration patterns to reuse, not evidence that internal DNS is
+deployed. The existing
+[DNS platform-project installation](https://github.com/datum-cloud/infra/blob/5cc5caba5b7f886ca00e7c3ed90726834dac7fac/apps/dns-operator/control-plane/staging/platform-project-dns.yaml)
+targets the `datum-cloud` project; a separate DNS-service-owned project is a
+proposed deployment boundary.
+
+The local prototype keeps consumer declarations in two independent source APIs
+and DNS coordination state in a third platform API. It uses a separate namespace
+and credential in that third API for location networking objects. It does not
+have a fourth independent edge API or a Karmada deployment.
+
+Mapping the prototype's platform client to the DNS service project, implementing
+networking projections through Karmada, and validating an independent edge API
+remain deployment work. The current provider-VPC resolver annotation is a local
+bridge; it is not the proposed typed federation contract.
+
 ## System concepts
 
 ### DNS context
@@ -63,6 +206,28 @@ fleet has applied the current authorization. Access has a bounded validity
 period so an abandoned network path cannot retain permission indefinitely.
 Removing access in one region does not delete the context or access elsewhere.
 The logical network owner controls context deletion.
+
+#### Why an access binding has a region
+
+The current `DNSResolverAccessBinding.spec.region` identifies the DNS serving
+target to which the grant applies. The binding lives in a project API that can
+describe access in several regions, so its storage location does not identify
+that target. DNS uses the target for serving placement, destination allocation
+scope, delivery, and acknowledgment tracking.
+
+For example, one context can have a Central access binding and an East access
+binding. Each carries its own service-side destination, renewal sequence,
+deadline, and readiness. Expiring East access does not revoke Central access or
+change the context's zones. The region does not define tenant identity or choose
+regional application endpoints.
+
+The integration obtains placement from trusted network location state. The
+current prototype represents that placement as a configured region string. If
+the released API uses a serving-location reference or a deployment target that
+already determines placement, it can derive the region instead of requiring
+duplicate input. The architecture requires an unambiguous serving target; the
+current field shape remains subject to API review. Mapping regions to multiple
+edge cells and defining cross-region fallback also remain release decisions.
 
 ### Galactic private service access
 
