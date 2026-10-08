@@ -49,11 +49,9 @@ must travel as desired state in the networking projection. The existing
 propagation contract does not carry source status. DNS publications follow their
 own delivery path.
 
-The edge integration resolves local VPC identities and creates private service
-policies pinned to those lifetimes. Consumer policies and endpoint descriptors
-share the consumer VPC's namespace; endpoints select service-owned producer
-attachments. References retain canonical project DNS identities, while local
-objects receive their own API-assigned UIDs.
+The networking integration preserves canonical project DNS references when
+establishing edge access. The [Private Service Connect design](../../network/private-service-connect/README.md)
+defines endpoint authorization, local VPC identities, and network programming.
 
 ## Contexts and regional access
 
@@ -94,12 +92,11 @@ DNS treats the context's consumer identity as opaque. Networking owns its mappin
 to logical networks and regional VPCs. DNS does not discover VPCs or attachments.
 Adding a VPC adds data and authorization to the shared fleet.
 
-## Resolver setup and query path
+## Private Service Connect integration
 
 The integration advertises resolver settings only after DNS authorization and
-both consumer and producer network paths are ready. The workload runtime applies
-those settings inside the guest. Policy acceptance alone proves valid
-configuration, not a working path.
+the Private Service Connect path is ready. The workload runtime applies those
+settings inside the guest. DNS serving and network readiness are separate gates.
 
 ```mermaid
 sequenceDiagram
@@ -108,17 +105,15 @@ sequenceDiagram
   participant D as Shared DNS fleet
   Note over W,D: Authorization and network paths are ready
   W->>G: Query the inherited resolver address
-  Note over G: Validate trusted<br/>VPC attachment
   G->>D: Forward to the authorized destination
   Note over D: Select context<br/>Resolve its zones
   D-->>G: DNS response
-  G-->>W: Restore resolver address and reply
+  G-->>W: DNS response through the private endpoint
 ```
 
-Galactic maps the trusted attachment to query identity. Tenant-supplied source
-addresses or DNS metadata cannot select a different context. The platform
-reserves resolver addresses; final addresses and supported client address
-families remain release decisions.
+The service-side destination selects the DNS context. Consumer DNS metadata
+cannot select another context. The final well-known resolver addresses and
+supported client address families remain release decisions.
 
 Public names resolve through the same service. Missing or unavailable private
 names do not fall through to another context or public DNS. Answers and caches

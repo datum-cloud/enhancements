@@ -196,7 +196,9 @@ not confirm that workloads can resolve it.
 
 The [internal DNS architecture](../../../../architecture/deliver/dns/internal-dns/README.md)
 defines DNS contexts, Galactic integration, resource placement across control
-planes, query and record flows, and failure behavior. API and implementation
+planes, query and record flows, and failure behavior. The
+[Private Service Connect design](../../../../architecture/deliver/network/private-service-connect/README.md)
+defines the private endpoint capability used by DNS. API and implementation
 details belong in the component repositories.
 
 ### Adoption and release scope
