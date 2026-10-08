@@ -101,25 +101,14 @@ details. It rejects status from another cell.
 ### Session status and client behavior
 
 The project API exposes output-only `status` for discovery and lifecycle. It
-does not store the diagnostic stream. Clients use these status fields:
-
-- `observedGeneration`: Ignore status from an older spec generation.
-- `cell`: Show the selected cell. The control plane accepts status only from
-  that cell.
-- `connection.endpointID`, `relayURLs`, and `target`: Connect to the Datum
-  Connect endpoint. These values do not grant access.
-- `connectBefore`: Stop connection attempts after this deadline.
-- `startedAt` and `finishedAt`: Show when execution began and ended.
-- `coverage.expected`, `successful`, `failed`, and `omitted`: Show how many
-  routers answered, failed, or were omitted.
-- `conditions[type=Ready]`: Show the session state and final outcome.
-
-A connectable status has this shape:
+does not store the diagnostic stream. A connectable status has this shape:
 
 ```yaml
 status:
+  # Clients ignore status from older spec generations.
   observedGeneration: 1
   cell: us-central-1-a
+  # Connection details identify the endpoint; they do not grant access.
   connection:
     endpointID: "<iroh-endpoint-id>"
     relayURLs: ["<relay-url>"]
@@ -134,9 +123,30 @@ status:
       lastTransitionTime: "<RFC3339 timestamp>"
 ```
 
-`Ready` follows Compute's session condition shape. Each condition includes
-`status`, `reason`, a plain-language `message`, `observedGeneration`, and
-`lastTransitionTime`. Clients handle its states as follows:
+A terminal status includes execution times and router coverage:
+
+```yaml
+status:
+  observedGeneration: 1
+  cell: us-central-1-a
+  startedAt: "<RFC3339 timestamp>"
+  finishedAt: "<RFC3339 timestamp>"
+  coverage:
+    expected: 3
+    successful: 2
+    failed: 1
+    omitted: 0
+  conditions:
+    - type: Ready
+      status: "False"
+      reason: PartialResults
+      message: "Two of three routers answered."
+      observedGeneration: 1
+      lastTransitionTime: "<RFC3339 timestamp>"
+```
+
+`Ready` follows Compute's session condition shape. Clients handle its states
+as follows:
 
 - `Unknown` with reason `Pending`: Show that placement is in progress and keep
   watching status.
