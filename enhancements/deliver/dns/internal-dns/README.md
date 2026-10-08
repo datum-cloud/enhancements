@@ -197,7 +197,7 @@ not confirm that workloads can resolve it.
 The [internal DNS architecture](../../../../architecture/deliver/dns/internal-dns/README.md)
 defines DNS contexts, Galactic integration, resource placement across control
 planes, query and record flows, and failure behavior. The
-[Private Service Connect design](../../../../architecture/networking/private-service-connect/README.md)
+[Private Service Connect design](https://github.com/datum-cloud/galactic/blob/docs/private-service-connect-architecture/docs/enhancements/networking/private-service-connect/README.md)
 defines the private endpoint capability used by DNS. API and implementation
 details belong in the component repositories.
 
