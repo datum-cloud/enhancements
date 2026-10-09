@@ -49,10 +49,10 @@ its managed namespace and associated private zones. Separate contexts can use
 overlapping names and addresses. Zone sharing requires explicit associations.
 
 Each context has its own managed zone with the same default domain,
-`datum.internal`. Automatic names include the resource's project namespace,
-such as `api.production.datum.internal`. The context provides isolation;
-VPC and project identifiers do not need to appear in the hostname. Workload
-search lists try `<resource-namespace>.datum.internal` before `datum.internal`.
+`datum.internal`, with automatic names such as `api.datum.internal`. The context
+provides isolation and name uniqueness; resource namespace, VPC, and project
+identifiers do not need to appear in the hostname. Workloads receive
+`datum.internal` as the default search domain.
 
 Each serving location has independent access, readiness, and expiration. Losing
 access in one region does not remove the context or access elsewhere. Networking
@@ -64,12 +64,12 @@ opaque. Regional resolver placement does not select application endpoints.
 ```mermaid
 flowchart LR
   subgraph A[Consumer VPC A]
-    WA["Workload: 10.0.0.5<br/>Query: api.production.datum.internal"]
+    WA["Workload: 10.0.0.5<br/>Query: api.datum.internal"]
     RA[Common resolver<br/>address]
     WA --> RA
   end
   subgraph B[Consumer VPC B]
-    WB["Workload: 10.0.0.5<br/>Query: api.production.datum.internal"]
+    WB["Workload: 10.0.0.5<br/>Query: api.datum.internal"]
     RB[Common resolver<br/>address]
     WB --> RB
   end
@@ -84,8 +84,8 @@ flowchart LR
   I -.->|Program access for VPC B| GB
   subgraph S[DNS service VPC: shared serving fleet]
     D["Shared dnsdist<br/>Destination selects context"]
-    CA["DNS context A<br/>api.production.datum.internal → 10.0.0.10"]
-    CB["DNS context B<br/>api.production.datum.internal → 10.0.0.20"]
+    CA["DNS context A<br/>api.datum.internal → 10.0.0.10"]
+    CB["DNS context B<br/>api.datum.internal → 10.0.0.20"]
     D -->|Destination A| CA
     D -->|Destination B| CB
   end

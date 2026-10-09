@@ -66,24 +66,24 @@ name without creating a zone or choosing a zone for each resource. Public names
 continue to resolve through the same DNS service.
 
 Every VPC uses `datum.internal` as its default domain. Automatic names follow
-`<resource-name>.<resource-namespace>.datum.internal`, using the customer-visible
-project namespace. VPC and project identifiers do not appear in the domain.
+`<assigned-resource-name>.datum.internal`. Namespace, VPC, and project identifiers
+do not appear in the domain. Assigned names are unique within the VPC's DNS context.
 Each VPC resolves its own records, so the same name can have different answers
 in different VPCs.
 
 From a workload in the VPC, query an instance's IPv6 address with `dig`:
 
 ```console
-$ dig +short AAAA web-01-k7m2.production.datum.internal.
+$ dig +short AAAA web-01-k7m2.datum.internal.
 2001:db8:123::10
 
 $ dig +search +short AAAA web-01-k7m2
 2001:db8:123::10
 ```
 
-Workloads in the `production` namespace receive the ordered search domains
-`production.datum.internal` and `datum.internal`. Short names resolve within
-that namespace first. Use a fully qualified name to select another namespace.
+Workloads receive `datum.internal` as the default search domain. Short names
+resolve within the attached VPC. A fully qualified name does not select another
+VPC's DNS context.
 Additional private zones join the search list only through explicit configuration.
 
 Datum updates managed records when addresses change and removes them when you
@@ -145,7 +145,7 @@ endpoint addresses.
 Query a service with two healthy endpoints:
 
 ```console
-$ dig +short AAAA api.production.datum.internal.
+$ dig +short AAAA api.datum.internal.
 2001:db8:123::21
 2001:db8:123::22
 ```
@@ -154,7 +154,7 @@ After the service reports the second endpoint as unhealthy and DNS updates
 propagate, the same query returns only the healthy endpoint:
 
 ```console
-$ dig +short AAAA api.production.datum.internal.
+$ dig +short AAAA api.datum.internal.
 2001:db8:123::21
 ```
 
