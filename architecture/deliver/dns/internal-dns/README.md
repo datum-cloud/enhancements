@@ -54,6 +54,13 @@ provides isolation and name uniqueness; resource namespace, VPC, and project
 identifiers do not need to appear in the hostname. Workloads receive
 `datum.internal` as the default search domain.
 
+Peering DNS sharing explicitly associates a peer's qualified zone, such as
+`data.production.datum.internal`, with the local context. It does not associate
+the peer's default `datum.internal` zone or merge search lists. Cross-project
+sharing requires a unique project qualifier or chosen domain. Naming and sharing
+authorization require a peering design; DNS continues to consume zone and context
+references without inspecting network resources.
+
 Each serving location has independent access, readiness, and expiration. Losing
 access in one region does not remove the context or access elsewhere. Networking
 maps logical networks to regional VPCs; DNS treats the consumer identity as

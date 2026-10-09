@@ -135,6 +135,27 @@ Connecting two VPCs does not automatically share their private zones. Publishing
 a private record does not publish it to public DNS or grant access to its
 destination.
 
+#### Names across peered networks
+
+Keep `datum.internal` for local names. When you explicitly enable DNS sharing
+with a peer, use qualified names such as
+`<resource-name>.<network-name>.<network-namespace>.datum.internal` to select
+resources in that network.
+
+From the `application` network, query a database in the `data` network's
+`production` namespace:
+
+```console
+$ dig +short AAAA database.data.production.datum.internal.
+2001:db8:456::30
+```
+
+Sharing makes the peer's qualified zone available without importing its default
+`datum.internal` zone or changing local search domains. Network and namespace
+names are unique only within a project. Cross-project peers need a unique project
+qualifier or an explicitly chosen unique domain. Define peer naming and sharing
+authorization alongside the peering design.
+
 #### Health-aware service discovery
 
 For supported services, DNS returns usable endpoints and removes endpoints that
