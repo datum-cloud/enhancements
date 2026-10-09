@@ -35,8 +35,8 @@ organizations, a staff review step before anything goes public, and updates
 for the people who asked.
 
 Tracking issue: [datum-cloud/enhancements#889][issue]. Web designs:
-[Figma: Roadmap + Backlog][figma]. Technical design will follow in a separate
-document.
+[Figma: Roadmap + Backlog][figma]. Technical design:
+[Platform Feedback: Architecture](../../../architecture/design/feedback/README.md).
 
 [issue]: https://github.com/datum-cloud/enhancements/issues/889
 [figma]: https://www.figma.com/design/bBEQ8YeTP4SngNl5EkkQdH/Datum---Master-Design-File?node-id=17642-52938
