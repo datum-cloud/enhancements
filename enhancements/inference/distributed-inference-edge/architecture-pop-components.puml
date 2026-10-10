@@ -1,0 +1,66 @@
+@startuml architecture-pop-components
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+!include ../../datum-theme.puml
+
+title Distributed Inference Edge — PoP Components
+
+Container_Boundary(envoy_b, "Envoy  (existing edge deployment, extended)") {
+    Component(envoy_cluster, "Inference xDS Cluster", "Envoy Cluster v3", "VRAM-weighted endpoint pool.\nConsistent hash on KV prefix\nhash for cache locality.")
+    Component(envoy_hc, "Active Health Check", "Envoy HC", "HTTP GET /health every 5s.\nRemoves node from rotation\nwhen vram_pressure > threshold.")
+    Component(envoy_xds_client, "xDS Client", "Envoy ADS/SotW", "Receives CDS + EDS updates\nfrom pop-router xDS server.")
+}
+
+Container_Boundary(pop_router_b, "pop-router  (new binary per PoP)") {
+    Component(metrics_watcher, "Metrics Watcher", "Prometheus Go client", "Polls dcgm_fb_free + dcgm_fb_used\nfrom local Prometheus.\nTreats missing metrics as\nfull-pressure (fail-safe).")
+    Component(node_watcher, "Node Watcher", "k8s informer/cache", "Watches Pod + Workload resources\nin inference-system ns.\nCaches last-known list for\nAPI server outage resilience.")
+    Component(xds_srv, "xDS Server", "go-control-plane", "Serves CDS + EDS to Envoy.\nSets weight=0 on pressure\nthreshold breach or missing\nDCGM metrics.")
+    Component(session_mgr, "Session Manager", "Go", "Issues X-Datum-Session-ID on\nnew connections. Writes to\nlocal Redis Sentinel cluster.\nAsync-replicates to global\nsession registry. Handles\nroaming lookups.")
+    Component(srv6_client, "SRv6 Policy Client", "gRPC / mTLS", "Requests inference.steer policies\nfrom global control plane when\na roaming session is detected.")
+}
+
+Container_Boundary(node_b, "Inference Node  (one per GPU node, 3–6 per PoP, dedicated node pool)") {
+    Component(llama_srv, "llama-server", "llama.cpp HTTP server", "OpenAI-compatible\n/v1/chat/completions.\nKV cache managed internally.\nSSE streaming responses.")
+    Component(dcgm_exp, "dcgm-exporter", "NVIDIA DCGM exporter", "Exposes dcgm_fb_free,\ndcgm_fb_used on :9400/metrics.\nRequires DCGM daemon on node.")
+    Component(kv_store, "kv-cache-store", "custom sidecar", "Local KV cache keyed by\nSHA-256(prompt token prefix)\nscoped per tenant_id.\nUpdates Redis prefix index.")
+    Component(health_ep, "/health endpoint", "HTTP sidecar", "Returns VRAM pressure JSON:\n{vram_used_bytes, vram_free_bytes,\nvram_pressure: 0.0–1.0}.\nPolled by Envoy HC.")
+    Component(model_loader, "Model Readiness Gate", "init container / sidecar", "Blocks readiness probe until\nmodel weights fully loaded\ninto VRAM. Prevents routing\nto cold nodes post-scale-out.")
+}
+
+ContainerDb(redis_sentinel, "Redis Sentinel Cluster", "3-node Redis + Sentinel\n(mTLS between nodes)", "Local session registry.\nTenant-scoped KV cache prefix\nindex: tenant_id:SHA-256 → shard.")
+ContainerDb(prom_local, "Prometheus", "Prometheus (existing,\nextended with new scrape targets)", "Scrapes dcgm-exporter endpoints.\n~5MB/day storage per PoP.")
+
+Component_Ext(global_reg, "Global Session Registry", "Global Control Plane\n(CockroachDB-backed)", "Cross-PoP session lookup:\nsession_id → owning PoP.")
+Component_Ext(galactic_srv6, "Galactic VPC SRv6 Engine", "SRv6 policy provisioning", "Installs inference.steer\npolicies on PoP routers.")
+Component_Ext(flux_cd, "FluxCD", "GitOps reconciler", "Reconciles pop-router Deployment\n+ Envoy config from git.")
+
+' Metrics path
+Rel(prom_local, dcgm_exp, "Scrape /metrics", "HTTP pull 15s")
+Rel(metrics_watcher, prom_local, "Query VRAM metrics", "PromQL HTTP API")
+Rel(metrics_watcher, xds_srv, "Feed VRAM pressure weights")
+Rel(node_watcher, xds_srv, "Feed endpoint membership")
+
+' xDS path
+Rel(xds_srv, envoy_xds_client, "Push CDS + EDS snapshots", "gRPC ADS / SotW xDS v3")
+Rel(envoy_xds_client, envoy_cluster, "Reconfigure endpoint weights")
+Rel(envoy_hc, health_ep, "Poll health", "HTTP GET /health 5s")
+
+' Request path
+Rel(envoy_cluster, llama_srv, "Forward inference request\n(consistent hash on prefix)", "HTTP/1.1")
+Rel(llama_srv, kv_store, "Read/write KV cache shards", "local IPC")
+Rel(kv_store, redis_sentinel, "Update prefix hash index\n(tenant-scoped key)", "Redis HSET / mTLS")
+
+' Session path
+Rel(session_mgr, redis_sentinel, "Write session on new conn;\nRead on roaming (local miss)", "Redis SET/GET / mTLS")
+Rel(session_mgr, global_reg, "Async replicate new sessions;\nQuery on local miss", "HTTPS / mTLS")
+Rel(session_mgr, srv6_client, "Trigger SRv6 steering\non roaming detection")
+Rel(srv6_client, galactic_srv6, "Request inference.steer\npolicy for roaming client", "gRPC / mTLS")
+
+' Readiness
+Rel(model_loader, llama_srv, "Block readiness until\nVRAM warmup complete")
+
+' Lifecycle
+Rel(flux_cd, pop_router_b, "Reconcile Deployment", "Kubernetes API")
+
+SHOW_LEGEND()
+@enduml

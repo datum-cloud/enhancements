@@ -1,0 +1,28 @@
+@startuml architecture-context
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+!include ../../datum-theme.puml
+
+title Distributed Inference Edge — System Context
+
+Person(developer, "Developer / AI Application", "Calls OpenAI-compatible inference API;\nno client-side changes required")
+Person(sre, "Datum SRE", "Operates GPU node pools,\nFluxCD reconciliations,\nand Grafana dashboards")
+
+System(inference, "Distributed Inference Edge", "OpenAI-compatible LLM inference\nacross 20+ edge PoPs. Sessions\npinned via anycast; KV cache\npreserved across client roaming\nvia SRv6 session steering.")
+
+System_Ext(galactic_vpc, "Galactic VPC / SRv6 Underlay", "Cross-PoP traffic engineering.\nProvides inference.steer and\ninference.cache-xfer SRv6 segments.\nRequires IPv6 full mesh, MTU ≥ 9080.")
+System_Ext(workloads_api, "Datum Workloads API", "Schedules GPU inference nodes;\nautoscales on vram_headroom_bytes;\nmanages node lifecycle.")
+System_Ext(fluxcd, "FluxCD / GitOps", "Reconciles inference-system\nnamespace across edge clusters\nvia Kustomize overlays.")
+System_Ext(obs, "Observability Stack", "Victoria Metrics, Grafana,\nLoki, Tempo. Receives DCGM\nmetrics, inference latency\nhistograms, trace spans.")
+System_Ext(anycast_dns, "Anycast / DNS", "Routes new client sessions to\nnearest GPU-capable PoP via\nBGP anycast. No changes required.")
+
+Rel_D(developer, inference, "Calls", "HTTPS / OpenAI API\n+ X-Datum-Session-ID header")
+Rel_D(sre, inference, "Operates", "kubectl / Grafana / FluxCD CLI")
+Rel_R(inference, galactic_vpc, "Session steering +\nKV cache transfer", "SRv6 policies (Phase 2+)")
+Rel_D(inference, workloads_api, "Schedules &\nautoscales nodes", "Kubernetes API")
+Rel_L(inference, fluxcd, "Deployed and\nreconciled by", "GitOps / Kustomize")
+Rel_D(inference, obs, "Exports metrics,\nlogs, traces", "Prometheus / OTLP")
+Rel_U(anycast_dns, inference, "Directs clients to\nnearest PoP", "BGP anycast")
+
+SHOW_LEGEND()
+@enduml
