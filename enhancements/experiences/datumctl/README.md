@@ -18,5 +18,9 @@ grows alongside the platform.
   of `datumctl` plugins, and users can register, search, browse, and install
   across them — with the curated Datum catalog staying the trusted default and
   clear trust signals throughout.
+- [`vpc-plugin/`](./vpc) — a `kubectl`-modeled plugin for managing Virtual Private
+  Clouds: `datumctl vpc create`, `get`, `describe`, and `delete`, with
+  platform-assigned ULA IPv6, structured output formats, and confirmation-safe
+  deletion.
 
 _New datumctl enhancements are added here as they're proposed._
