@@ -1,0 +1,35 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+title Traffic-scope byte accounting — container view
+
+System_Boundary(node, "Any node") {
+    Container(intertap, "Inter-region tap", "TC-BPF", "Pass-through only. Classifies by comparing source/destination uSID Block.")
+    Container(agent, "Accounting agent", "Go DaemonSet", "Periodic BPF map read. Uniform across all taps.")
+}
+
+System_Boundary(shard, "NAT66/64 shard node") {
+    Container(egresstap, "Egress tap", "XDP, pre-NAT", "Reads tenant Argument nibble before NAT strips it.")
+    Container_Ext(nat, "NAT66/64 program", "XDP", "Existing masquerade/translation datapath")
+}
+
+System_Boundary(uplink, "Public/peer uplink") {
+    Container(nonattap, "No-NAT/BYOIP tap", "TC-BPF or XDP", "Matches source prefix against tenant-owned-block table")
+}
+
+System_Boundary(pipeline, "Existing telemetry pipeline") {
+    Container_Ext(collector, "gateway-collector", "OTel Collector", "New processor: uSID/VRF/prefix -> VPC lookup")
+    Container_Ext(nats, "o11y.metrics.<project_id>", "NATS JetStream", "Existing subject convention and durability")
+    Container_Ext(ch, "otel_metrics_*", "ClickHouse", "Extended with idempotent write key")
+}
+
+Rel(agent, intertap, "Reads map")
+Rel(agent, egresstap, "Reads map")
+Rel(agent, nonattap, "Reads map")
+Rel_D(egresstap, nat, "Chained before")
+Rel(agent, collector, "OTLP")
+Rel(collector, nats, "Publishes")
+Rel(nats, ch, "natsreceiver + clickhouseexporter")
+
+@enduml
