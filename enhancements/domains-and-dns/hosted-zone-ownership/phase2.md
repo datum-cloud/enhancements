@@ -16,9 +16,9 @@ change for each of them, and that cost grows with the customer base.
 - **Delegation proves ownership.** A domain is owned by the project whose zone's
   addresses appear in the registry delegation. One matching address is enough,
   because zones for the same name never share an address.
-- **Names stop being exclusive.** Several projects can hold zones for the same
-  name. Only the one the registry points to receives queries. Claims, holds, and
-  contests from Phase 1 are retired.
+- **Names stop being exclusive.** Several projects can have zones for the same
+  name. Only the one the registry points to receives queries. Claims,
+  reservations, and contests from Phase 1 are retired.
 - **The dependency becomes strictly one-way.** dns-operator allocates, serves,
   and publishes each zone's set, and never reads `Domain`.
   network-services-operator reads the set as evidence.
@@ -40,15 +40,15 @@ All three are required for serving immediately to be safe:
 
 ## Allocation
 
-| Property         | Value                                                                                                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Blocks           | Four /24s out of `67.14.160.0/22` (AS33438), plus four /48s out of `2607:ed40:0::/46`. The same index maps to one IPv4 and one IPv6 address.                                                            |
-| Radix            | **252 per block, fixed permanently.** `.0`, `.1`, `.254`, and `.255` are reserved in every block. Changing the radix later would remap every counter value.                                             |
-| Capacity         | 252⁴, about 4.03 billion zones                                                                                                                                                                          |
-| Legacy addresses | `.128` in each block serves today's `ns1` to `ns4`. Tuples containing it are skipped until the migration deadline.                                                                                      |
-| Key              | Held in Secret Manager. The key version is recorded with each assignment, so rotation affects only new zones. An unkeyed permutation would let anyone recover allocation order and the number of zones. |
-| Counter          | One counter, updated by compare-and-swap. Tuples are never reused.                                                                                                                                      |
-| Record           | The assignment and key version are stored on the `DNSZone` status.                                                                                                                                      |
+| Property         | Value                                                                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Blocks           | Four /24s out of `67.14.160.0/22` (AS33438), plus four /48s out of `2607:ed40:0::/46`. The same index maps to one IPv4 and one IPv6 address.                                                              |
+| Radix            | **252 per block, fixed permanently.** `.0`, `.1`, `.254`, and `.255` are reserved in every block. Changing the radix later would remap every counter value.                                               |
+| Capacity         | 252⁴, about 4.03 billion zones                                                                                                                                                                            |
+| Legacy addresses | `.128` in each block serves today's `ns1` to `ns4`. Tuples containing it are skipped until the migration deadline.                                                                                        |
+| Key              | Stored in Secret Manager. The key version is recorded with each assignment, so rotation affects only new zones. An unkeyed permutation would let anyone recover allocation order and the number of zones. |
+| Counter          | One counter, updated by compare-and-swap. Tuples are never reused.                                                                                                                                        |
+| Record           | The assignment and key version are stored on the `DNSZone` status.                                                                                                                                        |
 
 ## Naming
 
