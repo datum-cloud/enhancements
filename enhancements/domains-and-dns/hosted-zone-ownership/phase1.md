@@ -27,7 +27,7 @@ Phase 1a builds on behavior the operators already have:
 - Remove the verification gate behind a configuration flag.
 - Publish the serving DNSZoneClass's nameservers on each zone, so the delegation
   check can match.
-- Hold a deleted zone's claim for its project for a fixed period, such as 7
+- Reserve a deleted zone's name for its project for a fixed period, such as 7
   days.
 - Lower the registration refresh interval from 24 hours to about 1 hour.
 - Read delegations from the parent's authoritative servers when RDAP isn't
@@ -43,7 +43,7 @@ order, no TXT record for hosted domains, and a safe delete and recreate.
 Phase 1a accepts these risks, which are the ones Datum carried before
 dns-operator#100, plus a support path:
 
-- A dangling delegation can be claimed once the fixed hold expires.
+- A dangling delegation can be claimed once the fixed reservation expires.
 - Squatting is resolved by support, not by the rightful owner.
 - Verification stays permanent.
 
@@ -51,7 +51,7 @@ dns-operator#100, plus a support path:
 
 - Contests the rightful owner resolves with a TXT or HTTP record, and the
   Displaced state
-- A hold that lasts as long as the domain is delegated to Datum
+- A reservation that lasts as long as the domain is delegated to Datum
 - Re-checking delegation-based verification, with the 5-day grace period
 - A delegation re-check measured in minutes, with per-registry rate limits
 - The rest of the test plan
@@ -60,34 +60,34 @@ dns-operator#100, plus a support path:
 
 One claim exists per name across Datum, and it covers the name's whole subtree.
 A zone for a name under or over another project's zone is Contested, and the
-refusal names the holder. Datum's shared nameservers answer from the most
+refusal names the incumbent. Datum's shared nameservers answer from the most
 specific zone they host, so without this rule a zone for `shop.example.com`
 would take over that part of another project's `example.com`.
 [Wildcard Hostnames on ALBs](https://github.com/datum-cloud/enhancements/pull/914)
 applies the same rule to hostname claims.
 
-![Claim states: Holder is served; Held, Contested, and Displaced are
+![Claim states: Active is served; Reserved, Contested, and Displaced are
 not](claim-states.png)
 
 The diagram's source is [claim-states.puml](claim-states.puml).
 
 | State     | Meaning                                                                            | Served           |
 | --------- | ---------------------------------------------------------------------------------- | ---------------- |
-| Holder    | The first project to create a zone for the name, or the winner of a contest        | Yes, immediately |
-| Held      | The holder deleted the zone while the domain is still delegated to Datum           | No               |
+| Active    | The first project to create a zone for the name, or the winner of a contest        | Yes, immediately |
+| Reserved  | The incumbent deleted the zone while the domain is still delegated to Datum        | No               |
 | Contested | Another project created a zone for a claimed name, or for a name under or over one | No               |
 | Displaced | Lost a contest. Records are kept.                                                  | No               |
 
 - **Contests resolve immediately.** A valid TXT or HTTP proof shows the
   challenger controls the domain's DNS where it's actually delegated. The
-  holder's zone becomes Displaced and stops serving. Its records stay so its
+  incumbent's zone becomes Displaced and stops serving. Its records stay so its
   project can export them.
-- **When both projects hold a valid proof, the most recent one wins.** The
+- **When both projects have a valid proof, the most recent one wins.** The
   domain has changed hands.
-- **A hold lasts as long as the delegation points at Datum.** It ends when the
-  re-check confirms the delegation left Datum for 5 days, or when support
-  releases it.
-- **Existing zones become holders of their names**, with no customer action.
+- **A reservation lasts as long as the delegation points at Datum.** It ends
+  when the re-check confirms the delegation left Datum for 5 days, or when
+  support releases it.
+- **Existing zones become Active for their names**, with no customer action.
 
 > [!IMPORTANT]
 >
@@ -101,21 +101,21 @@ The diagram's source is [claim-states.puml](claim-states.puml).
 
 The claim and the verdict are independent:
 
-|                               | Not delegated to Datum                                                   | Delegated to Datum                           |
-| ----------------------------- | ------------------------------------------------------------------------ | -------------------------------------------- |
-| Holder                        | Served, but nobody asks Datum. Unverified, unless proven by TXT or HTTP. | Served and live. **Verified by delegation.** |
-| Held, Contested, or Displaced | Not served. Verified only by TXT or HTTP.                                | Not served. Verified only by TXT or HTTP.    |
+|                                   | Not delegated to Datum                                                   | Delegated to Datum                           |
+| --------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------- |
+| Active                            | Served, but nobody asks Datum. Unverified, unless proven by TXT or HTTP. | Served and live. **Verified by delegation.** |
+| Reserved, Contested, or Displaced | Not served. Verified only by TXT or HTTP.                                | Not served. Verified only by TXT or HTTP.    |
 
-- **Verified by delegation** requires both: the project's zone is the holder,
-  and the registry delegates to any of Datum's nameservers. Delegation is
-  re-checked periodically. If it leaves Datum, the verdict lapses after a 5-day
-  grace period, long enough for a long weekend or a slow registrar.
+- **Verified by delegation** requires both: the project's zone is Active, and
+  the registry delegates to any of Datum's nameservers. Delegation is re-checked
+  periodically. If it leaves Datum, the verdict lapses after a 5-day grace
+  period, long enough for a long weekend or a slow registrar.
 - **Verified by TXT or HTTP** stays permanent. Customers usually remove those
   records after verifying, so re-checking them would revoke almost everyone.
-- **Holding a delegated zone counts as owning the domain for ALBs and
-  certificates.** A project in that position already answers the domain's DNS.
-  It could get a certificate from any public CA, so a second proof would add
-  friction without adding security.
+- **An Active zone that the domain delegates to counts as owning the domain for
+  ALBs and certificates.** A project in that position already answers the
+  domain's DNS. It could get a certificate from any public CA, so a second proof
+  would add friction without adding security.
 
 ## Failure handling
 
@@ -126,7 +126,7 @@ The claim and the verdict are independent:
 | A partial delegation lists only some of Datum's nameservers, or mixes in another provider's | Counts as delegated to Datum if any Datum nameserver is listed                                                                                       |
 | The delegation leaves and returns within 5 days                                             | The grace timer resets. Nothing lapses or is released.                                                                                               |
 | Two projects claim a name, or a parent and child, at the same time                          | The first write wins atomically, and the other becomes Contested.                                                                                    |
-| Support releases a held or contested name                                                   | An explicit, audited action, recorded on the claim                                                                                                   |
+| Support releases a reserved or contested name                                               | An explicit, audited action, recorded on the claim                                                                                                   |
 | Datum's own nameservers can't be reached during a check                                     | Treated as a lookup failure                                                                                                                          |
 
 The proposal exposes these primitives for the portal and datumctl: the claim
@@ -135,21 +135,21 @@ each.
 
 ## What Kubernetes operator decides what
 
-Phase 1 can't be strictly one-way. The hold and the contest need ownership facts
-inside hosting. The rule is instead that **neither operator reads a decision
-that waits on its own output**.
+Phase 1 can't be strictly one-way. The reservation and the contest need
+ownership facts inside hosting. The rule is instead that **neither operator
+reads a decision that waits on its own output**.
 
-| Component                             | Owns                                                                                                                                        | Reads from the other                                                                                                               |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| dns-operator (hosting)                | Zones and serving. The **claim** on each name and its subtree: first claim, hold, contest resolution. Serves the holder's zone immediately. | From `Domain`: the registry delegation (for the hold) and the TXT/HTTP result (for contests). Never delegation-based verification. |
-| network-services-operator (ownership) | `Domain`: registry and delegation lookups, TXT/HTTP checks, and the verdict ALBs and certificates use                                       | From `DNSZone`: whether the zone is the holder, and the nameserver set it publishes (the shared set in Phase 1)                    |
+| Component                             | Owns                                                                                                                                             | Reads from the other                                                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| dns-operator (hosting)                | Zones and serving. The **claim** on each name and its subtree: first claim, reservation, contest resolution. Serves the Active zone immediately. | From `Domain`: the registry delegation (for the reservation) and the TXT/HTTP result (for contests). Never delegation-based verification. |
+| network-services-operator (ownership) | `Domain`: registry and delegation lookups, TXT/HTTP checks, and the verdict ALBs and certificates use                                            | From `DNSZone`: whether the zone is Active, and the nameserver set it publishes (the shared set in Phase 1)                               |
 
 This can't deadlock:
 
-- The hold and the contest depend only on the registry lookup and on TXT/HTTP,
-  which never consult zones.
-- Delegation-based verification depends on the zone being the holder, which
-  never waits on verification.
+- The reservation and the contest depend only on the registry lookup and on
+  TXT/HTTP, which never consult zones.
+- Delegation-based verification depends on the zone being Active, which never
+  waits on verification.
 - The verification gate, which made
   [network-services-operator#421](https://github.com/datum-cloud/network-services-operator/issues/421)
   a cycle, is removed.
@@ -161,12 +161,12 @@ This can't deadlock:
     flag.
   - Make claims cover subtrees, so a parent and child zone in different projects
     conflict.
-  - Add the Held, Contested, and Displaced claim states.
+  - Add the Reserved, Contested, and Displaced claim states.
   - Publish the serving DNSZoneClass's nameservers on each zone's status,
     replacing the project-side class that lists none.
   - Keep creating the `Domain` for each zone.
 - **network-services-operator:**
-  - The delegation check counts only the zone that holds the claim.
+  - The delegation check counts only the Active zone.
   - Read delegations from the parent's authoritative servers when RDAP isn't
     available.
   - Re-check delegation-based verification, with the 5-day grace period.
@@ -178,7 +178,7 @@ This can't deadlock:
 - Time from zone creation to served-and-verified. This feeds the convergence
   SLOs under
   [enhancements#905](https://github.com/datum-cloud/enhancements/issues/905).
-- The number of Held, Contested, and Displaced claims.
+- The number of Reserved, Contested, and Displaced claims.
 - The registry lookup error rate per TLD. This rate would have exposed the `.io`
   failure.
 
@@ -190,15 +190,15 @@ The current suites verify their own domains before asserting anything
 so none of these paths is exercised today. Each test asserts what Datum's
 nameservers actually answer, not only what a condition says.
 
-| Test                    | Must observe                                                                                                                            |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Delegate first          | The zone serves immediately. After delegation it's Verified with no TXT record.                                                         |
-| Non-holder isn't served | A second project's zone for the same name: Datum answers from the holder only                                                           |
-| Subtree                 | A second project's zone for a name under the holder's zone is Contested, and Datum answers for that name from the holder's zone         |
-| Contest                 | The challenger takes the name over with a TXT record, and the displaced zone stops answering.                                           |
-| Hold                    | A zone deleted while delegated stops answering. Another project's zone is Contested. The same project recreates it and it serves again. |
-| Lapse                   | When the delegation leaves, verification lapses after the grace period (shortened in tests).                                            |
-| Lookup failure          | A simulated registry failure doesn't lapse verification.                                                                                |
+| Test                           | Must observe                                                                                                                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Delegate first                 | The zone serves immediately. After delegation it's Verified with no TXT record.                                                         |
+| Only the Active zone is served | A second project's zone for the same name: Datum answers from the Active zone only                                                      |
+| Subtree                        | A second project's zone for a name under the Active zone is Contested, and Datum answers for that name from the Active zone             |
+| Contest                        | The challenger takes the name over with a TXT record, and the displaced zone stops answering.                                           |
+| Reservation                    | A zone deleted while delegated stops answering. Another project's zone is Contested. The same project recreates it and it serves again. |
+| Lapse                          | When the delegation leaves, verification lapses after the grace period (shortened in tests).                                            |
+| Lookup failure                 | A simulated registry failure doesn't lapse verification.                                                                                |
 
 Fixtures:
 

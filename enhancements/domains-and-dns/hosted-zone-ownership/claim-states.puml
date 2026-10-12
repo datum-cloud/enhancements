@@ -25,22 +25,22 @@ skinparam state {
 }
 
 state "Zone created" as Created <<event>>
-state "Holder\n<size:11>served</size>" as Holder #D5F5E0;line:0C1D31;line.bold
-state "Held\n<size:11>not served</size>" as Held
+state "Active\n<size:11>served</size>" as Active #D5F5E0;line:0C1D31;line.bold
+state "Reserved\n<size:11>not served</size>" as Reserved
 state "Displaced\n<size:11>not served</size>" as Displaced
 state "Contested\n<size:11>not served</size>" as Contested
 state "Name released" as Released <<event>>
 
-Created -down-> Holder : name\nfree
+Created -down-> Active : name\nfree
 Created -down-> Contested : name already\nclaimed
 
-Holder -down-> Held : deleted while\ndelegated to Datum
-Held -up-> Holder : same project\nrecreates it
+Active -down-> Reserved : deleted while\ndelegated to Datum
+Reserved -up-> Active : same project\nrecreates it
 
-Holder -down-> Displaced : another project\nproves ownership
+Active -down-> Displaced : another project\nproves ownership
 Displaced -right-> Contested : contests\nback
-Contested -up-> Holder : proves\nownership
+Contested -up-> Active : proves\nownership
 
-Holder -[dashed,#4D6356]left-> Released : deleted, not\ndelegated to Datum
-Held -[dashed,#4D6356]up-> Released : delegation leaves,\nor support releases
+Active -[dashed,#4D6356]left-> Released : deleted, not\ndelegated to Datum
+Reserved -[dashed,#4D6356]up-> Released : delegation leaves,\nor support releases
 @enduml
