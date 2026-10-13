@@ -73,15 +73,17 @@ startup.
 | `labels` | Label names for metrics and log keys alike, generated from `labels.yaml`; reserved-name lookup |
 | `buildinfo` | The binary's `build_version` and the library's `instrumentation_version` |
 | `metrics` | `client_golang`-style constructors that register on the served registry and refuse reserved names; `Handler` for servers that are not managers |
-| `logging` | JSON at info level, no sampling, Kubernetes objects by reference in every mode, versions on every line |
+| `logging` | JSON at info level, no sampling, Kubernetes objects by name and namespace (a convenience, not redaction), UTC timestamps, versions on every line |
 | `instrumenttest` | `AssertNothingStranded`, `AssertStandardLogger`, and `Lint` |
 
 `AssertNothingStranded` reads the module's source and fails at each use of
-the default registry. `AssertStandardLogger` reads source the same way and
-fails at any other logger constructor, at any `SetLogger` in a file that
-never calls `logging.New`, and when nothing calls `logging.New`. Reading
-source finds every use wherever the test lives, regardless of initialization
-order. `Lint` runs `promlint`.
+the default registry, at each registration that bypasses the library's
+label checks, and at a disabled manager metrics server when nothing else
+serves metrics. `AssertStandardLogger` reads source the same way and fails
+at any other logger constructor, at any `SetLogger` in a file that never
+calls `logging.New`, and when no file sets a logger built with `logging.New`.
+Reading source finds every use wherever the test lives, regardless of
+initialization order. `Lint` runs `promlint`.
 
 Rules:
 
