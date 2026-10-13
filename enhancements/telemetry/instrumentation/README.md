@@ -73,7 +73,7 @@ startup.
 | `labels` | Label names for metrics and log keys alike, generated from `labels.yaml`; reserved-name lookup |
 | `buildinfo` | The binary's `build_version` and the library's `instrumentation_version` |
 | `metrics` | `client_golang`-style constructors that register on the served registry and refuse reserved names; `Handler` for servers that are not managers |
-| `logging` | JSON at info level, no sampling, Kubernetes objects by name and namespace (a convenience, not redaction), UTC timestamps, versions on every line |
+| `logging` | JSON at info level, no sampling, UTC timestamps, versions on every line. It does not redact; don't log secrets |
 | `instrumenttest` | `AssertNothingStranded`, `AssertStandardLogger`, and `Lint` |
 
 `AssertNothingStranded` reads the module's source and fails at each use of
