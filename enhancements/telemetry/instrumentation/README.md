@@ -38,7 +38,7 @@ scope here.
   `prometheus.DefaultRegisterer`, which nothing serves. Nothing fails.
   - network-services-operator: 13 metric families. Three production alerts
     can never fire ([network-services-operator#359][nso-359]).
-  - `milo-os/locations`: 10 gauges. Its metrics config looks copied from
+  - `milo-os/locations`: 11 metrics. Its metrics config looks copied from
     network-services-operator, bug included.
 - **Colliding labels, in every repository checked.**
   network-services-operator keys gauges by `{namespace, name}`, so they
@@ -63,8 +63,9 @@ The tests work before any migration. Migrating to the library is the fix
 they point to.
 
 One wrong key name can send internal operator logs into a customer's
-telemetry. The library reserves that key, so a metric using it panics at
-startup.
+telemetry. The library reserves that key: a metric using it panics at
+startup. Log keys are not checked, so the reservation documents the rule for
+logs rather than enforcing it.
 
 ## Design
 
@@ -122,7 +123,7 @@ Rules:
 | Repository | Work |
 |---|---|
 | network-services-operator | Build on the pending fix for #359, which moves the 13 families to the served registry, adds `project`, and updates the alerts. Swap its local checks for the library's, serve the extension server's metrics with `metrics.Handler`, key logs with `labels`, and adopt `logging`. Done when a scrape of its e2e environment shows the gateway metrics and `GatewayListenerCertUnusable` fires there for a broken certificate |
-| `milo-os/locations` | Add the test and confirm it names the 10 gauges. Migrate its metrics |
+| `milo-os/locations` | Add the test and confirm it names the 11 metrics. Migrate its metrics |
 
 ## Evaluation
 
