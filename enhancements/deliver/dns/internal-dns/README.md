@@ -74,10 +74,10 @@ in different VPCs.
 From a workload in the VPC, query an instance's IPv6 address with `dig`:
 
 ```console
-$ dig +short AAAA web-01-k7m2.datum.internal.
+$ dig +short AAAA web-01.datum.internal.
 2001:db8:123::10
 
-$ dig +search +short AAAA web-01-k7m2
+$ dig +search +short AAAA web-01
 2001:db8:123::10
 ```
 
@@ -195,12 +195,16 @@ Cached answers can persist until their DNS cache lifetime expires. Applications
 still need connection retries. Custom records do not receive automatic health
 checks.
 
+Applied records and resolver access remain available during control plane
+outages. Delayed health observations retain the last reported endpoint state.
+Confirmed health changes and deletions update answers when delivery resumes.
+
 ### Risks and mitigations
 
 - Accidental name exposure: require explicit zone associations and preserve VPC
   isolation, including when VPCs are connected.
-- Stale endpoint answers: expire outdated health reports and document update and
-  cache lifetimes.
+- Stale endpoint answers: document health update delays and cache lifetimes.
+  Product services explicitly withdraw endpoints after confirmed health changes.
 - Unclear availability: show assigned names, DNS readiness, and reasons for
   pending or unavailable names.
 

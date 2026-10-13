@@ -61,7 +61,8 @@ sharing requires a unique project qualifier or chosen domain. Naming and sharing
 authorization require a peering design; DNS continues to consume zone and context
 references without inspecting network resources.
 
-Each serving location has independent access, readiness, and expiration. Losing
+Each serving location has independent access and readiness. Explicit deletion
+withdraws access; unavailable observations retain the applied path. Losing
 access in one region does not remove the context or access elsewhere. Networking
 maps logical networks to regional VPCs; DNS treats the consumer identity as
 opaque. Regional resolver placement does not select application endpoints.
@@ -109,18 +110,19 @@ The names and answer addresses above are illustrative.
 
 Networking advertises resolver settings after DNS authorization and private
 endpoint programming are ready. The workload runtime applies those settings.
-The final well-known resolver addresses and supported client address families
-remain release decisions.
+Workloads use `fd53::53` with the `datum.internal` search domain.
 
 ## Publication and failure boundaries
 
 Product services publish addresses and eligibility through project DNS APIs.
 DNS does not inspect product APIs to infer health. Instance identity follows the
-instance lifecycle; service discovery withdraws unhealthy or expired endpoints.
+instance lifecycle; product services explicitly withdraw unhealthy endpoints.
+Unavailable health observations retain the last reported endpoint state.
 Cached answers can persist until their TTL expires.
 
-Queries use applied serving state without contacting a control plane. Lifetime
-and freshness checks prevent stale updates from restoring deleted access or
+Queries use applied serving state without contacting a control plane. Records
+and resolver access persist through control plane outages. Lifetime
+and version checks prevent stale updates from restoring deleted access or
 records. Unknown or unavailable private contexts fail closed. Answers and caches
 remain isolated; private names do not fall through to another context or public
 DNS. Resolving a name does not grant network access to its destination.
