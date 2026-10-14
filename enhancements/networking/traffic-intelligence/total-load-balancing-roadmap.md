@@ -4,6 +4,12 @@
 **Status:** Early definition  
 **Parent:** [Total Load Balancing](total-load-balancing.md)
 
+
+> **Note:** Phases referencing GSLB as a PowerDNS-based DNS steering layer
+> ("Jamie Tartt") are stale. That design has been superseded by
+> [Global Server Load Balancing](global-server-load-balancing/README.md).
+> This roadmap has not yet been revised against it, and the sequencing of
+> GSLB-dependent items should not be treated as current.
 ---
 
 The roadmap is organized around four phases, each building on the foundation established by the last. Phase 1 puts the core infrastructure in place — the signal distribution fabric, health monitoring, DDoS protection, and Compute location awareness in Envoy. Every subsequent phase adds signals and consumers: geo in Phase 2, path quality in Phase 3, and sovereignty and AI routing in Phase 4.
