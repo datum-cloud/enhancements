@@ -1,0 +1,33 @@
+@startuml looking-glass-containers
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+LAYOUT_TOP_DOWN()
+title Looking glass - Container view
+
+Person(customer, "Project member", "Runs a diagnostic from a chosen edge location")
+Container_Ext(client, "Portal / datumctl", "Web / CLI", "Creates sessions and displays live results")
+System_Boundary(project, "Project control plane") {
+    Container_Ext(project_api, "Project API", "Kubernetes API", "Serves LookingGlassSession and enforces project permissions")
+    Container(controller, "Looking glass controller", "Go", "Binds sessions to a cell, reflects status and records activity")
+}
+Container_Ext(karmada, "Karmada hub", "Federation control plane", "Delivers cell copies and returns status")
+System_Boundary(cell, "Selected edge cell") {
+    Container(endpoint, "Datum Connect endpoint", "Iroh", "Proxies authenticated client streams to the gateway")
+    Container(gateway, "Looking glass gateway", "Go", "Authenticates sessions, applies limits and streams observations")
+    Container_Ext(fabric_gateway, "Galactic fabric gateway", "gRPC", "Selects routers and runs bounded fabric queries")
+    Container_Ext(router_agents, "Fabric router agents", "gRPC", "Read routing state and send network probes")
+}
+
+Rel_R(customer, client, "Uses")
+Rel_D(client, project_api, "Creates session", "HTTPS")
+Rel_R(project_api, controller, "Session events", "Kubernetes API")
+Rel_R(controller, karmada, "Cell-bound session", "Kubernetes API")
+Rel_D(karmada, gateway, "Cell copy and status", "Kubernetes API")
+Rel_D(client, endpoint, "Live results", "Iroh / QUIC")
+Rel_R(endpoint, gateway, "Session stream", "WebSocket")
+Rel_R(gateway, fabric_gateway, "Diagnostic", "mTLS gRPC")
+Rel_R(fabric_gateway, router_agents, "Per-router query", "mTLS gRPC")
+
+@enduml
