@@ -4,11 +4,11 @@
   "source": "null",
   "elements": [
     {
-      "id": "status-notifications-title",
+      "id": "delivery-tracking-title",
       "type": "text",
       "x": 40,
       "y": -90,
-      "width": 419.46875,
+      "width": 603.328125,
       "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -22,16 +22,16 @@
       "frameId": null,
       "index": "a0",
       "roundness": null,
-      "seed": 528048323,
+      "seed": 110198252,
       "version": 2,
-      "versionNonce": 1922308415,
+      "versionNonce": 1598192479,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Status changes and digest emails",
-      "originalText": "Status changes and digest emails",
+      "text": "Delivery tracking: derive the stage, notify once",
+      "originalText": "Delivery tracking: derive the stage, notify once",
       "fontSize": 32,
       "fontFamily": 5,
       "textAlign": "left",
@@ -41,12 +41,12 @@
       "lineHeight": 1.25
     },
     {
-      "id": "staff",
+      "id": "status",
       "type": "rectangle",
       "x": 40,
-      "y": 80,
-      "width": 270,
-      "height": 120,
+      "y": 40,
+      "width": 280,
+      "height": 76,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "#ffd8a8",
@@ -61,31 +61,31 @@
       "roundness": {
         "type": 3
       },
-      "seed": 709224591,
+      "seed": 1248227185,
       "version": 2,
-      "versionNonce": 1128554033,
+      "versionNonce": 146583057,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "staff-t"
+          "id": "status-t"
         },
         {
           "type": "arrow",
-          "id": "staff->sync"
+          "id": "status->sync"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "staff-t",
+      "id": "status-t",
       "type": "text",
-      "x": 82.81249999999999,
-      "y": 100,
-      "width": 184.375,
-      "height": 80,
+      "x": 109.140625,
+      "y": 58,
+      "width": 141.71875,
+      "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -98,34 +98,34 @@
       "frameId": null,
       "index": "a2",
       "roundness": null,
-      "seed": 93340631,
+      "seed": 1156016100,
       "version": 2,
-      "versionNonce": 1214028127,
+      "versionNonce": 1899607935,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Staff update GitHub\nmove card on Enhancements\nproject, close issue,\nship milestone",
-      "originalText": "Staff update GitHub\nmove card on Enhancements\nproject, close issue,\nship milestone",
+      "text": "Enhancements project\nStatus field",
+      "originalText": "Enhancements project\nStatus field",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "staff",
+      "containerId": "status",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "sync",
+      "id": "subs",
       "type": "rectangle",
-      "x": 390,
-      "y": 80,
-      "width": 240,
-      "height": 120,
+      "x": 40,
+      "y": 140,
+      "width": 280,
+      "height": 76,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#d0bfff",
+      "backgroundColor": "#ffd8a8",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -137,34 +137,30 @@
       "roundness": {
         "type": 3
       },
-      "seed": 34815410,
+      "seed": 1994312341,
       "version": 2,
-      "versionNonce": 1817931793,
+      "versionNonce": 570344433,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "sync-t"
+          "id": "subs-t"
         },
         {
           "type": "arrow",
-          "id": "staff->sync"
-        },
-        {
-          "type": "arrow",
-          "id": "sync->post"
+          "id": "subs->sync"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "sync-t",
+      "id": "subs-t",
       "type": "text",
-      "x": 429.03906250000006,
-      "y": 120,
-      "width": 161.921875,
+      "x": 100.22265624999999,
+      "y": 158,
+      "width": 159.5546875,
       "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -178,34 +174,34 @@
       "frameId": null,
       "index": "a4",
       "roundness": null,
-      "seed": 392289871,
+      "seed": 1746659813,
       "version": 2,
-      "versionNonce": 761271679,
+      "versionNonce": 355757983,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Webhook -> sync worker\n(reconcile as backstop)",
-      "originalText": "Webhook -> sync worker\n(reconcile as backstop)",
+      "text": "Sub-issues\nsub_issues, issues events",
+      "originalText": "Sub-issues\nsub_issues, issues events",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "sync",
+      "containerId": "subs",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "post",
+      "id": "prs",
       "type": "rectangle",
-      "x": 710,
-      "y": 80,
-      "width": 240,
-      "height": 120,
+      "x": 40,
+      "y": 240,
+      "width": 280,
+      "height": 76,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#d0bfff",
+      "backgroundColor": "#ffd8a8",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -217,39 +213,31 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1296401683,
+      "seed": 819181331,
       "version": 2,
-      "versionNonce": 1752516081,
+      "versionNonce": 1514347985,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "post-t"
+          "id": "prs-t"
         },
         {
           "type": "arrow",
-          "id": "sync->post"
-        },
-        {
-          "type": "arrow",
-          "id": "post->changed"
-        },
-        {
-          "type": "arrow",
-          "id": "post->reads"
+          "id": "prs->sync"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "post-t",
+      "id": "prs-t",
       "type": "text",
-      "x": 774.671875,
-      "y": 110,
-      "width": 110.65625,
-      "height": 60,
+      "x": 114.6796875,
+      "y": 258,
+      "width": 130.640625,
+      "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -262,34 +250,34 @@
       "frameId": null,
       "index": "a6",
       "roundness": null,
-      "seed": 559338186,
+      "seed": 1131264398,
       "version": 2,
-      "versionNonce": 2027883935,
+      "versionNonce": 895689663,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Update Post\nstatus · milestone\nshipped",
-      "originalText": "Update Post\nstatus · milestone\nshipped",
+      "text": "Linked pull requests\npull_request events",
+      "originalText": "Linked pull requests\npull_request events",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "post",
+      "containerId": "prs",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "changed",
-      "type": "diamond",
-      "x": 1030,
-      "y": 65,
-      "width": 200,
-      "height": 150,
+      "id": "milestone",
+      "type": "rectangle",
+      "x": 40,
+      "y": 340,
+      "width": 280,
+      "height": 76,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#ffec99",
+      "backgroundColor": "#ffd8a8",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -299,41 +287,33 @@
       "frameId": null,
       "index": "a7",
       "roundness": {
-        "type": 2
+        "type": 3
       },
-      "seed": 845495685,
+      "seed": 478184767,
       "version": 2,
-      "versionNonce": 1385783249,
+      "versionNonce": 547437489,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "changed-t"
+          "id": "milestone-t"
         },
         {
           "type": "arrow",
-          "id": "post->changed"
-        },
-        {
-          "type": "arrow",
-          "id": "changed->notifier"
-        },
-        {
-          "type": "arrow",
-          "id": "changed->none"
+          "id": "milestone->sync"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "changed-t",
+      "id": "milestone-t",
       "type": "text",
-      "x": 1096.021484375,
-      "y": 117.5,
-      "width": 67.95703125,
-      "height": 45,
+      "x": 122.01953125,
+      "y": 358,
+      "width": 115.9609375,
+      "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -346,34 +326,34 @@
       "frameId": null,
       "index": "a8",
       "roundness": null,
-      "seed": 2005336041,
+      "seed": 1814089153,
       "version": 2,
-      "versionNonce": 1175060927,
+      "versionNonce": 568742879,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Status\nchanged?",
-      "originalText": "Status\nchanged?",
-      "fontSize": 18,
+      "text": "Release milestone\nclosed",
+      "originalText": "Release milestone\nclosed",
+      "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "changed",
+      "containerId": "milestone",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "notifier",
+      "id": "changelog",
       "type": "rectangle",
-      "x": 1310,
-      "y": 70,
-      "width": 290,
-      "height": 140,
+      "x": 40,
+      "y": 440,
+      "width": 280,
+      "height": 76,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#d0bfff",
+      "backgroundColor": "#ffd8a8",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -385,39 +365,31 @@
       "roundness": {
         "type": 3
       },
-      "seed": 2033193052,
+      "seed": 421654853,
       "version": 2,
-      "versionNonce": 2027896241,
+      "versionNonce": 356556177,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "notifier-t"
+          "id": "changelog-t"
         },
         {
           "type": "arrow",
-          "id": "changed->notifier"
-        },
-        {
-          "type": "arrow",
-          "id": "notifier->email"
-        },
-        {
-          "type": "arrow",
-          "id": "notifier->example"
+          "id": "changelog->sync"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "notifier-t",
+      "id": "changelog-t",
       "type": "text",
-      "x": 1389.30859375,
-      "y": 110,
-      "width": 131.3828125,
-      "height": 60,
+      "x": 110.00390625,
+      "y": 458,
+      "width": 139.9921875,
+      "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -430,34 +402,34 @@
       "frameId": null,
       "index": "aA",
       "roundness": null,
-      "seed": 42927400,
+      "seed": 963809062,
       "version": 2,
-      "versionNonce": 1979806175,
+      "versionNonce": 1389264895,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Queue for digest\nvoters + submitter\n+ merged submitters",
-      "originalText": "Queue for digest\nvoters + submitter\n+ merged submitters",
+      "text": "Changelog discussion\nreferences",
+      "originalText": "Changelog discussion\nreferences",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "notifier",
+      "containerId": "changelog",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "email",
+      "id": "sync",
       "type": "rectangle",
-      "x": 1680,
-      "y": 80,
-      "width": 230,
-      "height": 120,
+      "x": 420,
+      "y": 190,
+      "width": 260,
+      "height": 130,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#ffec99",
+      "backgroundColor": "#d0bfff",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -469,35 +441,51 @@
       "roundness": {
         "type": 3
       },
-      "seed": 756826802,
+      "seed": 2130508750,
       "version": 2,
-      "versionNonce": 2054053777,
+      "versionNonce": 1733870449,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "email-t"
+          "id": "sync-t"
         },
         {
           "type": "arrow",
-          "id": "notifier->email"
+          "id": "status->sync"
         },
         {
           "type": "arrow",
-          "id": "email->unsub"
+          "id": "subs->sync"
+        },
+        {
+          "type": "arrow",
+          "id": "prs->sync"
+        },
+        {
+          "type": "arrow",
+          "id": "milestone->sync"
+        },
+        {
+          "type": "arrow",
+          "id": "changelog->sync"
+        },
+        {
+          "type": "arrow",
+          "id": "sync->derive"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "email-t",
+      "id": "sync-t",
       "type": "text",
-      "x": 1732.55859375,
-      "y": 120,
-      "width": 124.8828125,
-      "height": 40,
+      "x": 491.11718750000006,
+      "y": 225,
+      "width": 117.765625,
+      "height": 60,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -510,34 +498,34 @@
       "frameId": null,
       "index": "aC",
       "roundness": null,
-      "seed": 1599019852,
+      "seed": 458438183,
       "version": 2,
-      "versionNonce": 1909841407,
+      "versionNonce": 1780230175,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Daily digest email\n(Milo notifications)",
-      "originalText": "Daily digest email\n(Milo notifications)",
+      "text": "Sync worker\nre-fetch the Post\nand its work items",
+      "originalText": "Sync worker\nre-fetch the Post\nand its work items",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "email",
+      "containerId": "sync",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "reads",
+      "id": "derive",
       "type": "rectangle",
-      "x": 710,
-      "y": 300,
-      "width": 240,
-      "height": 120,
+      "x": 780,
+      "y": 190,
+      "width": 280,
+      "height": 130,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#a5d8ff",
+      "backgroundColor": "#d0bfff",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -549,31 +537,39 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1738516356,
+      "seed": 891178728,
       "version": 2,
-      "versionNonce": 629032305,
+      "versionNonce": 1932602705,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "reads-t"
+          "id": "derive-t"
         },
         {
           "type": "arrow",
-          "id": "post->reads"
+          "id": "sync->derive"
+        },
+        {
+          "type": "arrow",
+          "id": "derive->store"
+        },
+        {
+          "type": "arrow",
+          "id": "derive->check"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "reads-t",
+      "id": "derive-t",
       "type": "text",
-      "x": 758.01171875,
-      "y": 330,
-      "width": 143.9765625,
-      "height": 60,
+      "x": 854.0234375,
+      "y": 215,
+      "width": 131.953125,
+      "height": 80,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -586,34 +582,34 @@
       "frameId": null,
       "index": "aE",
       "roundness": null,
-      "seed": 380076836,
+      "seed": 294284951,
       "version": 2,
-      "versionNonce": 747095583,
+      "versionNonce": 1975503935,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Read paths update\nRoadmap, Feedback\nfilters, datumctl, Patch",
-      "originalText": "Read paths update\nRoadmap, Feedback\nfilters, datumctl, Patch",
+      "text": "Derive stage\nrequested · planned ·\npicked-up · released\n· closed",
+      "originalText": "Derive stage\nrequested · planned ·\npicked-up · released\n· closed",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "reads",
+      "containerId": "derive",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "none",
+      "id": "store",
       "type": "rectangle",
-      "x": 1030,
-      "y": 320,
-      "width": 200,
-      "height": 80,
+      "x": 780,
+      "y": 420,
+      "width": 280,
+      "height": 100,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "#e9ecef",
+      "backgroundColor": "#ffec99",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -625,31 +621,31 @@
       "roundness": {
         "type": 3
       },
-      "seed": 694688599,
+      "seed": 1839592342,
       "version": 2,
-      "versionNonce": 357986129,
+      "versionNonce": 539056945,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "none-t"
+          "id": "store-t"
         },
         {
           "type": "arrow",
-          "id": "changed->none"
+          "id": "derive->store"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "none-t",
+      "id": "store-t",
       "type": "text",
-      "x": 1083.259765625,
-      "y": 348.75,
-      "width": 93.48046875,
-      "height": 22.5,
+      "x": 852.8984375,
+      "y": 450,
+      "width": 134.203125,
+      "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -662,72 +658,80 @@
       "frameId": null,
       "index": "aG",
       "roundness": null,
-      "seed": 1502538344,
+      "seed": 768008036,
       "version": 2,
-      "versionNonce": 1695001151,
+      "versionNonce": 1905912927,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Not included",
-      "originalText": "Not included",
-      "fontSize": 18,
+      "text": "Post.status.delivery\nstage · history · work",
+      "originalText": "Post.status.delivery\nstage · history · work",
+      "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "none",
+      "containerId": "store",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "example",
-      "type": "rectangle",
-      "x": 1310,
-      "y": 300,
-      "width": 290,
-      "height": 130,
+      "id": "check",
+      "type": "diamond",
+      "x": 1150,
+      "y": 180,
+      "width": 220,
+      "height": 150,
       "angle": 0,
-      "strokeColor": "#868e96",
-      "backgroundColor": "transparent",
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#ffec99",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "strokeStyle": "dashed",
+      "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
       "index": "aH",
       "roundness": {
-        "type": 3
+        "type": 2
       },
-      "seed": 863869115,
+      "seed": 1838894916,
       "version": 2,
-      "versionNonce": 273571121,
+      "versionNonce": 2123418897,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "example-t"
+          "id": "check-t"
         },
         {
           "type": "arrow",
-          "id": "notifier->example"
+          "id": "derive->check"
+        },
+        {
+          "type": "arrow",
+          "id": "check->queue"
+        },
+        {
+          "type": "arrow",
+          "id": "check->quiet"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "example-t",
+      "id": "check-t",
       "type": "text",
-      "x": 1375.726318359375,
-      "y": 327.5,
-      "width": 158.54736328125,
-      "height": 75,
+      "x": 1216.7490234375,
+      "y": 232.5,
+      "width": 86.501953125,
+      "height": 45,
       "angle": 0,
-      "strokeColor": "#868e96",
+      "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
@@ -738,31 +742,31 @@
       "frameId": null,
       "index": "aI",
       "roundness": null,
-      "seed": 1717573628,
+      "seed": 1535347086,
       "version": 2,
-      "versionNonce": 674630239,
+      "versionNonce": 159058047,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "\"Bare Metal Infrastructure\nservice is In progress\"\n\"... shipped in Hedy 2.0\"\n(from a changelog post)",
-      "originalText": "\"Bare Metal Infrastructure\nservice is In progress\"\n\"... shipped in Hedy 2.0\"\n(from a changelog post)",
-      "fontSize": 15,
+      "text": "Past highest\nnotified?",
+      "originalText": "Past highest\nnotified?",
+      "fontSize": 18,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "example",
+      "containerId": "check",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "unsub",
+      "id": "quiet",
       "type": "rectangle",
-      "x": 1680,
-      "y": 300,
-      "width": 230,
-      "height": 120,
+      "x": 1150,
+      "y": 420,
+      "width": 220,
+      "height": 100,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "#e9ecef",
@@ -777,31 +781,31 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1031081822,
+      "seed": 910373602,
       "version": 2,
-      "versionNonce": 634228497,
+      "versionNonce": 636945137,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "unsub-t"
+          "id": "quiet-t"
         },
         {
           "type": "arrow",
-          "id": "email->unsub"
+          "id": "check->quiet"
         }
       ],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false
     },
     {
-      "id": "unsub-t",
+      "id": "quiet-t",
       "type": "text",
-      "x": 1731.25732421875,
-      "y": 337.5,
-      "width": 127.4853515625,
-      "height": 45,
+      "x": 1206.97265625,
+      "y": 450,
+      "width": 106.0546875,
+      "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -814,34 +818,34 @@
       "frameId": null,
       "index": "aK",
       "roundness": null,
-      "seed": 1757133930,
+      "seed": 815943726,
       "version": 2,
-      "versionNonce": 316892799,
+      "versionNonce": 455319711,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "Unsubscribe link\nper Post or global",
-      "originalText": "Unsubscribe link\nper Post or global",
-      "fontSize": 18,
+      "text": "Tracker updates,\nno email",
+      "originalText": "Tracker updates,\nno email",
+      "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "unsub",
+      "containerId": "quiet",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "staff->sync",
-      "type": "arrow",
-      "x": 316,
-      "y": 140,
-      "width": 68,
-      "height": 0,
+      "id": "queue",
+      "type": "rectangle",
+      "x": 1460,
+      "y": 190,
+      "width": 290,
+      "height": 130,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "transparent",
+      "backgroundColor": "#d0bfff",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -851,48 +855,37 @@
       "frameId": null,
       "index": "aL",
       "roundness": {
-        "type": 2
+        "type": 3
       },
-      "seed": 164853945,
+      "seed": 495800348,
       "version": 2,
-      "versionNonce": 206275825,
+      "versionNonce": 1390116049,
       "isDeleted": false,
-      "boundElements": [],
-      "updated": 1791537528414,
-      "link": null,
-      "locked": false,
-      "points": [
-        [
-          0,
-          0
-        ],
-        [
-          68,
-          0
-        ]
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "queue-t"
+        },
+        {
+          "type": "arrow",
+          "id": "check->queue"
+        },
+        {
+          "type": "arrow",
+          "id": "queue->digest"
+        }
       ],
-      "lastCommittedPoint": null,
-      "startBinding": {
-        "elementId": "staff",
-        "focus": 0,
-        "gap": 6
-      },
-      "endBinding": {
-        "elementId": "sync",
-        "focus": 0,
-        "gap": 6
-      },
-      "startArrowhead": null,
-      "endArrowhead": "arrow",
-      "elbowed": false
+      "updated": 1792399382220,
+      "link": null,
+      "locked": false
     },
     {
-      "id": "sync->post",
-      "type": "arrow",
-      "x": 636,
-      "y": 140,
-      "width": 68,
-      "height": 0,
+      "id": "queue-t",
+      "type": "text",
+      "x": 1527.0234375,
+      "y": 225,
+      "width": 155.953125,
+      "height": 60,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -904,52 +897,35 @@
       "groupIds": [],
       "frameId": null,
       "index": "aM",
-      "roundness": {
-        "type": 2
-      },
-      "seed": 965867135,
+      "roundness": null,
+      "seed": 222026454,
       "version": 2,
-      "versionNonce": 1406156447,
+      "versionNonce": 2017735871,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "points": [
-        [
-          0,
-          0
-        ],
-        [
-          68,
-          0
-        ]
-      ],
-      "lastCommittedPoint": null,
-      "startBinding": {
-        "elementId": "sync",
-        "focus": 0,
-        "gap": 6
-      },
-      "endBinding": {
-        "elementId": "post",
-        "focus": 0,
-        "gap": 6
-      },
-      "startArrowhead": null,
-      "endArrowhead": "arrow",
-      "elbowed": false
+      "text": "Queue digest event\npicked-up · part-shipped\n· released · closed",
+      "originalText": "Queue digest event\npicked-up · part-shipped\n· released · closed",
+      "fontSize": 16,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "queue",
+      "autoResize": true,
+      "lineHeight": 1.25
     },
     {
-      "id": "post->changed",
-      "type": "arrow",
-      "x": 956,
-      "y": 140,
-      "width": 68,
-      "height": 0,
+      "id": "digest",
+      "type": "rectangle",
+      "x": 1460,
+      "y": 420,
+      "width": 290,
+      "height": 100,
       "angle": 0,
       "strokeColor": "#1e1e1e",
-      "backgroundColor": "transparent",
+      "backgroundColor": "#ffec99",
       "fillStyle": "solid",
       "strokeWidth": 2,
       "strokeStyle": "solid",
@@ -959,48 +935,33 @@
       "frameId": null,
       "index": "aN",
       "roundness": {
-        "type": 2
+        "type": 3
       },
-      "seed": 77526713,
+      "seed": 814883158,
       "version": 2,
-      "versionNonce": 1062190801,
+      "versionNonce": 1154857649,
       "isDeleted": false,
-      "boundElements": [],
-      "updated": 1791537528414,
-      "link": null,
-      "locked": false,
-      "points": [
-        [
-          0,
-          0
-        ],
-        [
-          68,
-          0
-        ]
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "digest-t"
+        },
+        {
+          "type": "arrow",
+          "id": "queue->digest"
+        }
       ],
-      "lastCommittedPoint": null,
-      "startBinding": {
-        "elementId": "post",
-        "focus": 0,
-        "gap": 6
-      },
-      "endBinding": {
-        "elementId": "changed",
-        "focus": 0,
-        "gap": 6
-      },
-      "startArrowhead": null,
-      "endArrowhead": "arrow",
-      "elbowed": false
+      "updated": 1792399382220,
+      "link": null,
+      "locked": false
     },
     {
-      "id": "changed->notifier",
-      "type": "arrow",
-      "x": 1236,
-      "y": 140,
-      "width": 68,
-      "height": 0,
+      "id": "digest-t",
+      "type": "text",
+      "x": 1561.2568359375,
+      "y": 447.5,
+      "width": 87.486328125,
+      "height": 45,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1012,54 +973,32 @@
       "groupIds": [],
       "frameId": null,
       "index": "aO",
-      "roundness": {
-        "type": 2
-      },
-      "seed": 79006002,
+      "roundness": null,
+      "seed": 948271662,
       "version": 2,
-      "versionNonce": 1840059071,
+      "versionNonce": 1753040095,
       "isDeleted": false,
-      "boundElements": [
-        {
-          "type": "text",
-          "id": "changed->notifier-label"
-        }
-      ],
-      "updated": 1791537528414,
+      "boundElements": [],
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "points": [
-        [
-          0,
-          0
-        ],
-        [
-          68,
-          0
-        ]
-      ],
-      "lastCommittedPoint": null,
-      "startBinding": {
-        "elementId": "changed",
-        "focus": 0,
-        "gap": 6
-      },
-      "endBinding": {
-        "elementId": "notifier",
-        "focus": 0,
-        "gap": 6
-      },
-      "startArrowhead": null,
-      "endArrowhead": "arrow",
-      "elbowed": false
+      "text": "Daily digest\nto followers",
+      "originalText": "Daily digest\nto followers",
+      "fontSize": 18,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "digest",
+      "autoResize": true,
+      "lineHeight": 1.25
     },
     {
-      "id": "changed->notifier-label",
-      "type": "text",
-      "x": 1260.00244140625,
-      "y": 130.625,
-      "width": 19.9951171875,
-      "height": 18.75,
+      "id": "status->sync",
+      "type": "arrow",
+      "x": 326,
+      "y": 78,
+      "width": 88,
+      "height": 177,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1071,32 +1010,49 @@
       "groupIds": [],
       "frameId": null,
       "index": "aP",
-      "roundness": null,
-      "seed": 1292474023,
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1763169842,
       "version": 2,
-      "versionNonce": 1567734961,
+      "versionNonce": 1552759953,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "yes",
-      "originalText": "yes",
-      "fontSize": 15,
-      "fontFamily": 5,
-      "textAlign": "center",
-      "verticalAlign": "middle",
-      "containerId": "changed->notifier",
-      "autoResize": true,
-      "lineHeight": 1.25
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          88,
+          177
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "status",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "sync",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
     },
     {
-      "id": "changed->none",
+      "id": "subs->sync",
       "type": "arrow",
-      "x": 1130,
-      "y": 221,
-      "width": 0,
-      "height": 93,
+      "x": 326,
+      "y": 178,
+      "width": 88,
+      "height": 77,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1111,17 +1067,12 @@
       "roundness": {
         "type": 2
       },
-      "seed": 1223699936,
+      "seed": 1804087742,
       "version": 2,
-      "versionNonce": 958030559,
+      "versionNonce": 1801408767,
       "isDeleted": false,
-      "boundElements": [
-        {
-          "type": "text",
-          "id": "changed->none-label"
-        }
-      ],
-      "updated": 1791537528414,
+      "boundElements": [],
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
       "points": [
@@ -1130,18 +1081,18 @@
           0
         ],
         [
-          0,
-          93
+          88,
+          77
         ]
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "changed",
+        "elementId": "subs",
         "focus": 0,
         "gap": 6
       },
       "endBinding": {
-        "elementId": "none",
+        "elementId": "sync",
         "focus": 0,
         "gap": 6
       },
@@ -1150,12 +1101,12 @@
       "elbowed": false
     },
     {
-      "id": "changed->none-label",
-      "type": "text",
-      "x": 1122.5,
-      "y": 258.125,
-      "width": 15,
-      "height": 18.75,
+      "id": "prs->sync",
+      "type": "arrow",
+      "x": 326,
+      "y": 278,
+      "width": 88,
+      "height": 23,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1167,32 +1118,49 @@
       "groupIds": [],
       "frameId": null,
       "index": "aR",
-      "roundness": null,
-      "seed": 1304069143,
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1142859761,
       "version": 2,
-      "versionNonce": 1180237457,
+      "versionNonce": 2042200689,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
-      "text": "no",
-      "originalText": "no",
-      "fontSize": 15,
-      "fontFamily": 5,
-      "textAlign": "center",
-      "verticalAlign": "middle",
-      "containerId": "changed->none",
-      "autoResize": true,
-      "lineHeight": 1.25
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          88,
+          -23
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "prs",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "sync",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
     },
     {
-      "id": "notifier->email",
+      "id": "milestone->sync",
       "type": "arrow",
-      "x": 1606,
-      "y": 140,
-      "width": 68,
-      "height": 0,
+      "x": 326,
+      "y": 378,
+      "width": 88,
+      "height": 123,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1207,12 +1175,12 @@
       "roundness": {
         "type": 2
       },
-      "seed": 262083856,
+      "seed": 1652040315,
       "version": 2,
-      "versionNonce": 648589055,
+      "versionNonce": 980080927,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
       "points": [
@@ -1221,18 +1189,18 @@
           0
         ],
         [
-          68,
-          0
+          88,
+          -123
         ]
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "notifier",
+        "elementId": "milestone",
         "focus": 0,
         "gap": 6
       },
       "endBinding": {
-        "elementId": "email",
+        "elementId": "sync",
         "focus": 0,
         "gap": 6
       },
@@ -1241,12 +1209,12 @@
       "elbowed": false
     },
     {
-      "id": "post->reads",
+      "id": "changelog->sync",
       "type": "arrow",
-      "x": 830,
-      "y": 206,
-      "width": 0,
-      "height": 88,
+      "x": 326,
+      "y": 478,
+      "width": 88,
+      "height": 223,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1261,12 +1229,12 @@
       "roundness": {
         "type": 2
       },
-      "seed": 1327990937,
+      "seed": 1428898565,
       "version": 2,
-      "versionNonce": 2025653361,
+      "versionNonce": 421661777,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
       "points": [
@@ -1275,18 +1243,18 @@
           0
         ],
         [
-          0,
-          88
+          88,
+          -223
         ]
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "post",
+        "elementId": "changelog",
         "focus": 0,
         "gap": 6
       },
       "endBinding": {
-        "elementId": "reads",
+        "elementId": "sync",
         "focus": 0,
         "gap": 6
       },
@@ -1295,12 +1263,12 @@
       "elbowed": false
     },
     {
-      "id": "email->unsub",
+      "id": "sync->derive",
       "type": "arrow",
-      "x": 1795,
-      "y": 206,
-      "width": 0,
-      "height": 88,
+      "x": 686,
+      "y": 255,
+      "width": 88,
+      "height": 0,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1315,12 +1283,66 @@
       "roundness": {
         "type": 2
       },
-      "seed": 1116606151,
+      "seed": 1525628970,
       "version": 2,
-      "versionNonce": 1087928095,
+      "versionNonce": 185621823,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528414,
+      "updated": 1792399382220,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          88,
+          0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "sync",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "derive",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "derive->store",
+      "type": "arrow",
+      "x": 920,
+      "y": 326,
+      "width": 0,
+      "height": 88,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aV",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1879228503,
+      "version": 2,
+      "versionNonce": 849238577,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
       "points": [
@@ -1335,12 +1357,12 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "email",
+        "elementId": "derive",
         "focus": 0,
         "gap": 6
       },
       "endBinding": {
-        "elementId": "unsub",
+        "elementId": "store",
         "focus": 0,
         "gap": 6
       },
@@ -1349,10 +1371,160 @@
       "elbowed": false
     },
     {
-      "id": "notifier->example",
+      "id": "derive->check",
       "type": "arrow",
-      "x": 1455,
-      "y": 216,
+      "x": 1066,
+      "y": 255,
+      "width": 78,
+      "height": 0,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aW",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1867759636,
+      "version": 2,
+      "versionNonce": 279993695,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792399382220,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          78,
+          0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "derive",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "check",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "check->queue",
+      "type": "arrow",
+      "x": 1376,
+      "y": 255,
+      "width": 78,
+      "height": 0,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aX",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 151611371,
+      "version": 2,
+      "versionNonce": 1461054481,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "check->queue-label"
+        }
+      ],
+      "updated": 1792399382220,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          78,
+          0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "check",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "queue",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "check->queue-label",
+      "type": "text",
+      "x": 1405.00244140625,
+      "y": 245.625,
+      "width": 19.9951171875,
+      "height": 18.75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aY",
+      "roundness": null,
+      "seed": 306219390,
+      "version": 2,
+      "versionNonce": 1050368383,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792399382220,
+      "link": null,
+      "locked": false,
+      "text": "yes",
+      "originalText": "yes",
+      "fontSize": 15,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "check->queue",
+      "autoResize": true,
+      "lineHeight": 1.25
+    },
+    {
+      "id": "check->quiet",
+      "type": "arrow",
+      "x": 1260,
+      "y": 336,
       "width": 0,
       "height": 78,
       "angle": 0,
@@ -1360,21 +1532,26 @@
       "backgroundColor": "transparent",
       "fillStyle": "solid",
       "strokeWidth": 2,
-      "strokeStyle": "dashed",
+      "strokeStyle": "solid",
       "roughness": 1,
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aV",
+      "index": "aZ",
       "roundness": {
         "type": 2
       },
-      "seed": 388907931,
+      "seed": 1122561203,
       "version": 2,
-      "versionNonce": 811945553,
+      "versionNonce": 243286513,
       "isDeleted": false,
-      "boundElements": [],
-      "updated": 1791537528414,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "check->quiet-label"
+        }
+      ],
+      "updated": 1792399382220,
       "link": null,
       "locked": false,
       "points": [
@@ -1389,12 +1566,103 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "notifier",
+        "elementId": "check",
         "focus": 0,
         "gap": 6
       },
       "endBinding": {
-        "elementId": "example",
+        "elementId": "quiet",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "check->quiet-label",
+      "type": "text",
+      "x": 1252.5,
+      "y": 365.625,
+      "width": 15,
+      "height": 18.75,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aa",
+      "roundness": null,
+      "seed": 281383721,
+      "version": 2,
+      "versionNonce": 1242681759,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792399382220,
+      "link": null,
+      "locked": false,
+      "text": "no",
+      "originalText": "no",
+      "fontSize": 15,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "check->quiet",
+      "autoResize": true,
+      "lineHeight": 1.25
+    },
+    {
+      "id": "queue->digest",
+      "type": "arrow",
+      "x": 1605,
+      "y": 326,
+      "width": 0,
+      "height": 88,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ab",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 753327194,
+      "version": 2,
+      "versionNonce": 1977932753,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1792399382220,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          88
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "queue",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "digest",
         "focus": 0,
         "gap": 6
       },

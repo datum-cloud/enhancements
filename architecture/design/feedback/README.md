@@ -23,6 +23,7 @@ latest-milestone: "v0.1"
 - [Status and Category Mapping](#status-and-category-mapping)
 - [Votes](#votes)
 - [Submissions and Staff Review](#submissions-and-staff-review)
+- [Delivery Tracking](#delivery-tracking)
 - [Notifications](#notifications)
 - [Clients](#clients)
 - [Staff Analytics](#staff-analytics)
@@ -82,7 +83,7 @@ server registered with Milo through an `APIService`, with custom storage.
 | **feedback-apiserver** | Serves `feedback.miloapis.com/v1alpha1`. `FeedbackSource` uses the standard etcd registry; everything else uses custom `rest.Storage` backed by Postgres. |
 | **feedback-webhook** | Public HTTPS endpoint for GitHub App webhooks. Verifies `X-Hub-Signature-256`, drops events for private repos, publishes to NATS JetStream. No other processing. |
 | **feedback-sync** | Consumes webhook events and runs periodic GraphQL reconciliation. Upserts posts, releases and changelog entries. The only component with GitHub write access: creates approved issues and mirrors vote totals. |
-| **feedback-controller** | Runs submission triage, computes embeddings, applies review outcomes, and builds digest emails. |
+| **feedback-controller** | Runs submission triage, computes embeddings, applies review outcomes, queues delivery tracking events, and builds digest emails. |
 | **feedback-mcp** | MCP server exposing feedback tools to Patch. |
 
 Backing services:
@@ -221,6 +222,28 @@ status:
   publicVoters:              # only users who opted in, max 10
     - displayName: Ada L.
       avatarURL: https://...
+  delivery:                  # see Delivery Tracking
+    stage: picked-up
+    highestNotified: picked-up
+    history:
+      - {stage: requested, at: "2026-09-30T14:12:00Z"}
+      - {stage: planned, at: "2026-10-02T09:00:00Z"}
+      - stage: picked-up
+        at: "2026-10-07T09:40:00Z"
+        cause: datum-cloud/compute#318 opened, closes datum-cloud/compute#311
+    work:
+      total: 5                 # sub-issues, or linked PRs if none
+      done: 3
+      items:
+        - kind: issue
+          ref: datum-cloud/compute#311
+          title: BMC inventory API
+          state: open
+          url: https://github.com/datum-cloud/compute/issues/311
+          pullRequests:
+            - {ref: datum-cloud/compute#318, state: open}
+      partShipped:
+        - {changelog: datum-cloud.datum.303, at: "2026-10-07T13:23:39Z"}
   lastSyncedAt: "2026-10-08T12:00:00Z"
 ```
 
@@ -241,7 +264,9 @@ spec:
     categories: [deliver]
     orgs: [datum-cloud, milo-os]
     votedByMe: false               # user context only
-  sort: top                        # top | newest | trending | relevance
+    followedByMe: false            # user context only, for My feedback
+    deliveryStage: []              # requested | planned | picked-up | released | closed
+  sort: top                        # top | newest | trending | relevance | recentlyChanged
   limit: 20
   continue: ""
   facets: [status, categories]
@@ -268,6 +293,8 @@ Sorts:
   over Datum votes and GitHub reactions. Updated on vote write and
   refreshed hourly.
 - `relevance`: default when `text` or `similarTo` is set.
+- `recentlyChanged`: latest `delivery.history` entry first. Used by My
+  feedback.
 
 `similarTo` embeds the text through the AI gateway and runs a pgvector
 nearest-neighbour search, blended with full-text rank. It drives the
@@ -435,12 +462,13 @@ status:
 - Organization projects: read/write on `datum-cloud` (write for the Votes
   field)
 - Discussions: read (changelog)
+- Pull requests: read (linked pull requests for delivery tracking)
 
 It replaces the app datum.net uses today once datum.net is migrated.
 
 **Webhooks.** `issues`, `label`, `issue_comment` (comment counts only),
-`projects_v2_item`, `milestone`, `discussion`, and `repository` (visibility
-changes). Events are published to a JetStream subject keyed by
+`sub_issues`, `projects_v2_item`, `milestone`, `discussion`, and `repository`
+(visibility changes). Events are published to a JetStream subject keyed by
 `org/repo/number` so events for one item are processed in order. Project
 item events arrive through the `datum-cloud` installation for issues in
 either org.
@@ -460,7 +488,9 @@ case it returns.
   included repos.
 - Every 30 minutes: 👍 sweep over tracked open posts, 100 issues per query
   (`reactions(content: THUMBS_UP) { totalCount }`). Reactor logins are only
-  fetched when a count changed.
+  fetched when a count changed. The same sweep refreshes work items for
+  posts in the planned and picked-up stages (see
+  [Delivery Tracking](#delivery-tracking)).
 - Nightly: full sweep of every included repo, removing posts that no longer
   match.
 - On demand: the `feedback.miloapis.com/resync-requested-at` annotation on a
@@ -553,24 +583,83 @@ The GitHub issue body never contains the submitter's identity, org, project,
 logs or attachments. A footer links to the submission in the staff portal,
 which only staff can open.
 
+## Delivery Tracking
+
+![Delivery tracking: inputs from GitHub derive a stage, and only a new highest stage queues a digest event](./diagrams/delivery-tracking.svg)
+
+*Every input re-derives the stage; only a stage past the highest one
+already announced is notified.*
+
+Each `Post` carries a delivery tracker in `status.delivery`: the current
+stage, its history, and the related work behind it.
+
+**Stages.** Ordered `requested` < `planned` < `picked-up` < `released`, with
+`closed` as a terminal stage. The stage is the highest one whose condition
+holds:
+
+| Stage | Reached when |
+| --- | --- |
+| `requested` | The post exists (Status not set, or Backlog). |
+| `planned` | Status is Planning or On Deck. |
+| `picked-up` | Status is In Progress, **or** any work item is in progress: a sub-issue is In Progress on the Enhancements project, has an open pull request that closes it, or is already closed as completed. |
+| `released` | Status is Done or the issue is closed as completed, **or** the post's release milestone is closed, **or** a `ChangelogEntry` links the post. |
+| `closed` | The issue is closed as not planned. |
+
+**Work items.** The related work behind a post:
+
+- **Sub-issues** of the post, from `Issue.subIssues` and
+  `subIssuesSummary`, one level deep. They can live in any repo in either
+  org.
+- **Linked pull requests**, from `closedByPullRequestsReferences` on the post
+  and on each sub-issue.
+
+Only public issues and pull requests are stored. Work in private repos is
+ignored entirely: not listed, not counted, and never used to derive a stage,
+so nothing about private work can leak through the tracker. `work.total` and
+`work.done` count sub-issues when there are any, otherwise linked pull
+requests.
+
+**Keeping it current.** The sync worker keeps an index of work item →
+post. The `sub_issues` webhook and `issues` events for a known work item
+re-derive the parent post straight away. Pull request state is not
+webhook-driven: the 30-minute sweep refreshes linked pull requests for posts
+in `planned` and `picked-up`. Subscribing to every `pull_request` event in
+both orgs would cost far more GitHub API calls than the extra freshness is
+worth, since followers hear about changes in a daily digest anyway.
+
+**Notify once.** `delivery.highestNotified` records the highest stage
+announced for the post. When the derived stage is past it, the controller
+queues a digest event for every follower and advances `highestNotified`.
+If the stage goes backwards (work paused, issue reopened), the tracker and
+`history` show it, but nothing is queued until the stage passes
+`highestNotified` again. `closed` is always announced once, even from
+`released`.
+
+**Part shipped.** When a `ChangelogEntry` links a work item rather than the
+post, and the post isn't `released`, the controller queues a `part-shipped`
+event once per changelog entry and records it in `work.partShipped`.
+
+**My feedback.** Clients build the list from two calls:
+
+- a `PostQuery` with `followedByMe: true` and `sort: recentlyChanged`;
+- the user's `Submission`s still in `PendingReview`, which aren't posts yet.
+
 ## Notifications
-
-![Status notifications: GitHub status change queued for a daily digest to followers](./diagrams/status-notifications.svg)
-
-*Changes are queued per follower and sent as a daily digest.*
 
 Followers get a **daily digest**, not one email per change.
 
-- When a followed post changes `status`, is added to a release, or is linked
-  from a new changelog entry, the controller appends an event to each
-  follower's pending queue in Postgres. Submission outcomes are queued the
-  same way for the submitter.
+- The controller appends events to each follower's pending queue in
+  Postgres: `picked-up`, `part-shipped`, `released` and `closed` from
+  delivery tracking, plus submission outcomes (`approved`, `merged`,
+  `rejected`) for the submitter.
 - Once a day the controller collapses each user's queue (one line per post,
-  latest status wins) and creates a single Milo `Email` from a feedback
+  latest event wins) and creates a single Milo `Email` from a feedback
   `EmailTemplate` (see [email
   integration](../../../enhancements/platform/email-integration/simple-email-sending/README.md)).
   Users with an empty queue get nothing.
-- Edits, label changes and comments are never queued.
+- Moving into `planned`, edits, label changes and comments are never queued.
+- Followers only get events raised after they started following; someone
+  who votes on an item that's already picked up just sees the tracker.
 - Every digest links to unfollow each post and to turn off feedback emails
   globally.
 
@@ -611,16 +700,19 @@ datumctl feedback show datum-cloud.enhancements.913
 datumctl feedback vote datum-cloud.enhancements.913
 datumctl feedback unvote datum-cloud.enhancements.913
 datumctl feedback submit --title "..." --body-file notes.md --attach err.log
-datumctl feedback submissions
+datumctl feedback mine
 ```
 
-`submit` runs a `similarTo` query first and asks whether a match covers it.
+`mine` lists submissions under review and every followed post with its
+delivery stage and last change. `submit` runs a `similarTo` query first and
+asks whether a match covers it.
 Context includes the datumctl version and active org and project.
 
 **Patch.** `feedback-mcp` exposes `feedback__search` (including
 `similarTo`), `feedback__get`, `feedback__vote`, `feedback__unvote`,
 `feedback__submit` (always confirmed by the user in chat) and
-`feedback__my_submissions`.
+`feedback__mine`, which answers "what's happening with my requests?" from
+the delivery tracker.
 
 `CapabilityBinding`s are per project, but feedback belongs to the user. We
 register feedback as a platform service entitled for every project so a
@@ -661,8 +753,9 @@ Matches the [product rollout][product]:
    sync worker, `Post`, `PostQuery`, `Release`, `ChangelogEntry`. datum.net
    pages move to the service behind a flag, side by side with the old
    code, then its GitHub integration is removed.
-2. **Vote.** `Vote`, `Subscription`, 👍 sweep and dedupe, Votes field
-   mirroring, website login gate, daily digest, avatar opt-in.
+2. **Vote and track.** `Vote`, `Subscription`, 👍 sweep and dedupe, Votes
+   field mirroring, website login gate, delivery tracking and work items,
+   My feedback, daily digest, avatar opt-in.
 3. **Submit.** `Submission`, attachments, `similarTo`, triage, staff review
    queue, issue creation on approval, website submit form.
 4. **Everywhere.** Portal panel, `datumctl feedback`, Patch MCP tools, staff
@@ -685,7 +778,9 @@ does.
 - Reconcile duration, items changed and errors per source.
 - GitHub rate limit remaining per installation.
 - Review queue size and age of the oldest pending submission.
-- Digest emails created and failed.
+- Digest events queued by type, and digest emails created and failed.
+- Delivery stage transitions per day, and posts whose work items failed to
+  refresh.
 - API latency and errors per resource, especially `PostQuery`.
 
 Alerts: reconcile failing three runs in a row, rate limit under 10%, oldest
@@ -709,7 +804,9 @@ Postgres instance is enough for the foreseeable future. `similarTo` is the
 most expensive call (an embedding plus a vector search), so clients debounce
 it and the apiserver rate limits it per user. The GitHub GraphQL budget
 (at least 5,000 points per hour per installation) comfortably covers the
-reconcile and sweep schedule.
+reconcile and sweep schedule, including work items: only posts in `planned`
+or `picked-up` (tens, not hundreds) are swept for sub-issues and pull
+requests.
 
 **Troubleshooting.**
 
