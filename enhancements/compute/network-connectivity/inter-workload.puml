@@ -1,0 +1,19 @@
+@startuml inter-workload
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+System_Boundary(region_a, "Region A - Worker Node") {
+    Container(vm_a, "Workload A", "Function", "API handler")
+}
+
+System_Ext(gvpc, "Galactic VPC", "SRv6-based overlay providing encrypted connectivity between all attached workloads")
+
+System_Boundary(region_b, "Region B - Worker Node") {
+    Container(vm_b, "Workload B", "Database", "Managed data store")
+}
+
+Rel_R(vm_a, gvpc, "Sends packet", "Private IP via network interface")
+Rel_R(gvpc, vm_b, "Delivers packet", "Routed via SRv6 segment list")
+
+SHOW_LEGEND()
+@enduml
