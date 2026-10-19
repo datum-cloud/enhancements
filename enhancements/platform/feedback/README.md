@@ -15,7 +15,7 @@ latest-milestone: "v0.1"
   - [Where it shows up](#where-it-shows-up)
   - [Browse and upvote](#browse-and-upvote)
   - [Share feedback](#share-feedback)
-  - [Stay in the loop](#stay-in-the-loop)
+  - [Delivery tracker](#delivery-tracker)
   - [Staff review and insights](#staff-review-and-insights)
   - [Product rules](#product-rules)
 - [Rollout](#rollout)
@@ -61,8 +61,8 @@ service means one experience and one set of data.
 - Users can share feedback from the website, portal, datumctl or Patch, and
   are shown similar existing items first so they can upvote instead.
 - Every submission is reviewed by Datum staff before anything is public.
-- Users hear back when something they voted for or submitted changes status,
-  ships, or is declined.
+- Users can track everything they've voted for or submitted, and hear back
+  when work on it is picked up, when it's released, or if it's declined.
 - Staff can see who is asking for what, by user and organization.
 - The website's Releases, Roadmap, Changelog and Feedback pages are built on
   this service, replacing the website's own GitHub integration.
@@ -91,7 +91,7 @@ service means one experience and one set of data.
 | --- | --- |
 | **datum.net** | Releases, Roadmap, Changelog and Feedback pages per the Figma. Browse without signing in; sign in to vote or submit. |
 | **Cloud portal** | A feedback widget available on every page. Organization, project, page and recent errors are attached automatically. Browse and vote in place. |
-| **datumctl** | `datumctl feedback search`, `show`, `vote` and `submit`. |
+| **datumctl** | `datumctl feedback search`, `show`, `vote`, `submit` and `mine`. |
 | **Patch** | When a user says something is missing or broken, Patch searches existing feedback, offers to upvote a match, or drafts a submission for the user to confirm. |
 | **Staff portal** | Review queue for submissions, and insight into who is asking for what. |
 
@@ -140,21 +140,45 @@ Content comes from three places on GitHub:
 
 Nothing a user submits is ever published automatically.
 
-### Stay in the loop
+### Delivery tracker
 
-![Status changes reach every surface and email followers](./diagrams/stay-in-the-loop.svg)
+![Stages from requested to released, with related work and notifications](./diagrams/delivery-tracker.svg)
 
-People who voted for or submitted an item follow it. Updates arrive as a
-digest email that covers everything that changed since the last one, so a
-busy week of planning doesn't mean a flood of emails. An item is included
-when:
+Every item shows where it is on the way to users, like a parcel tracker.
+Anyone can see an item's tracker; signed-in users also get one view of
+everything they follow.
 
-- the item changes status (for example, moves to In progress);
-- it ships in a release or is referenced in a changelog post;
-- their submission is approved, merged or declined.
+| Stage | What it means | Followers told? |
+| --- | --- | --- |
+| Under review | A submission waiting for staff (only the submitter sees this) | Outcome only |
+| Requested | It's on the board: someone asked for it | No |
+| Planned | On the roadmap: Planning or On deck | No |
+| Picked up | Work has started on the item or any piece of it | Yes |
+| Released | Shipped in a release or a changelog post | Yes |
+| Closed | Won't be built, with a reason | Yes |
 
-Edits, label changes and GitHub comments aren't included. Every digest links
-to unfollow an item or all feedback updates.
+**Related work.** Bigger items are usually split into smaller pieces of
+work, often in other repos: GitHub sub-issues and the pull requests that
+close them. The tracker lists the public ones with their state ("3 of 5
+done") and links to each, so users can see progress between Picked up and
+Released. When a changelog post ships one piece before the whole item is
+done, followers get a "part of this shipped" update that links to the post.
+
+**Who follows.** Everyone who voted for an item, everyone whose submission
+was approved as it or merged into it, and anyone who followed it by hand.
+
+**How they hear.** Tracker updates go in the daily digest email, alongside
+submission outcomes. Each stage is announced once: if work pauses and
+starts again, the tracker shows it but nobody is emailed twice. Edits,
+label changes and GitHub comments are never sent. Every digest links to
+unfollow an item or all feedback updates.
+
+**My feedback.** Signed-in users see everything they follow in one list,
+with each item's stage and what changed last:
+
+- a My feedback page on datum.net and in the cloud portal;
+- `datumctl feedback mine`;
+- Patch, when asked "what's happening with my requests?".
 
 ### Staff review and insights
 
@@ -183,7 +207,10 @@ by demand where they already plan.
   shown.
 - **Statuses**: None (not yet triaged), Backlog, Planning, On deck, In
   progress, Shipped, Closed. Submissions also have Under review, Merged and
-  Declined.
+  Declined. The delivery tracker groups these into the stages above.
+- **Related work** only shows public issues and pull requests. Work in
+  private repos still moves the tracker through the item's own status but
+  isn't listed or counted.
 - **Categories** come from GitHub labels: Build, Deliver, Connect, Platform,
   Infrastructure, and AX/DX/UX on changelog posts. An Infrastructure label
   doesn't exist yet and needs adding.
@@ -194,7 +221,8 @@ by demand where they already plan.
 
 1. **Read.** Roadmap, Releases, Changelog and Feedback lists on datum.net,
    from both orgs, replacing the website's direct GitHub integration.
-2. **Vote.** Upvoting, login gate, following and email updates.
+2. **Vote and track.** Upvoting, login gate, following, the delivery tracker
+   with related work, My feedback, and digest emails.
 3. **Submit.** Similar-feedback suggestions, submissions and the staff review
    queue.
 4. **Everywhere.** Portal widget, datumctl commands, Patch, staff insights.
