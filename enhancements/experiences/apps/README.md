@@ -90,16 +90,17 @@ project while retaining its own deployment and deletion controls.
 An author develops and tests an app recipe in a project. They can start from a
 draft template or derive a draft from a working App revision, then choose which
 values become inputs. Publishing validates the recipe and creates an immutable
-template version owned by the organization. Datum uses the same path to
-publish platform-owned curated versions. A published template keeps the source
-project and revision as provenance, but installations depend only on the
-published version. Project-specific values and secret contents never enter the
-published template.
+template version discoverable through the platform, attributed to the publishing
+organization. Datum uses the same path for curated versions. A published
+template keeps the source project and revision as provenance, but installations
+depend only on the published version. Project-specific values and secret
+contents never enter the published template.
 
-One discovery experience combines Datum-curated templates with those published
-by the customer's organization. It shows the publisher, version, required
-services and permissions, example outputs, and lifecycle state. Project drafts
-remain visible only to their authors; other projects discover published
+One platform discovery experience shows published templates allowed by the
+caller's access, including Datum-curated and organization-published versions.
+It shows the publisher, version, required services and permissions, example
+outputs, and lifecycle state. Project drafts remain visible only to their
+authors; other projects discover published
 versions. An organization can manage its own publications without maintaining
 a separate catalog resource. Publishing a new version does not change existing
 installations.
@@ -171,11 +172,13 @@ one, subject to that service's availability and permissions.
 
 ### API and ownership contract
 
-The proposed API includes immutable `AppTemplate` versions, a project-scoped
-`App` installation, side-effect-free `AppPlan` previews, and immutable
-`AppRevision` history. Templates declare the resources they create or reference,
-typed inputs and outputs, and required services. A plan shows the expected
-resource changes and available cost estimates before the App is applied.
+The proposed API stores immutable published `AppTemplate` versions at Platform
+scope, with publisher identity and visibility enforced on discovery and use.
+It includes a project-scoped `App` installation, side-effect-free `AppPlan`
+previews, and immutable `AppRevision` history. Templates declare the resources
+they create or reference, typed inputs and outputs, and required services. A
+plan shows expected resource changes and available cost estimates before the
+App is applied.
 
 An App owns only resources it creates. Customers change those resources through
 the App while it is installed; existing referenced resources remain under their

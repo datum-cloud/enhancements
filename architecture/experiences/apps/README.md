@@ -12,20 +12,21 @@ API group does not require its implementation to live in the `milo-os/milo`
 repository. The Apps service and schemas remain owned by `datum-labs/apps` and
 are served through Milo's normal service API and discovery integration. Names
 and field shapes below are for review; service-specific manifests still use
-their native APIs. Authoring begins in a project. Published `AppTemplate`
-versions have a publisher scope: an organization or Datum's platform scope.
-Apps and plans live in a project. One discovery API lists platform-published
-versions and versions published by the caller's organization, filtered by
-visibility and authorization; it does not search every project or require an
-`OrganizationCatalog` resource. A project resolves a curated version without
-an editable copy in its organization. Authorization to use a template is
-checked when planning and deploying.
+their native APIs. Authoring begins in a project. Every published
+`AppTemplate` version is stored and discoverable through the Platform context.
+Its `publisherRef` identifies Datum or an organization; publisher identity is
+metadata and authorization, not a second API scope. Apps and plans live in a
+project. The Platform list and get APIs filter published versions by visibility
+and caller authorization, without searching projects or creating an
+`OrganizationCatalog` resource. A project resolves a published version by its
+qualified identity. Authorization to use it is checked when planning and
+deploying.
 
 | Resource | Purpose |
 | --- | --- |
 | `AppTemplateDraft` | Editable recipe in an authoring project; supports preview and test installations there. |
-| `AppPublication` | Project-scoped request to validate an exact draft revision and publish an immutable version under an authorized publisher scope. |
-| `AppTemplate` | Immutable, published recipe version. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
+| `AppPublication` | Project-scoped request to validate an exact draft revision and publish an immutable version in Platform context for an authorized publisher. |
+| `AppTemplate` | Platform-scoped immutable published version. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
 | `App` | Desired installation: template reference and input values. Its status reports the observed deployment. |
 | `AppPlan` | Side-effect-free preview of a proposed App create or update. Creating a plan never enables services or creates components. |
 | `AppRevision` | Immutable record of an accepted App spec, used for history and rollback. It stores references rather than secret values. |
@@ -40,19 +41,25 @@ it directly or derive it from an App's accepted revision, then replace
 project-specific values with typed inputs and identify references that
 installers must supply. The draft can be planned and installed for testing only
 in its source project. An `AppPublication` names the exact draft revision,
-publisher scope, family, and version. Publishing checks the author's rights in
-the source project and publisher scope, target API schemas, bindings, required
-services, referenced-resource rules, and the absence of embedded credentials.
-It then stores an immutable published snapshot. A live App or its resource
+publisher identity, visibility, family, and version. Publishing checks the
+author's rights in the source project and publisher organization, target API
+schemas, bindings, required services, referenced-resource rules, and the
+absence of embedded credentials. It then stores an immutable published snapshot
+in Platform context. A live App or its resource
 state is never the template's ongoing source of truth.
 
 The published version records source project and revision, publisher identity,
 content digest, compatibility requirements, and lifecycle state. The discovery
 API exposes these along with required permissions, inputs, and outputs.
-Project drafts are private to their project; organization versions are visible
-to authorized projects in that organization; Datum versions are visible where
-the required services are available. A template reference includes publisher
-scope and immutable version identity, so equal family names cannot collide.
+Project drafts are private to their project. Platform discovery filters
+published versions by visibility, publisher policy, and service availability;
+private organization versions are visible only to authorized callers in that
+organization. List, get, plan, and install must enforce the same visibility
+rules so direct lookup cannot bypass discovery filtering. A template reference
+includes publisher identity and immutable version identity, so equal family
+names cannot collide. The service assigns a unique Platform object name from
+that qualified identity; consumers do not infer publisher identity from a
+display name.
 Deprecation hides a version from recommended discovery while existing pinned
 Apps continue to work. Emergency revocation blocks new installs and upgrades;
 existing installations retain the snapshot needed for safe reconciliation,
@@ -74,6 +81,10 @@ kind: AppTemplate
 metadata:
   name: web-api-v1
 spec:
+  publisherRef:
+    kind: Platform
+    name: datum
+  visibility: Public
   family: web-api
   version: 1.0.0
   inputs:
