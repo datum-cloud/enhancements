@@ -86,7 +86,9 @@ flow, with dependencies and price implications shown before deployment.
    version after reviewing the resulting plan. Revert to a prior successful
    version when an update fails.
 5. **Delete:** Preview what will be removed. App-owned resources are deleted;
-   referenced resources and shared service entitlements are retained.
+   referenced resources and shared service entitlements are retained. Choose
+   **keep resources** before deletion to graduate owned resources to direct
+   management after the App installation is gone.
 
 For example, a team selects **Web API**, chooses an image and domain, and
 deploys. The app creates a Workload and route, connects the route to the chosen
@@ -105,7 +107,8 @@ one, subject to that service's availability and permissions.
 - Validate inputs and permissions, show a plan, reconcile created resources,
   and expose partial failure and retry at the component level.
 - Record app ownership on created resources so updates and deletion can
-  distinguish them from referenced or manually created resources.
+  distinguish them from referenced or manually created resources, and prevent
+  direct changes while the App manages them.
 
 ### Success measures
 
@@ -115,6 +118,8 @@ one, subject to that service's availability and permissions.
   resource for diagnosis.
 - Customers can preview and complete an app update or deletion without losing
   referenced resources.
+- Customers can keep an App's resources when removing it, then manage those
+  resources directly with no period of simultaneous App and customer control.
 - Track deployment completion, time to first healthy endpoint, failed steps,
   template reuse, and update or rollback rates.
 
@@ -219,6 +224,7 @@ metadata:
 spec:
   templateRef:
     name: web-api-v1
+  uninstallPolicy: Delete # Set to Retain before deleting to keep owned resources.
   inputs:
     image:
       value: registry.example.com/orders@sha256:...
@@ -256,8 +262,8 @@ The app controller reports `status.observedGeneration`, the resolved template
 version, conditions (`Accepted`, `Progressing`, `Ready`), per-component
 resource references and conditions, and declared outputs such as the hostname. A
 condition identifies the failed component and its actionable reason. Created
-resources carry an app owner reference or equivalent cross-service ownership
-record; referenced resources are never adopted.
+resources carry a protected App installation UID marker and appear in the App's
+inventory; referenced resources are never adopted.
 
 To preview a change, a client creates an `AppPlan` with `spec.app` containing
 the proposed App name and spec. The plan compares it with any existing App of
@@ -278,14 +284,27 @@ components after a deletion preview; existing referenced resources and shared
 service entitlements remain. Native resource admission, permissions, and
 service-specific safety checks still apply to every generated change.
 
+`spec.uninstallPolicy` defaults to `Delete`. An owner can change it to `Retain`
+after reviewing a plan that lists every resource to keep, then delete the App.
+The App is the installation: there is no separate installation object to leave
+behind. Retained resources become directly editable only after that App has
+been removed and their ownership markers have been released. A failed release
+shows progress and retries; it never silently grants direct control.
+
 ### Implementation approach
 
 Build Apps as a control-plane service that registers the APIs above with Milo
 and reconciles project Apps through existing Datum service APIs. It does not run
 application traffic or replace the Workload, Networking, DNS, or managed-service
-controllers. The managed service pattern
-provides the model for watching project resources and reporting status across
-control planes.
+controllers. Milo's [multicluster runtime provider](https://github.com/milo-os/milo/blob/main/pkg/multicluster-runtime/milo/provider.go)
+provides project discovery and per-project clients and caches. It watches
+ready Projects through the core API and connects to their project control
+planes; internal deployments can instead watch ready ProjectControlPlanes and
+use service addresses. The Apps controller uses the mode appropriate to its
+deployment, scopes each reconciliation to one project, and disengages when a
+project becomes unavailable. Cluster engagement must run on every replica,
+using Milo's `WithoutAutoStart` and `EngageAlways` wiring until the upstream
+leader-election issue is fixed.
 
 The service has three parts:
 
@@ -324,18 +343,85 @@ policy may still deny sensitive kinds or cross-project
 references; those are authorization decisions, not a fixed list of app-capable
 resources.
 
-Each generated resource gets a stable name and an App identity label. The App
-keeps an inventory of created resource identities so it can detect drift and
-clean up after partial failures. Where resources live in another control plane,
-that inventory and a finalizer provide ownership; a Kubernetes owner reference
-alone cannot cross control-plane boundaries. Use server-side apply with a
-dedicated field manager so the App controller owns only template-managed fields.
-Changes to those fields are reconciled back to the App spec; other native fields
-remain available to service-specific tooling. Referenced resources are checked
-for access and readiness but never adopted or deleted.
+Each generated resource gets a stable name and a protected owner marker
+containing the App's project and immutable UID. The App stores an inventory of
+component GVK, name, namespace, and resource UID so it can detect drift, name
+reuse, and partial failures. The marker and inventory must agree before an
+update or deletion. On restart, the controller also discovers marked resources
+to recover a create that succeeded before its inventory write. A Kubernetes
+owner reference alone cannot establish ownership across control planes. Use
+server-side apply with a dedicated field
+manager for the desired fields; field ownership does not authorize direct
+customer edits while the App manages the resource. Referenced resources are
+checked for access and readiness but never marked, adopted, or deleted.
 
-Deletion runs the graph in reverse dependency order and keeps the App finalizer
-until owned resources are removed or a clear intervention condition is set.
+#### Ownership protection
+
+One App installation owns a resource at a time. The controller refuses to
+create over an existing unmarked resource or one marked by a different App.
+Future adoption of an existing resource requires a separate, explicit transfer
+flow; it is not part of the first release. Only dedicated Apps controller and
+release identities may create or remove an owner marker. Project users,
+including project admins, cannot update or delete a marked resource directly;
+they update the App instead.
+Normal status updates and necessary service-controller finalizer writes must
+continue through narrowly scoped subresource or service-identity rules. No
+general exception for privileged project users or field managers is allowed.
+
+Enforce this at the project API's admission boundary, after authentication and
+authorization, for every supported component kind. Check the old object on
+update and delete so a client cannot strip the marker in the same request.
+Reject marker forgery on create and marker changes by other identities. Give
+the Apps controller a dedicated credential with scoped permissions; customers
+must not be able to impersonate it. Keep a project-level admission guard
+active even when new App installations are disabled, or existing resources
+would become unprotected.
+
+A shared CEL `ValidatingAdmissionPolicy` and `Deny` binding could make the
+common marker and caller checks local to each API server, with constant policy
+count per project rather than one policy per App or component. However,
+[Milo currently exposes admissionregistration resources only in Platform
+context](https://github.com/milo-os/milo/blob/main/config/discovery/core/discovery-context-policy.yaml),
+and [its project control planes are not seeded with
+policies](https://github.com/milo-os/milo/blob/main/internal/apiserver/admission/plugin/emailverification/admission.go).
+Enabling the plugin alone therefore does not protect project writes. Start
+with a small Milo admission guard on project API servers, or first add reliable
+per-project policy bootstrap and restricted policy administration. A VAP rollout
+must prove policy availability before the API accepts App ownership, fail
+closed when policy distribution fails, and measure admission latency and policy
+sync at project scale. CEL can inspect the request and old object but cannot
+look up the live App, so the controller remains responsible for the ownership
+inventory and release state. Recheck any component APIs that bypass Milo's
+project admission path before allowing them in templates.
+
+#### Graduation and removal
+
+There are two deletion outcomes, shown in the App plan:
+
+1. **Delete resources (default):** The App finalizer deletes owned components
+   in reverse dependency order, verifies their resource UIDs, and then removes
+   the installation. Referenced resources and shared entitlements stay.
+2. **Keep resources:** The user first sets `spec.uninstallPolicy: Retain` and
+   reviews the retained inventory, then deletes the App. The App controller
+   freezes reconciliation, persists an `AppRelease` record with the exact
+   inventory, and removes the App finalizer. The release worker waits until the
+   App UID is absent, then clears owner markers only on matching resource UIDs.
+   It records per-resource progress and retries failures. A resource remains
+   protected until its marker is cleared, and an incomplete release is visible
+   for repair. The release record is removed only after all resources are free.
+
+The release worker must not apply App templates. This ordering ensures that a
+user can take over a resource only after deleting the managing installation;
+there is no dual ownership during a partial release. A new App cannot claim a
+marked resource. Direct edits and deletes are denied throughout the handoff
+until each resource is released. The release record is durable and separate
+from the deleted App so retries survive controller restarts and App garbage
+collection. Retaining a stateful component keeps its data but does not promise
+the App's former readiness or connectivity after graduation.
+
+Default deletion runs the graph in reverse dependency order and keeps the App
+finalizer until owned resources are removed or a clear intervention condition
+is set.
 Shared service entitlements remain enabled. Rollback selects a prior successful
 revision and reconciles its desired spec; it cannot undo external side effects
 or stateful data changes. A failed rollout preserves the previous revision
@@ -347,9 +433,11 @@ record and exposes exactly which component needs attention.
    Workload, an existing Gateway, and an HTTP route. Ship `AppTemplate`, `App`,
    and a shared planner through API and CLI before adding a template gallery.
    Resolve the Workload-to-route backend contract with Networking first.
-2. **Safe lifecycle:** Add plans, component status, deletion, immutable
-   revisions, and rollback. Verify partial failure, retry, drift, permissions,
-   and preservation of referenced resources in end-to-end tests.
+2. **Safe lifecycle:** Add ownership admission, plans, component status,
+   deletion, retention and release, immutable revisions, and rollback. Verify
+   direct update/delete denial, marker forgery, status and finalizer exceptions,
+   name reuse, partial failure, retry, drift, and preservation of referenced
+   resources in end-to-end tests.
 3. **Broader composition:** Allow organization-owned templates after publishing
    validation is proven. Add richer readiness, outputs, and cost estimates as
    services publish App capability contracts.
@@ -366,6 +454,9 @@ component resources.
   depends on traffic?
 - Which networking resource should an HTTPRoute target for a Workload component,
   and what output should that component expose to the template?
+- Can project policy bootstrap and administration meet fail-closed availability
+  and latency targets, allowing the ownership guard to move from a Milo plugin
+  to one shared validating admission policy and binding per project?
 
 ## Production Readiness Review Questionnaire
 
@@ -401,10 +492,14 @@ depend on service-published capability contracts.
 
 ### Scalability
 
-Apps add four API types and API calls proportional to their component count.
-Bound template size and plan work, rate-limit reconciliation per project, and
-watch only the resources needed by active Apps. Measure controller work queue
-depth and API request rates as adoption grows.
+Apps add four customer-facing API types, an internal release record, and API
+calls proportional to component count. Bound template size and plan work,
+rate-limit reconciliation per project, and restrict per-project caches to
+needed resource kinds. Milo's provider currently registers project control
+planes serially; measure project engagement time, memory, watch count, and API
+request rates before expanding adoption. Ownership admission must use request
+metadata and identity without per-write App lookups. Measure deny rate and
+latency separately from reconciliation work.
 
 ### Troubleshooting
 
@@ -417,6 +512,8 @@ were changed. Operators can inspect the linked resource in its owning service.
 
 - 2026-10-11: Initial provisional product proposal.
 - 2026-10-13: API and implementation approach revised; product named Apps.
+- 2026-10-20: Added Milo multicluster architecture, ownership admission, and
+  graduation after installation removal.
 
 ## Drawbacks
 
@@ -433,6 +530,7 @@ meaningful health or cost signals without an additional capability contract.
 
 ## Infrastructure Needed (Optional)
 
-An Apps API and controller, storage for templates, Apps, plans, and revisions,
-and project-scoped service identity are required. Existing services continue to
-own their runtimes and data planes.
+An Apps API and controller, storage for templates, Apps, plans, revisions, and
+release records, project-scoped service identity, and project API ownership
+admission are required. Existing services continue to own their runtimes and
+data planes.
