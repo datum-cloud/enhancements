@@ -174,7 +174,6 @@ spec:
   outputs:
     - name: hostname
       type: string
-      exportable: true
       fromInput: hostname
 ```
 
@@ -188,9 +187,9 @@ resolved value's type, such as `string`; the App input supplies a literal
 `value`, an in-project `resourceRef`, or an `appRef` where its declared type
 permits it. An `appRef` identifies a producing project, App UID, and output. A
 template may restrict which source forms an input accepts. The producer's
-template declares the output type and whether it is exportable, while the
-producer App grants specific consumer projects access to that output. The
-planner checks consumer authorization and, for cross-project references, the
+template declares the output type, while the producer App grants specific
+consumer projects access to that output. The planner checks consumer
+authorization and, for cross-project references, the
 producer's grant. It records the producer UID, output contract, and observed
 output generation in the plan and consumer status, so name reuse or a stale
 plan cannot silently retarget a binding.
@@ -209,13 +208,15 @@ producers, revoked grants, changed output contracts, and cycles set an
 actionable blocked condition and pause dependent writes while preserving their
 existing owned resources. Deletion never cascades through the graph.
 
-Exports contain typed, non-secret values or service-defined scoped references,
-never credential contents. Each subsequent link requires its own declared
-output and grant; an upstream value may be re-exported only when its producer
-permits that propagation through an explicit `allowReexport` grant field.
-Derived outputs from the consumer's own components use that consumer's output
-contract and grant. A producer may change a value within its declared
-type, while consumers reconcile under their own authority. Output grants do
+App outputs contain typed, non-secret values or service-defined scoped
+references, never credential contents. A declared output needs no separate
+`exportable` flag: same-project use follows project authorization, and
+cross-project use requires an output grant from the producing App. A consumer
+may declare an output derived from its own inputs or components and grant access
+to that output. This does not give a downstream App direct access to an earlier
+producer; every direct `appRef` is authorized against its named producer. A
+producer may change a value within its declared type, while consumers reconcile
+under their own authority. Output grants do
 not transfer ownership or grant access to upstream Apps further along a chain.
 
 ```yaml
@@ -285,8 +286,8 @@ status:
 
 ### Wiring an output into another App
 
-The producer template above declares `hostname` as an exportable `string`
-output. The `orders-api` App in project `orders` supplies its value and grants
+The producer template above declares `hostname` as a `string` output. The
+`orders-api` App in project `orders` supplies its value and grants
 project `shop` access. Its controller publishes the ready value in
 `status.outputs.hostname`. The consumer template declares a normal `string`
 input whose source must be an App output:
@@ -478,7 +479,7 @@ capabilities for readiness conditions, outputs, cost estimates, and special
 deletion behavior. A required component without a readiness contract leaves
 the App's readiness unknown, and a template cannot bind to an undeclared
 output. Plans and status show when capabilities are unavailable. Platform
-policy may still deny sensitive kinds or App output exports; those are
+policy may still deny sensitive kinds or cross-project output grants; those are
 authorization decisions, not a fixed list of app-capable resources.
 
 Each generated resource gets a stable name and a protected owner marker
