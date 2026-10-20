@@ -177,19 +177,30 @@ An `App` may use the pinned template shown below or carry an inline
 validates either form and creates the declared components. Direct resource
 inputs include group, kind, name, and scope and resolve within the installation
 project.
-Cross-project composition uses a typed `appRef` input naming the producing
-project and App plus a declared output. Its template or inline definition
-declares the output's type and whether it may be exported. The producing App
-explicitly grants access to the consuming project. The planner checks both
-the consumer's right to use it and the producer's grant. The consumer records
-the producer's UID and output contract, detects name reuse, and watches for
-relevant output or readiness changes. A missing producer, revoked grant,
-incompatible output, or dependency cycle blocks affected reconciliation with
-an actionable
-condition. The consumer never adopts or deletes the producer or its resources.
-For example, a database App in project `data` could export an `endpoint` to
-project `orders`; an API App in `orders` could bind that output to one of its
-inputs:
+An `appRef` input names a producing project, App, and declared output. Its
+template or inline definition declares the expected output type. The producer
+declares whether the output is exportable and grants access to specific
+consumer projects for cross-project references. The planner checks consumer
+authorization for every reference and the producer's grant across projects. It resolves
+the producer UID, output contract, and observed output generation into the plan
+and consumer status, so name reuse or a stale plan cannot silently retarget a
+binding.
+
+These references form a directed acyclic graph across projects. For example,
+`data/shared-db` can supply an endpoint to `orders/api`, which can supply its
+own route to `shop/storefront`. Each App has its own installation, resources,
+revision history, and lifecycle. A new dependency is checked against the
+current graph at plan and apply time, with a service-maintained dependency index
+to avoid a platform-wide scan for every reconciliation. Concurrent edits that
+would introduce a cycle must fail one apply. An upstream output change triggers
+replanning and reconciliation of affected consumers in dependency order; this
+does not create a new `AppRevision` unless the consumer's desired spec changes.
+Consumers bind only to ready, type-compatible outputs. Missing or unready
+producers, revoked grants, changed output contracts, and cycles set an
+actionable blocked condition and pause dependent writes while preserving their
+existing owned resources. Deletion never cascades through the graph.
+
+For the first link in that chain:
 
 ```yaml
 # Consumer template input
@@ -209,13 +220,28 @@ databaseEndpoint:
     project: data
     name: shared-db
     output: endpoint
+---
+# API App spec, in project orders: a separate grant for its own output
+outputGrants:
+  - output: route
+    projects: [shop]
+---
+# Storefront App input, in project shop
+apiRoute:
+  appRef:
+    project: orders
+    name: orders-api
+    output: route
 ```
 
 Exports contain typed, non-secret values or service-defined scoped references,
-never credential contents. A consumer cannot re-export an output without its
-own explicit authorization. The producer may change an output value within its
-declared type; the consumer plans and reconciles that change under its own
-revision and permissions. Output grants do not transfer ownership.
+never credential contents. Each subsequent link requires its own declared
+output and grant; an upstream value may be re-exported only when its producer
+permits that propagation through an explicit `allowReexport` grant field.
+Derived outputs from the consumer's own components, such as the API route
+above, use that consumer's output contract and grant. A producer may change a value within its declared
+type, while consumers reconcile under their own authority. Output grants do
+not transfer ownership or grant access to upstream Apps further along a chain.
 
 ```yaml
 apiVersion: apps.miloapis.com/v1alpha1

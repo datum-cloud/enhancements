@@ -74,14 +74,17 @@ The definition declares which components it owns; referenced resources remain
 under their existing owners. Required service enablement uses the Service Catalog's entitlement
 flow, with dependencies and price implications shown before deployment.
 
-An App may consume declared outputs from another App, including an unpublished
-App in a different project. The producing App grants access to specific outputs;
-the consumer sees the producer, its readiness, and the dependency in its plan.
-Each App manages only its own resources. A reference never makes the consumer
-the producer's parent or owner, and deleting either App does not cascade to
-the other. Direct resource references remain available within an App's project.
-For example, a database App can share its endpoint with an API App in another
-project while retaining its own deployment and deletion controls.
+Apps can form chains: a database App exports an endpoint to an API App, which
+exports its route to a storefront App. Each installation binds a typed input to
+a declared output of another App, including an unpublished App in another
+project. The producing App grants access to specific outputs across projects;
+every link is authorized separately. The plan shows the dependency chain and
+readiness of each upstream App. When an output changes, dependent Apps
+reconcile in order. If an upstream App is unavailable or its grant is revoked,
+affected Apps report a blocked dependency and preserve their existing resources.
+Each App manages only its own resources. Deleting an App does not delete its
+consumers or producers. Direct resource references remain available within an
+App's project.
 
 ### Author and publish
 
