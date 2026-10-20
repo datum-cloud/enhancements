@@ -305,12 +305,8 @@ were changed. Operators can inspect the linked resource in its owning service.
 
 ## Implementation History
 
-- 2026-10-11: Initial provisional product proposal.
-- 2026-10-13: API and implementation approach revised; product named Apps.
-- 2026-10-20: Added Milo multicluster architecture, ownership admission, and
-  graduation after installation removal.
-- 2026-10-20: Moved API and runtime design to the linked Apps architecture.
-- 2026-10-20: Defined project authoring, publication, and catalog discovery.
+No implementation milestones yet. This section will track delivered work as
+the proposal moves through implementation.
 
 ## Drawbacks
 
