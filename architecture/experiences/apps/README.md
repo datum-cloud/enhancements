@@ -6,11 +6,15 @@ It is a design proposal; API names and fields remain subject to review.
 
 ## API design
 
-The API uses `apps.datumapis.com/v1alpha1` as a proposed group. Names and field
-shapes below are for review; service-specific manifests still use their native
-APIs. Templates are published at organization scope (Datum publishes the
-curated set), while apps and plans live in a project. Authorization to use a
-template is checked when planning and deploying.
+The API uses `apps.miloapis.com/v1alpha1` as a proposed group. Apps coordinates
+project resources across services, like other Milo platform capabilities; its
+API group does not require its implementation to live in the `milo-os/milo`
+repository. The Apps service and schemas remain owned by `datum-labs/apps` and
+are served through Milo's normal service API and discovery integration. Names
+and field shapes below are for review; service-specific manifests still use
+their native APIs. Templates are published at organization scope (Datum
+publishes the curated set), while apps and plans live in a project.
+Authorization to use a template is checked when planning and deploying.
 
 | Resource | Purpose |
 | --- | --- |
@@ -32,7 +36,7 @@ below omits most of the service-native Workload and HTTPRoute specs to focus on
 the app contract:
 
 ```yaml
-apiVersion: apps.datumapis.com/v1alpha1
+apiVersion: apps.miloapis.com/v1alpha1
 kind: AppTemplate
 metadata:
   name: web-api-v1
@@ -87,7 +91,7 @@ group, kind, and name in the actual API, and must resolve within the project
 unless a service explicitly supports cross-scope references.
 
 ```yaml
-apiVersion: apps.datumapis.com/v1alpha1
+apiVersion: apps.miloapis.com/v1alpha1
 kind: App
 metadata:
   name: orders-api
