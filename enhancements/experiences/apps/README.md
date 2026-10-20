@@ -89,6 +89,12 @@ every link is authorized separately. The plan shows the dependency chain and
 readiness of each upstream App. When an output changes, dependent Apps
 reconcile in order. If an upstream App is unavailable or its grant is revoked,
 affected Apps report a blocked dependency and preserve their existing resources.
+Customers can find granted outputs from their project without browsing the
+producer's private App or its resources. Offers show the output's identity,
+type, and readiness; resolving its value still requires authorization. A
+consumer's rollback restores its own prior configuration using current upstream
+values. Revoking a grant stops future updates but does not erase a value already
+written to a consumer-owned resource.
 Each App manages only its own resources. Deleting an App does not delete its
 consumers or producers. Direct resource references remain available within an
 App's project.
@@ -163,10 +169,12 @@ inputs connect existing Apps; they do not distribute or clone an App.
    component resources, and costs. Update its inputs or select a newer project
    template revision or published version after reviewing the resulting plan.
    Revert to a prior successful installation revision when an update fails.
-5. **Delete:** Preview what will be removed. App-owned resources are deleted;
+5. **Delete:** Preview what will be removed. If the App or its resource inventory
+   changes before deletion, review a fresh preview. App-owned resources are deleted;
    referenced resources and shared service entitlements are retained. Choose
    **keep resources** before deletion to graduate owned resources to direct
-   management after the App installation is gone.
+   management after the App installation is gone. Track cleanup or release
+   progress after the App disappears.
 
 For example, a team selects **Web API**, chooses an image and domain, and
 deploys. The app creates a Workload and route, connects the route to the chosen
@@ -227,7 +235,10 @@ side-effect-free, and `AppRevision` records installation changes. Templates
 declare the resources they create or reference, typed inputs and outputs, and
 required services. A
 plan shows expected resource changes and available cost estimates before the
-App is applied.
+App is applied. A delete plan shows exact resource actions and the chosen
+uninstall policy. Its preview is advisory; deletion rechecks App identity and
+current state. A customer-readable release record reports cleanup and
+graduation progress after deletion.
 
 An App owns only resources it creates. Customers change those resources through
 the App while it is installed; existing referenced resources remain under their
@@ -236,6 +247,9 @@ keep them. Kept resources become directly manageable after the App installation
 is removed. The [Apps architecture](../../../architecture/experiences/apps/README.md)
 defines the API shapes, Milo multicluster runtime, admission enforcement, and
 release sequence that preserves single ownership.
+References pin resource and App identities so a recreated same-name dependency
+cannot be selected silently. Templates may project authorized non-secret
+reference fields; credential contents remain opaque native secret references.
 
 ### Delivery sequence
 
