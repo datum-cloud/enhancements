@@ -126,12 +126,18 @@ discriminated `oneOf`; it rejects unsupported keywords rather than silently
 ignoring them. The schema is template data validated by the Apps service; each
 template does not create a new API resource schema. The planner validates the
 selected branch after resolving input bindings and rejects fields from other
-branches. Components and outputs may use
-a declarative `when` on the branch selector. Each component either **creates**
-a service-native resource or **references** an existing one. Typed bindings
-copy a leaf input or another component's declared output into a field accepted
-by the target API. Publishing validates schemas, binding paths, target fields,
-and dependency cycles. This keeps composition explicit without allowing
+branches. Components and outputs may use a declarative `when` on the branch
+selector. Each component either **creates** a service-native resource or
+**references** an existing one. A reserved `$input` marker occupies the exact
+target value inside the template's native resource shape; the planner replaces
+the entire marker with a typed resolved value before validating or applying
+the resource. A `$componentOutput` marker can refer to a declared output of an
+earlier component. There is no separate destination path or string
+interpolation. These markers are Apps template syntax and never reach a native
+service API. Publishing checks each marker against the target schema and input
+type; planning and apply validate the fully rendered resource through its
+native API. A marker that is missing, ambiguous, or type-incompatible fails
+validation. This keeps composition explicit without allowing
 arbitrary template code. The example below omits most of the service-native
 Workload and HTTPRoute specs to focus on the App contract:
 
@@ -182,10 +188,16 @@ spec:
       create:
         apiVersion: compute.datumapis.com/v1alpha
         kind: Workload
-        # Service-native Workload spec omitted.
-      bindings:
-        - fromInput: /runtime/image
-          toPath: /spec/template/spec/runtime/sandbox/containers/0/image
+        spec:
+          template:
+            spec:
+              runtime:
+                sandbox:
+                  containers:
+                    - name: api
+                      image:
+                        $input: /runtime/image
+          # Other required Workload fields omitted.
     - name: route
       dependsOn: [api]
       when:
@@ -195,15 +207,15 @@ spec:
       create:
         apiVersion: gateway.networking.k8s.io/v1
         kind: HTTPRoute
-        # Service-native HTTPRoute spec omitted.
-      bindings:
-        - fromInput: /exposure/gateway
-          fromField: metadata.name
-          toPath: /spec/parentRefs/0/name
-        - fromInput: /exposure/hostname
-          toPath: /spec/hostnames/0
-        # The backend binding targets the networking service's supported
-        # resource for the api component.
+        spec:
+          parentRefs:
+            - name:
+                $input: /exposure/gateway
+                field: metadata.name
+          hostnames:
+            - $input: /exposure/hostname
+          # The backend references the api component through a declared
+          # component output; other HTTPRoute fields omitted.
   outputs:
     - name: hostname
       type: string
@@ -214,10 +226,18 @@ spec:
       fromInput: /exposure/hostname
 ```
 
+The optional `field: metadata.name` projects a checked field from the resolved
+Gateway reference before filling the route's `parentRefs.name` string.
+
 `spec.inputs` on an App mirrors this nested schema. Its leaf fields hold
 `value`, `resourceRef`, or `appRef` bindings; the schema describes the values
-after those bindings resolve. `fromInput` and `when.inputEquals.path` use JSON
-Pointer paths into that resolved object, avoiding ambiguity in nested names.
+after those bindings resolve. `$input`, `fromInput` in output declarations,
+and `when.inputEquals.path` use JSON Pointer paths into that resolved object,
+avoiding ambiguity in nested names. The `$input` marker remains attached to
+its named container or list element when surrounding arrays are reordered.
+Compute's [Workload CRD](https://github.com/datum-cloud/compute/blob/main/config/base/crd/bases/compute.datumapis.com_workloads.yaml)
+declares `containers` and `env` as lists keyed by `name`; the template still
+names those entries, while Apps replaces only the marked leaf value.
 For `exposure.mode: public`, the planner requires `gateway` and `hostname` and
 includes the route. For `private`, it rejects those public-only fields and
 omits the route and `hostname` output. Switching branches in this example is
@@ -367,17 +387,24 @@ spec:
       create:
         apiVersion: compute.datumapis.com/v1alpha
         kind: Workload
-        # Service-native Workload spec omitted.
-      bindings:
-        - fromInput: /backend/apiHost
-          # Illustrative target; include the env entry in the Workload spec.
-          # Planner validation checks this path against the native API.
-          toPath: /spec/template/spec/runtime/sandbox/containers/0/env/0/value
+        spec:
+          template:
+            spec:
+              runtime:
+                sandbox:
+                  containers:
+                    - name: storefront
+                      env:
+                        - name: API_HOST
+                          value:
+                            $input: /backend/apiHost
+          # Other required Workload fields omitted.
 ```
 
 Here `type: string` constrains the resolved value. The installer can provide
-either a literal string or an `appRef` to a string output; both reach the same
-`fromInput: /backend/apiHost` binding after validation.
+either a literal string or an `appRef` to a string output; both fill the
+`$input: /backend/apiHost` marker after validation. Reordering `containers` or
+`env` entries cannot redirect that marker to another field.
 
 The storefront App selects the producing installation and output. The client
 can obtain the producer UID while selecting the App; the API requires it in the
@@ -411,8 +438,8 @@ checking the producer UID, `Ready` condition, output type and generation,
 consumer access, and `outputGrants`. The template binding writes the resolved
 string into the storefront Workload field. The value flows from
 `orders-api.status.outputs.hostname.value` through
-`storefront.spec.inputs.backend.apiHost.appRef` to the template binding's
-`fromInput: /backend/apiHost`. `AppPlan` reports the producer UID and output
+`storefront.spec.inputs.backend.apiHost.appRef` to the template's
+`$input: /backend/apiHost` marker. `AppPlan` reports the producer UID and output
 generation; apply rechecks both. A new ready output generation replans the
 consumer and updates only its owned resources. If the producer is unavailable,
 the grant is revoked, or the output type changes, the consumer reports a blocked
