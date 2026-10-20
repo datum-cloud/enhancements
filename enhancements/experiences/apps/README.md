@@ -55,7 +55,7 @@ a reusable offering that other projects can discover and install.
 - Automatically migrating application data or rolling back stateful services.
 - Creating and owning resources in more than one project from one App installation.
 - Hiding native resource controls from advanced users.
-- A marketplace for paid third-party templates.
+- A storefront or payment system for third-party apps in the first release.
 
 ## Proposal
 
@@ -97,8 +97,18 @@ enter the repository.
 
 Platform discovery shows approved versions from the single repository, with
 their source, version, required services and permissions, outputs, and lifecycle
-state. Unpublished Apps and their revision history remain in their projects.
-Publishing a new version does not change existing installations.
+state. A publication may be visible to the source organization or to all
+customers, as approved by the platform operator. Unpublished Apps and their
+revision history remain in their projects. Publishing a new version does not
+change existing installations.
+
+An organization can publish a recipe for its teams to install as separate Apps
+in their own projects. An app company can publish a public recipe for customers
+to install as separate Apps in customer projects. Each installation has its own
+inputs, resources, revisions, and deletion lifecycle. If the recipe uses a
+provider-managed service, the provider operates that service through its native
+API while the customer controls their App installation. Cross-project `appRef`
+inputs connect existing Apps; they do not distribute or clone an App.
 
 ### Customer experience
 

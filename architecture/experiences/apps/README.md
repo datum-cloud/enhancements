@@ -44,7 +44,7 @@ ever submitting one for publication. `spec.definition` and `spec.templateRef`
 are mutually exclusive, so an installation has one source of desired state.
 
 An optional `AppPublication` names an exact App UID, immutable revision and
-content digest, plus proposed family, version, and typed inputs. The author
+content digest, plus proposed family, version, audience, and typed inputs. The author
 reviews which local values become inputs and which references installers must
 supply. Submission freezes the request. Validation checks source-project
 permission, target API schemas, bindings, required services, reference rules,
@@ -65,6 +65,7 @@ spec:
     digest: "sha256:<revision-digest>"
   family: orders-api
   version: 1.0.0
+  audience: Organization # Or Public, subject to operator approval.
 # status.phase: PendingApproval; operator decision is written through a
 # restricted approval path, never by the submitter.
 ```
@@ -81,12 +82,27 @@ an immutable `AppTemplate` to the Platform repository and records its source
 project, App UID and revision, submitter, approver, digest, compatibility
 requirements, and lifecycle state. A rejected request stays unpublished.
 
-Platform list and get expose only approved versions. All approved versions are
-discoverable there; project service availability and installer rights are
-checked at plan and install. Unpublished Apps and their revisions remain in
-their projects. The repository assigns a unique canonical template identity,
-so equal display names do not collide. Live App state never becomes the
+Platform list and get expose only approved versions allowed by their audience.
+`Organization` versions are visible and installable only within the source
+organization; `Public` versions are discoverable platform-wide. An operator
+approves the requested audience or rejects the request; broadening it requires
+a new submission by the author. List, get, plan, and install all enforce the
+approved audience. Project service availability and installer rights are checked at
+plan and install. Unpublished Apps and their revisions remain in their
+projects. The repository assigns a unique canonical template identity, so
+equal display names do not collide. Live App state never becomes the
 template's ongoing source of truth.
+
+The repository distributes recipes, not running installations. Every install
+creates a new project App UID, revision history, and owned-resource inventory;
+the source App's project never owns the consumer's resources. An app company's
+public template may request a new instance of its provider-managed service via
+the normal Service Catalog entitlement and native service API. The provider
+operates that service; the customer controls the App installation and its
+project resources. Publication grants the provider no direct write access to
+those resources. A new published template version does not silently update
+existing installations. Cross-project `appRef` is a separate composition
+feature for consuming an existing App's outputs.
 
 Deprecation hides a version from recommended discovery while existing pinned
 Apps continue to work. Emergency revocation blocks new installs and upgrades;
@@ -109,6 +125,7 @@ kind: AppTemplate
 metadata:
   name: web-api-v1
 spec:
+  audience: Public
   family: web-api
   version: 1.0.0
   inputs:
