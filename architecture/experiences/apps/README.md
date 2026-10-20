@@ -12,16 +12,19 @@ API group does not require its implementation to live in the `milo-os/milo`
 repository. The Apps service and schemas remain owned by `datum-labs/apps` and
 are served through Milo's normal service API and discovery integration. Names
 and field shapes below are for review; service-specific manifests still use
-their native APIs. Organization-owned templates, Datum-curated templates, and
-their discovery scope need an explicit publication contract before the first
-release. A project must resolve a curated template without copying an editable
-recipe into each customer organization. Define publisher identity, visibility,
-authorization, immutable version identity, deprecation, and emergency
-revocation across those scopes. Apps and plans live in a project.
-Authorization to use a template is checked when planning and deploying.
+their native APIs. Authoring begins in a project. Published `AppTemplate`
+versions live in an organization catalog or, for Datum-curated offerings, the
+platform catalog. Apps and plans live in a project. Discovery combines the
+platform catalog with versions published by the project's organization and
+filters entries by visibility and authorization; it does not search every
+project. A project resolves a curated version without an editable copy in its
+organization. Authorization to use a template is checked when planning and
+deploying.
 
 | Resource | Purpose |
 | --- | --- |
+| `AppTemplateDraft` | Editable recipe in an authoring project; supports preview and test installations there. |
+| `AppPublication` | Project-scoped request to validate an exact draft revision and publish an immutable version to an authorized catalog. |
 | `AppTemplate` | Immutable, published recipe version. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
 | `App` | Desired installation: template reference and input values. Its status reports the observed deployment. |
 | `AppPlan` | Side-effect-free preview of a proposed App create or update. Creating a plan never enables services or creates components. |
@@ -29,6 +32,33 @@ Authorization to use a template is checked when planning and deploying.
 
 `AppRelease` is an internal, durable handoff record created when a customer
 deletes an App with `Retain`. It is not a second installation.
+
+### Project authoring and catalog discovery
+
+A project-scoped `AppTemplateDraft` is the working recipe. An author may build
+it directly or derive it from an App's accepted revision, then replace
+project-specific values with typed inputs and identify references that
+installers must supply. The draft can be planned and installed for testing only
+in its source project. An `AppPublication` names the exact draft revision,
+destination organization or platform catalog,
+family, and version. Publishing checks the author's rights in both scopes,
+target API schemas, bindings, required services, referenced-resource rules,
+and the absence of embedded credentials. It then copies an immutable snapshot
+to the catalog. A live App or its resource state is never the template's
+ongoing source of truth.
+
+The published version records source project and revision, publisher identity,
+content digest, compatibility requirements, and lifecycle state. A catalog
+listing exposes these along with required permissions, inputs, and outputs.
+Project drafts are private to their project; organization versions are visible
+to authorized projects in that organization; Datum versions are visible where
+the required services are available. A template reference includes publisher
+scope and immutable version identity, so equal family names cannot collide.
+Deprecation hides a version from recommended discovery while existing pinned
+Apps continue to work. Emergency revocation blocks new installs and upgrades;
+existing installations retain the snapshot needed for safe reconciliation,
+deletion, and graduation. The source project may be removed without changing
+published versions.
 
 An `AppTemplate` declares typed inputs, required catalog services, components,
 and public outputs. Each component either **creates** a service-native resource
@@ -102,6 +132,9 @@ metadata:
   namespace: default
 spec:
   templateRef:
+    publisherRef:
+      kind: Platform
+      name: datum
     name: web-api-v1
   uninstallPolicy: Delete # Set to Retain before deleting to keep owned resources.
   inputs:

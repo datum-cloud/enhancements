@@ -35,6 +35,9 @@ discover and enable individual services. App Templates build on those services
 to describe a working application; they do not create a new service type or
 replace the services' own APIs.
 
+Teams should be able to turn an application they have tested in a project into
+a reusable offering that other projects can discover and install.
+
 ### Goals
 
 - Deploy a useful multi-resource application through one guided flow or a
@@ -71,6 +74,23 @@ which components it owns; referenced resources remain under their existing
 owners. Required service enablement uses the Service Catalog's entitlement
 flow, with dependencies and price implications shown before deployment.
 
+### Author and publish
+
+An author develops and tests an app recipe in a project. They can start from a
+draft template or derive a draft from a working App revision, then choose which
+values become inputs. Publishing validates the recipe and creates an immutable
+template version in the organization's catalog. Datum uses the same path to
+publish curated templates to the platform catalog. A published template keeps
+the source project and revision as provenance, but installations depend only on
+the published version. Project-specific values and secret contents never enter
+the catalog.
+
+Discovery combines Datum-curated templates with those published by the
+customer's organization. The catalog shows the publisher, version, required
+services and permissions, example outputs, and lifecycle state. Project drafts
+remain visible only to their authors; other projects discover published
+versions. Publishing a new version does not change existing installations.
+
 ### Customer experience
 
 1. **Discover:** Browse templates by use case and see the services, required
@@ -99,7 +119,7 @@ one, subject to that service's availability and permissions.
 ### Initial scope
 
 - Start with platform-curated templates installed into a single project, then
-  allow organization-owned templates once publishing validation is proven.
+  allow organization-owned publication once publishing validation is proven.
   Start with Workload, Gateway/HTTP route, domain, and references to existing
   services; add Function and new managed services as they mature.
 - Publish immutable template versions. Existing apps stay on their selected
@@ -233,6 +253,7 @@ were changed. Operators can inspect the linked resource in its owning service.
 - 2026-10-20: Added Milo multicluster architecture, ownership admission, and
   graduation after installation removal.
 - 2026-10-20: Moved API and runtime design to the linked Apps architecture.
+- 2026-10-20: Defined project authoring, publication, and catalog discovery.
 
 ## Drawbacks
 
