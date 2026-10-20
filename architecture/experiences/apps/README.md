@@ -12,21 +12,19 @@ API group does not require its implementation to live in the `milo-os/milo`
 repository. The Apps service and schemas remain owned by `datum-labs/apps` and
 are served through Milo's normal service API and discovery integration. Names
 and field shapes below are for review; service-specific manifests still use
-their native APIs. An App may keep its definition in its project indefinitely;
-publication is optional. Every published `AppTemplate` version is stored and
-discoverable through the Platform context.
-Its `publisherRef` identifies Datum or an organization; publisher identity is
-metadata and authorization, not a second API scope. Apps and plans live in a
-project. The Platform list and get APIs filter published versions by visibility
-and caller authorization, without searching projects or creating an
-`OrganizationCatalog` resource. A project resolves a published version by its
-qualified identity. Authorization to use it is checked when planning and
-deploying.
+their native APIs. An App may keep its definition and revision history in its
+project indefinitely; publication is optional. Every approved `AppTemplate`
+version is stored in one Platform-scoped app repository and discoverable through
+the Platform context. This is a logical repository served by the Apps API; its
+backing storage is an implementation choice distinct from the `datum-labs/apps`
+source repository. Apps and plans live in a project. Publication requires a
+platform operator's approval. Template use still requires authorization in the
+installation project.
 
 | Resource | Purpose |
 | --- | --- |
-| `AppPublication` | Optional project-scoped request to publish an exact App revision as an immutable version in Platform context for an authorized publisher. |
-| `AppTemplate` | Platform-scoped immutable published version. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
+| `AppPublication` | Optional project-scoped request to submit an exact App revision for platform operator review. |
+| `AppTemplate` | Platform-scoped, operator-approved immutable version in the app repository. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
 | `App` | Desired installation: either an inline definition or a published template reference, plus inputs. Its status reports the observed deployment. |
 | `AppPlan` | Side-effect-free preview of a proposed App create or update. Creating a plan never enables services or creates components. |
 | `AppRevision` | Immutable record of an accepted App spec, used for history and rollback. It stores references rather than secret values. |
@@ -39,31 +37,56 @@ deletes an App with `Retain`. It is not a second installation.
 An App can contain an inline `spec.definition` with the same validated
 components, inputs, bindings, and outputs as a template. It can be planned,
 installed, updated, and rolled back within its project without publication.
-Each accepted change creates an immutable `AppRevision`; reconciliation uses
-that accepted snapshot. `spec.definition` and `spec.templateRef` are mutually
-exclusive, so an installation has one source of desired state.
+Each accepted change creates an immutable, project-scoped `AppRevision` with
+actor, timestamp, and change provenance; reconciliation and rollback use these
+snapshots. A project owner can list, compare, and roll back revisions without
+ever submitting one for publication. `spec.definition` and `spec.templateRef`
+are mutually exclusive, so an installation has one source of desired state.
 
-An optional `AppPublication` names an exact App UID and revision, publisher
-identity, visibility, family, and version. The author reviews which local
-values become typed inputs and which references installers must supply.
-Publishing checks rights in the source project and publisher identity,
-target API schemas, bindings, required services, reference rules, and the
-absence of embedded credentials. It then stores an immutable published
-snapshot in Platform context. Live App state never becomes the template's
-ongoing source of truth.
+An optional `AppPublication` names an exact App UID, immutable revision and
+content digest, plus proposed family, version, and typed inputs. The author
+reviews which local values become inputs and which references installers must
+supply. Submission freezes the request. Validation checks source-project
+permission, target API schemas, bindings, required services, reference rules,
+and the absence of embedded credentials. The request then enters a Platform
+review queue as `PendingApproval`; it is not discoverable or installable.
 
-The published version records source project, App UID and revision, publisher
-identity, content digest, compatibility requirements, and lifecycle state.
-Discovery exposes these along with required permissions, inputs, and outputs.
-Unpublished Apps remain in their project. Platform discovery filters
-published versions by visibility, publisher policy, and service availability;
-private organization versions are visible only to authorized callers in that
-organization. List, get, plan, and install must enforce the same visibility
-rules so direct lookup cannot bypass discovery filtering. A template reference
-includes publisher identity and immutable version identity, so equal family
-names cannot collide. The service assigns a unique Platform object name from
-that qualified identity; consumers do not infer publisher identity from a
-display name.
+```yaml
+apiVersion: apps.miloapis.com/v1alpha1
+kind: AppPublication
+metadata:
+  name: orders-api-1-0-0
+spec:
+  appRef:
+    name: orders-api
+    uid: "<app-uid>"
+  revisionRef:
+    name: orders-api-r3
+    digest: "sha256:<revision-digest>"
+  family: orders-api
+  version: 1.0.0
+# status.phase: PendingApproval; operator decision is written through a
+# restricted approval path, never by the submitter.
+```
+
+A platform operator reviews the exact digest, validation results, permissions,
+and example plan, then approves or rejects with an auditable identity, time,
+and reason. Only an operator may record that decision or change a published
+version's lifecycle state; the submitter cannot write approval status. Only
+the publication controller may create `AppTemplate` records from approved
+requests, so direct API creation cannot bypass review. Before approval, recheck
+the frozen digest, source-project eligibility, and current target schemas.
+Changing the source App does not change the reviewed snapshot. Approval writes
+an immutable `AppTemplate` to the Platform repository and records its source
+project, App UID and revision, submitter, approver, digest, compatibility
+requirements, and lifecycle state. A rejected request stays unpublished.
+
+Platform list and get expose only approved versions. All approved versions are
+discoverable there; project service availability and installer rights are
+checked at plan and install. Unpublished Apps and their revisions remain in
+their projects. The repository assigns a unique canonical template identity,
+so equal display names do not collide. Live App state never becomes the
+template's ongoing source of truth.
 
 Deprecation hides a version from recommended discovery while existing pinned
 Apps continue to work. Emergency revocation blocks new installs and upgrades;
@@ -86,10 +109,6 @@ kind: AppTemplate
 metadata:
   name: web-api-v1
 spec:
-  publisherRef:
-    kind: Platform
-    name: datum
-  visibility: Public
   family: web-api
   version: 1.0.0
   inputs:
@@ -189,9 +208,6 @@ metadata:
   namespace: default
 spec:
   templateRef:
-    publisherRef:
-      kind: Platform
-      name: datum
     name: web-api-v1
   uninstallPolicy: Delete # Set to Retain before deleting to keep owned resources.
   inputs:
@@ -295,9 +311,9 @@ for release.
 The service has three parts:
 
 1. **App API and publication:** Validate inline App definitions and immutable
-   published template versions with the same schema. Check publisher
-   permissions, target API discovery, typed bindings, dependency cycles,
-   reference scope, and secret handling before publication. Require
+   published template versions with the same schema. Check submission rights,
+   platform operator approval, target API discovery, typed bindings, dependency
+   cycles, reference scope, and secret handling before publication. Require
    target APIs to validate their own resource specs. Templates cannot execute
    scripts or bypass service admission.
 2. **Shared planner:** Resolve an inline definition or template version and App inputs into a stable

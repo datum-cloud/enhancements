@@ -86,24 +86,19 @@ project while retaining its own deployment and deletion controls.
 ### Author and publish
 
 An author can define, preview, deploy, and keep an App entirely within a
-project. Its accepted revisions support updates and rollback without
-publication. If the author later wants reuse elsewhere, they select a working
-revision and choose which values become template inputs. Publishing validates
-that revision and creates an immutable template version discoverable through the
-platform, attributed to the publishing organization. Datum uses the same path
-for curated versions. A published
-template keeps the source project and revision as provenance, but installations
-depend only on the published version. Project-specific values and secret
-contents never enter the published template.
+project. Every accepted change creates a project revision for history and
+rollback. If the author later wants reuse elsewhere, they submit one revision
+for publication and choose which values become template inputs. A platform
+operator reviews that exact snapshot and approves or rejects it. Only approved
+versions enter the platform app repository and become discoverable. The source
+project and revision remain as provenance, but installations depend on the
+immutable published version. Project-specific values and secret contents never
+enter the repository.
 
-One platform discovery experience shows published templates allowed by the
-caller's access, including Datum-curated and organization-published versions.
-It shows the publisher, version, required services and permissions, example
-outputs, and lifecycle state. Unpublished Apps remain visible only in their
-project; other projects discover published versions. An organization can manage
-its own publications without a separate catalog resource. Publishing a new
-version does not change existing
-installations.
+Platform discovery shows approved versions from the single repository, with
+their source, version, required services and permissions, outputs, and lifecycle
+state. Unpublished Apps and their revision history remain in their projects.
+Publishing a new version does not change existing installations.
 
 ### Customer experience
 
@@ -133,7 +128,8 @@ one, subject to that service's availability and permissions.
 ### Initial scope
 
 - Support project-only Apps alongside the first platform-curated template, then
-  allow organization-owned publication once publishing validation is proven.
+  enable operator-reviewed publication from customer projects once validation
+  and approval are proven.
   Start with Workload, Gateway/HTTP route, domain, and references to existing
   services; add Function and new managed services as they mature.
 - Publish immutable template versions when reuse is wanted. Existing template
@@ -173,8 +169,9 @@ one, subject to that service's availability and permissions.
 
 ### API and ownership contract
 
-The proposed API stores immutable published `AppTemplate` versions at Platform
-scope, with publisher identity and visibility enforced on discovery and use.
+The proposed API stores operator-approved, immutable `AppTemplate` versions in
+one Platform-scoped repository, with source attribution and operator-controlled
+lifecycle state.
 It includes a project-scoped `App` with either an inline definition or a pinned
 template reference, side-effect-free `AppPlan` previews, and immutable
 `AppRevision` history. Definitions and templates declare the resources
@@ -202,8 +199,8 @@ release sequence that preserves single ownership.
    direct update/delete denial, marker forgery, status and finalizer exceptions,
    name reuse, partial failure, retry, drift, and preservation of referenced
    resources in end-to-end tests.
-3. **Broader composition:** Allow organization-owned templates after publishing
-   validation is proven. Add cross-project App output references and richer
+3. **Broader composition:** Allow operator-approved publication from customer
+   projects after validation is proven. Add cross-project App output references and richer
    readiness, outputs, and cost estimates as services publish App capability
    contracts.
 
