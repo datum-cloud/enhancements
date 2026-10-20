@@ -182,6 +182,13 @@ project becomes unavailable. Cluster engagement must run on every replica,
 using Milo's `WithoutAutoStart` and `EngageAlways` wiring until the upstream
 leader-election issue is fixed.
 
+Apps deployment manifests live under `datum-labs/apps/config` and use
+Kustomize bases, optional components, and environment overlays, following the
+relevant layout in [`datum-cloud/compute/config`](https://github.com/datum-cloud/compute/tree/main/config).
+The automated test environment consumes an Apps overlay or published Kustomize
+bundle through Flux, so tests exercise the same deployment manifests intended
+for release.
+
 The service has three parts:
 
 1. **Template API and admission:** Store immutable template versions. Check
