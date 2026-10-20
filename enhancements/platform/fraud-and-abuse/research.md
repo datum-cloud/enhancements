@@ -51,7 +51,7 @@ To guide our evaluation and strategy, our findings and proposed tools are mapped
 
 3. **Problem: No way to fast-track trusted users from our community**
    - *Context*: We need to prevent unnecessary API latency and third-party validation costs for known, trusted enterprise and community signups.
-   - *Solutions*: Deploy local pre-check short-circuit logic using verified corporate domains, trusted IP ranges, or OIDC/SSO logins.
+   - *Solutions*: Deploy local pre-check short-circuit logic using verified enterprise domains.
    - *Tools detailed in this document*: **Local Allow-list Layer** (Section 4).
 
 ---
@@ -177,10 +177,9 @@ A local allow-list check is a simple, highly effective optimization. It allows t
 
 ### 4.1 Designing the Allow-list Layer
 
-The allow-list operates as an instant pre-check before any external third-party API is called. We structure the allow-list around several categories:
+The allow-list operates as an instant pre-check before any external third-party API is called. We structure the allow-list around verified enterprise domains:
 
 - **Enterprise Domains**: Fast-track users registering with verified corporate domains (e.g., `@datum.com`, `@amberflo.io`).
-- **Trusted IP Ranges**: Allow signups from known office locations or dedicated partner network gateways.
 
 ### 4.2 Orchestration and Short-Circuit Logic
 
