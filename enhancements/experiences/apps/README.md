@@ -86,6 +86,15 @@ Each App manages only its own resources. Deleting an App does not delete its
 consumers or producers. Direct resource references remain available within an
 App's project.
 
+```mermaid
+flowchart LR
+  DB["Database App<br/>project data"] -->|"endpoint output → databaseEndpoint input"| API["API App<br/>project orders"]
+  API -->|"route output → apiRoute input"| SHOP["Storefront App<br/>project shop"]
+```
+
+Each arrow is a separately authorized output binding. The three Apps are
+independent installations with separate resources and deletion lifecycles.
+
 ### Author and publish
 
 An author can define a template, retain its revision history, and install
@@ -99,6 +108,21 @@ immutable published version. Installation values and secret contents never
 enter the repository.
 The create flow may author a private template and its first App together, so a
 one-off deployment does not require a separate manual publishing step.
+
+```mermaid
+flowchart LR
+  T["Project AppTemplate"] --> R["Immutable template revision"]
+  R --> LOCAL["App in authoring project"]
+  R --> REQUEST["Publication request"]
+  REQUEST --> REVIEW{"Operator approves?"}
+  REVIEW -->|Yes| P["Published template version"]
+  REVIEW -->|No| PRIVATE["Remains private"]
+  P --> A["App in consumer project A"]
+  P --> B["App in consumer project B"]
+```
+
+The authoring App is optional. Publication distributes the template snapshot;
+each consumer deploys a new App with its own inputs and resources.
 
 Platform discovery shows approved versions from the single repository, with
 their source, version, required services and permissions, outputs, and lifecycle

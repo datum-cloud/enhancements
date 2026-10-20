@@ -393,6 +393,24 @@ The service has three parts:
    backoff. Persist an `AppRevision` for each accepted spec and mark it
    successful only when the App is ready.
 
+```mermaid
+flowchart LR
+  CLIENT["Project client"] --> API["Milo project API"]
+  API --> APPS["Apps API and shared planner"]
+  APPS --> STORE["Templates, Apps, revisions, inventory"]
+  STORE --> CTRL["Apps controller"]
+  PROVIDER["Milo multicluster runtime provider"] -->|"ready project clients and watches"| CTRL
+  CTRL -->|"scoped service identity"| API
+  API --> GUARD["Project ownership admission"]
+  GUARD --> RES["Native service resources"]
+  RES -->|"readiness and outputs"| CTRL
+```
+
+The admission path applies to writes of managed native resources. The
+controller's inventory and resource UID checks handle ownership across
+restarts; the admission guard prevents unauthorized direct writes at the
+project API boundary.
+
 Composition should be open to any project resource reachable through Milo's
 standard API, subject to project authorization, target admission, and an Apps
 service identity scoped to that project. Generic integration provides create,
@@ -497,6 +515,25 @@ There are two deletion outcomes, shown in the App plan:
    It records per-resource progress and retries failures. A resource remains
    protected until its marker is cleared, and an incomplete release is visible
    for repair. The release record is removed only after all resources are free.
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant App as App API
+  participant Controller as Apps controller
+  participant Release as AppRelease record
+  participant Worker as Release worker
+  participant Resource as Project resource
+  User->>App: Set Retain, preview, delete App
+  App->>Controller: Deletion with finalizer
+  Controller->>Controller: Freeze reconciliation
+  Controller->>Release: Persist App and resource UID snapshot
+  Controller->>App: Remove App finalizer
+  Worker->>App: Confirm App UID is absent
+  Worker->>Resource: Verify resource UID and owner marker
+  Worker->>Resource: Clear matching owner marker
+  Note over User,Resource: Direct management is allowed after marker removal
+```
 
 Only the trusted App controller may create an `AppRelease`, and only the
 release worker may advance it or clear ownership markers. Persist a snapshot
