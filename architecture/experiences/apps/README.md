@@ -17,7 +17,8 @@ project indefinitely; publication is optional. Every approved `PublishedAppTempl
 version is stored in one Platform-scoped app repository and discoverable through
 the Platform context. This is a logical repository served by the Apps API; its
 backing storage is an implementation choice distinct from the `datum-labs/apps`
-source repository. Apps and plans live in a project. Publication requires a
+source repository. There are no organization-scoped Apps, templates, or
+catalogs. Apps and plans live in a project. Publication requires a
 platform operator's approval. Template use still requires authorization in the
 installation project.
 
@@ -26,7 +27,7 @@ installation project.
 | `AppTemplate` | Project-scoped reusable definition; authoring changes create immutable revisions. |
 | `AppTemplateRevision` | Immutable project snapshot of one accepted template definition, used for local installs, history, rollback, and publication. |
 | `AppPublication` | Optional project-scoped request to submit an exact template revision for platform operator review. |
-| `PublishedAppTemplate` | Platform-scoped, operator-approved immutable version in the app repository. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
+| `PublishedAppTemplate` | Platform-scoped, operator-approved immutable version in the app repository, discoverable by all customers. `spec.family` groups versions; `spec.version` identifies one release. |
 | `App` | Desired installation pinned to a project template revision or published version, plus inputs. Its status reports the observed deployment. |
 | `AppPlan` | Side-effect-free preview of a proposed App create or update. Creating a plan never enables services or creates components. |
 | `AppRevision` | Immutable record of an accepted App spec, used for history and rollback. It stores references rather than secret values. |
@@ -52,7 +53,7 @@ installs from its revisions. A published version retains its own
 immutable snapshot independently of the authoring project.
 
 An optional `AppPublication` names an exact template UID, immutable revision,
-and content digest, plus proposed family, version, and audience. The author
+and content digest, plus proposed family and version. The author
 reviews which inputs and references installers must supply. Submission freezes
 the request. Validation checks source-project
 permission, target API schemas, bindings, required services, reference rules,
@@ -73,7 +74,6 @@ spec:
     digest: "sha256:<revision-digest>"
   family: orders-api
   version: 1.0.0
-  audience: Organization # Or Public, subject to operator approval.
 # status.phase: PendingApproval; operator decision is written through a
 # restricted approval path, never by the submitter.
 ```
@@ -90,14 +90,11 @@ an immutable `PublishedAppTemplate` to the Platform repository and records its s
 project, template UID and revision, submitter, approver, digest, compatibility
 requirements, and lifecycle state. A rejected request stays unpublished.
 
-Platform list and get expose only approved versions allowed by their audience.
-`Organization` versions are visible and installable only within the source
-organization; `Public` versions are discoverable platform-wide. An operator
-approves the requested audience or rejects the request; broadening it requires
-a new submission by the author. List, get, plan, and install all enforce the
-approved audience. Project service availability and installer rights are checked at
-plan and install. Unpublished templates and their revisions remain in their
-projects. The repository assigns a unique canonical template identity, so
+Platform list and get expose approved versions to all customers. An operator
+approves or rejects the exact submitted revision; pending and rejected requests
+never enter discovery. Plan and install still check project service
+availability and installer rights. Unpublished templates and their revisions
+remain in their projects. The repository assigns a unique canonical template identity, so
 equal display names do not collide. Live App state never becomes the
 template's ongoing source of truth.
 
@@ -121,8 +118,8 @@ published versions.
 An `AppTemplate` or `PublishedAppTemplate` declares typed inputs, required
 catalog services, components, and outputs. The project template uses the same
 graph schema as the published version; publication adds family, version,
-audience, provenance, and approval state. Each component either **creates** a service-native resource
-or **references** an existing one. Typed bindings copy an input or another
+provenance, and approval state. Each component either **creates** a service-native
+resource or **references** an existing one. Typed bindings copy an input or another
 component's declared output into a field accepted by the target API. Publishing
 validates binding types, target schemas, and dependency cycles. This keeps
 composition explicit without allowing arbitrary template code. The example
@@ -135,7 +132,6 @@ kind: PublishedAppTemplate
 metadata:
   name: web-api-v1
 spec:
-  audience: Public
   family: web-api
   version: 1.0.0
   inputs:

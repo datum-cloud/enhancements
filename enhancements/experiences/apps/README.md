@@ -126,14 +126,15 @@ each consumer deploys a new App with its own inputs and resources.
 
 Platform discovery shows approved versions from the single repository, with
 their source, version, required services and permissions, outputs, and lifecycle
-state. A publication may be visible to the source organization or to all
-customers, as approved by the platform operator. Unpublished templates and their
-revision history remain in their projects. Publishing a new version does not
+state. Every approved published version is discoverable platform-wide.
+Unpublished templates and their revision history remain in their projects.
+Publishing a new version does not
 change existing installations.
 
-An organization can publish a recipe for its teams to install as separate Apps
-in their own projects. An app company can publish a public recipe for customers
-to install as separate Apps in customer projects. Each installation has its own
+A team can submit a recipe for platform publication so colleagues and other
+customers can install separate Apps in their own projects. An app company
+can publish a recipe for customers to install as separate Apps in customer
+projects. Each installation has its own
 inputs, resources, revisions, and deletion lifecycle. If the recipe uses a
 provider-managed service, the provider operates that service through its native
 API while the customer controls their App installation. Cross-project `appRef`
