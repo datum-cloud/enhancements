@@ -53,7 +53,7 @@ a reusable offering that other projects can discover and install.
 
 - A general-purpose infrastructure language or arbitrary scripts in templates.
 - Automatically migrating application data or rolling back stateful services.
-- Deployments spanning multiple projects or organizations.
+- Creating and owning resources in more than one project from one App installation.
 - Hiding native resource controls from advanced users.
 - A marketplace for paid third-party templates.
 
@@ -74,22 +74,30 @@ which components it owns; referenced resources remain under their existing
 owners. Required service enablement uses the Service Catalog's entitlement
 flow, with dependencies and price implications shown before deployment.
 
+An App may reference a resource in another project when that service supports
+the connection and the resource's project has granted access. The plan shows the
+target project, the required grant, and what happens if access is withdrawn.
+The referenced resource stays with its existing owner and is not deleted with
+the App.
+
 ### Author and publish
 
 An author develops and tests an app recipe in a project. They can start from a
 draft template or derive a draft from a working App revision, then choose which
 values become inputs. Publishing validates the recipe and creates an immutable
-template version in the organization's catalog. Datum uses the same path to
-publish curated templates to the platform catalog. A published template keeps
-the source project and revision as provenance, but installations depend only on
-the published version. Project-specific values and secret contents never enter
-the catalog.
+template version owned by the organization. Datum uses the same path to
+publish platform-owned curated versions. A published template keeps the source
+project and revision as provenance, but installations depend only on the
+published version. Project-specific values and secret contents never enter the
+published template.
 
-Discovery combines Datum-curated templates with those published by the
-customer's organization. The catalog shows the publisher, version, required
+One discovery experience combines Datum-curated templates with those published
+by the customer's organization. It shows the publisher, version, required
 services and permissions, example outputs, and lifecycle state. Project drafts
 remain visible only to their authors; other projects discover published
-versions. Publishing a new version does not change existing installations.
+versions. An organization can manage its own publications without maintaining
+a separate catalog resource. Publishing a new version does not change existing
+installations.
 
 ### Customer experience
 

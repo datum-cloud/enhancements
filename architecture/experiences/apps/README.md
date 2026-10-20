@@ -13,18 +13,18 @@ repository. The Apps service and schemas remain owned by `datum-labs/apps` and
 are served through Milo's normal service API and discovery integration. Names
 and field shapes below are for review; service-specific manifests still use
 their native APIs. Authoring begins in a project. Published `AppTemplate`
-versions live in an organization catalog or, for Datum-curated offerings, the
-platform catalog. Apps and plans live in a project. Discovery combines the
-platform catalog with versions published by the project's organization and
-filters entries by visibility and authorization; it does not search every
-project. A project resolves a curated version without an editable copy in its
-organization. Authorization to use a template is checked when planning and
-deploying.
+versions have a publisher scope: an organization or Datum's platform scope.
+Apps and plans live in a project. One discovery API lists platform-published
+versions and versions published by the caller's organization, filtered by
+visibility and authorization; it does not search every project or require an
+`OrganizationCatalog` resource. A project resolves a curated version without
+an editable copy in its organization. Authorization to use a template is
+checked when planning and deploying.
 
 | Resource | Purpose |
 | --- | --- |
 | `AppTemplateDraft` | Editable recipe in an authoring project; supports preview and test installations there. |
-| `AppPublication` | Project-scoped request to validate an exact draft revision and publish an immutable version to an authorized catalog. |
+| `AppPublication` | Project-scoped request to validate an exact draft revision and publish an immutable version under an authorized publisher scope. |
 | `AppTemplate` | Immutable, published recipe version. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
 | `App` | Desired installation: template reference and input values. Its status reports the observed deployment. |
 | `AppPlan` | Side-effect-free preview of a proposed App create or update. Creating a plan never enables services or creates components. |
@@ -40,16 +40,15 @@ it directly or derive it from an App's accepted revision, then replace
 project-specific values with typed inputs and identify references that
 installers must supply. The draft can be planned and installed for testing only
 in its source project. An `AppPublication` names the exact draft revision,
-destination organization or platform catalog,
-family, and version. Publishing checks the author's rights in both scopes,
-target API schemas, bindings, required services, referenced-resource rules,
-and the absence of embedded credentials. It then copies an immutable snapshot
-to the catalog. A live App or its resource state is never the template's
-ongoing source of truth.
+publisher scope, family, and version. Publishing checks the author's rights in
+the source project and publisher scope, target API schemas, bindings, required
+services, referenced-resource rules, and the absence of embedded credentials.
+It then stores an immutable published snapshot. A live App or its resource
+state is never the template's ongoing source of truth.
 
 The published version records source project and revision, publisher identity,
-content digest, compatibility requirements, and lifecycle state. A catalog
-listing exposes these along with required permissions, inputs, and outputs.
+content digest, compatibility requirements, and lifecycle state. The discovery
+API exposes these along with required permissions, inputs, and outputs.
 Project drafts are private to their project; organization versions are visible
 to authorized projects in that organization; Datum versions are visible where
 the required services are available. A template reference includes publisher
@@ -120,9 +119,15 @@ spec:
 ```
 
 An `App` contains only customer choices; the controller resolves the pinned
-template and creates the declared components. Resource inputs include full
-group, kind, and name in the actual API, and must resolve within the project
-unless a service explicitly supports cross-scope references.
+template and creates the declared components. Resource inputs include the
+target project, group, kind, name, and scope in the actual API. They may resolve
+across projects when the target service supports that reference and the
+resource's project explicitly grants its use. The App checks both the
+installer's right to use the reference and the resource project's sharing
+grant. It records the resolved target UID to detect deletion or name reuse.
+Revoked access or a missing target blocks dependent reconciliation and reports
+an actionable condition; it never causes the App to recreate or delete the
+target.
 
 ```yaml
 apiVersion: apps.miloapis.com/v1alpha1
@@ -269,9 +274,8 @@ capabilities for readiness conditions, outputs, cost estimates, and special
 deletion behavior. A required component without a readiness contract leaves
 the App's readiness unknown, and a template cannot bind to an undeclared
 output. Plans and status show when capabilities are unavailable. Platform
-policy may still deny sensitive kinds or cross-project
-references; those are authorization decisions, not a fixed list of app-capable
-resources.
+policy may still deny sensitive kinds or unsupported cross-project references;
+those are authorization decisions, not a fixed list of app-capable resources.
 
 Each generated resource gets a stable name and a protected owner marker
 containing the App's project and immutable UID. The App stores an inventory of
@@ -282,8 +286,11 @@ to recover a create that succeeded before its inventory write. A Kubernetes
 owner reference alone cannot establish ownership across control planes. Use
 server-side apply with a dedicated field manager for the desired fields; field
 ownership does not authorize direct customer edits while the App manages the
-resource. Referenced resources are
-checked for access and readiness but never marked, adopted, or deleted.
+resource. Referenced resources are checked for access and readiness but never
+marked, adopted, or deleted. This also applies when a referenced resource is
+managed by another App in a different project: it has one owner and a separate
+consumer. Cross-project reference checks use the target service's sharing
+contract; Apps does not grant itself write access in the target project.
 
 ## Ownership protection
 
