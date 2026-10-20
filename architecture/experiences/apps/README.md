@@ -12,8 +12,12 @@ API group does not require its implementation to live in the `milo-os/milo`
 repository. The Apps service and schemas remain owned by `datum-labs/apps` and
 are served through Milo's normal service API and discovery integration. Names
 and field shapes below are for review; service-specific manifests still use
-their native APIs. Templates are published at organization scope (Datum
-publishes the curated set), while apps and plans live in a project.
+their native APIs. Organization-owned templates, Datum-curated templates, and
+their discovery scope need an explicit publication contract before the first
+release. A project must resolve a curated template without copying an editable
+recipe into each customer organization. Define publisher identity, visibility,
+authorization, immutable version identity, deprecation, and emergency
+revocation across those scopes. Apps and plans live in a project.
 Authorization to use a template is checked when planning and deploying.
 
 | Resource | Purpose |
@@ -219,7 +223,13 @@ service identity scoped to that project. Generic integration provides create,
 update, reference, and delete using API discovery and an ownership inventory.
 The installer must have permission for the resulting resource actions, or a
 project administrator must grant a template-specific install permission; the
-controller receives only the corresponding project-scoped rights. Generic
+controller receives only the corresponding project-scoped rights. Define the
+durable delegation behind that statement: record the template version,
+component kinds, verbs, project, and authorizing grant for each installation;
+check authority on install, spec changes, and later reconciliation. Revoking
+the grant must prevent new privileged actions while preserving safe cleanup
+or graduation. Privileged kinds such as RBAC and admission policy resources
+require an explicit platform allowlist before publication. Generic
 integration can report that a resource was accepted, but cannot infer health
 or usage cost from an unfamiliar kind. Services can register optional App
 capabilities for readiness conditions, outputs, cost estimates, and special
@@ -281,6 +291,18 @@ look up the live App, so the controller remains responsible for the ownership
 inventory and release state. Recheck any component APIs that bypass Milo's
 project admission path before allowing them in templates.
 
+Policy failure behavior needs a separate bootstrap guarantee: Kubernetes
+[ignores a binding whose policy is missing](https://kubernetes.io/docs/reference/kubernetes-api/admissionregistration/validating-admission-policy-binding-v1/),
+and [admissionregistration resources are exempt from validating admission
+policy](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/).
+`failurePolicy: Fail` alone cannot secure a project where the policy or binding
+was never installed or was removed. Gate marker creation and project readiness
+on a verified guard, protect guard administration with platform authorization,
+and independently deny writes to *existing marked resources* while that guard
+is absent. If VAP distribution cannot maintain both guarantees, use a compiled
+Milo guard for the first release. Exercise startup, reconnection, and deletion
+of the policy and binding on a real project API server.
+
 ## Graduation and removal
 
 There are two deletion outcomes, shown in the App plan:
@@ -296,6 +318,12 @@ There are two deletion outcomes, shown in the App plan:
    It records per-resource progress and retries failures. A resource remains
    protected until its marker is cleared, and an incomplete release is visible
    for repair. The release record is removed only after all resources are free.
+
+Only the trusted App controller may create an `AppRelease`, and only the
+release worker may advance it or clear ownership markers. Persist a snapshot
+of the uninstall policy and exact App and resource UIDs before App removal;
+customers cannot forge or edit that snapshot. The worker independently checks
+the App UID is absent and each resource UID and marker match before release.
 
 The release worker must not apply App templates. This ordering ensures that a
 user can take over a resource only after deleting the managing installation;
