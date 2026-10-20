@@ -164,10 +164,15 @@ shows progress and retries; it never silently grants direct control.
 
 ## Runtime and reconciliation
 
-Build Apps as a control-plane service that registers the APIs above with Milo
-and reconciles project Apps through existing Datum service APIs. It does not run
-application traffic or replace the Workload, Networking, DNS, or managed-service
-controllers. Milo's [multicluster runtime provider](https://github.com/milo-os/milo/blob/main/pkg/multicluster-runtime/milo/provider.go)
+Build Apps in the new [`datum-labs/apps`](https://github.com/datum-labs/apps)
+repository as a control-plane service that registers the APIs above with Milo
+and reconciles project Apps through existing Datum service APIs. The Apps API,
+planner, controllers, curated templates, packaging, and service-owned tests
+live there. Milo admission changes stay in `milo-os/milo`; the automated
+end-to-end environment and Flux deployment fixtures live in
+[`datum-cloud/test-infra`](https://github.com/datum-cloud/test-infra). Apps does
+not run application traffic or replace the Workload, Networking, DNS, or
+managed-service controllers. Milo's [multicluster runtime provider](https://github.com/milo-os/milo/blob/main/pkg/multicluster-runtime/milo/provider.go)
 provides project discovery and per-project clients and caches. It watches
 ready Projects through the core API and connects to their project control
 planes; internal deployments can instead watch ready ProjectControlPlanes and
