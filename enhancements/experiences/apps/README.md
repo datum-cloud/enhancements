@@ -73,6 +73,10 @@ route. It can ask for an existing network or domain instead of creating one.
 The definition declares which components it owns; referenced resources remain
 under their existing owners. Required service enablement uses the Service Catalog's entitlement
 flow, with dependencies and price implications shown before deployment.
+Templates group related inputs and can define explicit choices. For example,
+choosing public exposure requires a Gateway and hostname, while private
+exposure omits those fields and the public route. The configure flow shows the
+selected fields, and the plan shows the resources that choice creates or removes.
 
 Apps can form chains: a database App exports an endpoint to an API App, which
 exports its route to a storefront App. Each installation binds a typed input to

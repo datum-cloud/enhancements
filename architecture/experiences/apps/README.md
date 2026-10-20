@@ -115,16 +115,25 @@ existing installations retain the snapshot needed for safe reconciliation,
 deletion, and graduation. The source project may be removed without changing
 published versions.
 
-An `AppTemplate` or `PublishedAppTemplate` declares typed inputs, required
+An `AppTemplate` or `PublishedAppTemplate` declares an `inputSchema`, required
 catalog services, components, and outputs. The project template uses the same
 graph schema as the published version; publication adds family, version,
-provenance, and approval state. Each component either **creates** a service-native
-resource or **references** an existing one. Typed bindings copy an input or another
-component's declared output into a field accepted by the target API. Publishing
-validates binding types, target schemas, and dependency cycles. This keeps
-composition explicit without allowing arbitrary template code. The example
-below omits most of the service-native Workload and HTTPRoute specs to focus on
-the app contract:
+provenance, and approval state. `inputSchema` describes the resolved values as
+nested objects with required fields and a bounded `oneOf` for mutually
+exclusive choices. The Apps service supports a documented schema subset,
+including primitive types, `resourceRef`, objects, arrays, enums, and
+discriminated `oneOf`; it rejects unsupported keywords rather than silently
+ignoring them. The schema is template data validated by the Apps service; each
+template does not create a new API resource schema. The planner validates the
+selected branch after resolving input bindings and rejects fields from other
+branches. Components and outputs may use
+a declarative `when` on the branch selector. Each component either **creates**
+a service-native resource or **references** an existing one. Typed bindings
+copy a leaf input or another component's declared output into a field accepted
+by the target API. Publishing validates schemas, binding paths, target fields,
+and dependency cycles. This keeps composition explicit without allowing
+arbitrary template code. The example below omits most of the service-native
+Workload and HTTPRoute specs to focus on the App contract:
 
 ```yaml
 apiVersion: apps.miloapis.com/v1alpha1
@@ -134,17 +143,37 @@ metadata:
 spec:
   family: web-api
   version: 1.0.0
-  inputs:
-    - name: image
-      type: string
-      required: true
-    - name: gateway
-      type: resourceRef
-      resourceKind: Gateway
-      required: true
-    - name: hostname
-      type: string
-      required: true
+  inputSchema:
+    type: object
+    required: [runtime, exposure]
+    additionalProperties: false
+    properties:
+      runtime:
+        type: object
+        required: [image]
+        additionalProperties: false
+        properties:
+          image:
+            type: string
+      exposure:
+        oneOf:
+          - type: object
+            required: [mode]
+            additionalProperties: false
+            properties:
+              mode:
+                const: private
+          - type: object
+            required: [mode, gateway, hostname]
+            additionalProperties: false
+            properties:
+              mode:
+                const: public
+              gateway:
+                type: resourceRef
+                resourceKind: Gateway
+              hostname:
+                type: string
   requiredServices:
     - compute.datumapis.com
     - networking.datumapis.com
@@ -155,27 +184,46 @@ spec:
         kind: Workload
         # Service-native Workload spec omitted.
       bindings:
-        - fromInput: image
+        - fromInput: /runtime/image
           toPath: /spec/template/spec/runtime/sandbox/containers/0/image
     - name: route
       dependsOn: [api]
+      when:
+        inputEquals:
+          path: /exposure/mode
+          value: public
       create:
         apiVersion: gateway.networking.k8s.io/v1
         kind: HTTPRoute
         # Service-native HTTPRoute spec omitted.
       bindings:
-        - fromInput: gateway
+        - fromInput: /exposure/gateway
           fromField: metadata.name
           toPath: /spec/parentRefs/0/name
-        - fromInput: hostname
+        - fromInput: /exposure/hostname
           toPath: /spec/hostnames/0
         # The backend binding targets the networking service's supported
         # resource for the api component.
   outputs:
     - name: hostname
       type: string
-      fromInput: hostname
+      when:
+        inputEquals:
+          path: /exposure/mode
+          value: public
+      fromInput: /exposure/hostname
 ```
+
+`spec.inputs` on an App mirrors this nested schema. Its leaf fields hold
+`value`, `resourceRef`, or `appRef` bindings; the schema describes the values
+after those bindings resolve. `fromInput` and `when.inputEquals.path` use JSON
+Pointer paths into that resolved object, avoiding ambiguity in nested names.
+For `exposure.mode: public`, the planner requires `gateway` and `hostname` and
+includes the route. For `private`, it rejects those public-only fields and
+omits the route and `hostname` output. Switching branches in this example is
+an App update whose plan shows any resulting resource deletion;
+downstream consumers become blocked if an output they use disappears. No
+arbitrary condition expressions are needed.
 
 An `App` pins a revision of an `AppTemplate` in its project or an approved
 `PublishedAppTemplate` version from the Platform repository. The controller
@@ -231,15 +279,19 @@ spec:
     version: 1.0.0
   uninstallPolicy: Delete # Set to Retain before deleting to keep owned resources.
   inputs:
-    image:
-      value: registry.example.com/orders@sha256:...
-    gateway:
-      resourceRef:
-        apiVersion: gateway.networking.k8s.io/v1
-        kind: Gateway
-        name: shared-edge
-    hostname:
-      value: orders.example.com
+    runtime:
+      image:
+        value: registry.example.com/orders@sha256:...
+    exposure:
+      mode:
+        value: public
+      gateway:
+        resourceRef:
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: Gateway
+          name: shared-edge
+      hostname:
+        value: orders.example.com
   outputGrants:
     - output: hostname
       projects: [shop]
@@ -298,10 +350,18 @@ kind: AppTemplate
 metadata:
   name: storefront
 spec:
-  inputs:
-    - name: apiHost
-      type: string
-      required: true
+  inputSchema:
+    type: object
+    required: [backend]
+    additionalProperties: false
+    properties:
+      backend:
+        type: object
+        required: [apiHost]
+        additionalProperties: false
+        properties:
+          apiHost:
+            type: string
   components:
     - name: storefront
       create:
@@ -309,7 +369,7 @@ spec:
         kind: Workload
         # Service-native Workload spec omitted.
       bindings:
-        - fromInput: apiHost
+        - fromInput: /backend/apiHost
           # Illustrative target; include the env entry in the Workload spec.
           # Planner validation checks this path against the native API.
           toPath: /spec/template/spec/runtime/sandbox/containers/0/env/0/value
@@ -317,7 +377,7 @@ spec:
 
 Here `type: string` constrains the resolved value. The installer can provide
 either a literal string or an `appRef` to a string output; both reach the same
-`fromInput: apiHost` binding after validation.
+`fromInput: /backend/apiHost` binding after validation.
 
 The storefront App selects the producing installation and output. The client
 can obtain the producer UID while selecting the App; the API requires it in the
@@ -337,21 +397,22 @@ spec:
     uid: "<storefront-template-uid>"
     revision: storefront-r2
   inputs:
-    apiHost:
-      appRef:
-        project: orders
-        name: orders-api
-        uid: "<orders-api-app-uid>"
-        output: hostname
+    backend:
+      apiHost:
+        appRef:
+          project: orders
+          name: orders-api
+          uid: "<orders-api-app-uid>"
+          output: hostname
 ```
 
-The planner resolves `apiHost` to `orders.example.com` only after checking the
-producer UID, `Ready` condition, output type and generation, consumer access,
-and `outputGrants`. The template binding then writes that resolved string into
-the storefront Workload field. In short, the value flows from
+The planner resolves `backend.apiHost` to `orders.example.com` only after
+checking the producer UID, `Ready` condition, output type and generation,
+consumer access, and `outputGrants`. The template binding writes the resolved
+string into the storefront Workload field. The value flows from
 `orders-api.status.outputs.hostname.value` through
-`storefront.spec.inputs.apiHost.appRef` to the template binding's
-`fromInput: apiHost`. `AppPlan` reports the producer UID and output
+`storefront.spec.inputs.backend.apiHost.appRef` to the template binding's
+`fromInput: /backend/apiHost`. `AppPlan` reports the producer UID and output
 generation; apply rechecks both. A new ready output generation replans the
 consumer and updates only its owned resources. If the producer is unavailable,
 the grant is revoked, or the output type changes, the consumer reports a blocked
