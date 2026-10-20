@@ -185,12 +185,11 @@ project.
 An `appRef` is one way to supply a template input. The template declares the
 resolved value's type, such as `string`; the App input supplies a literal
 `value`, an in-project `resourceRef`, or an `appRef` where its declared type
-permits it. An `appRef` identifies a producing project, App UID, and output. A
-template may restrict which source forms an input accepts. The producer's
-template declares the output type, while the producer App grants specific
-consumer projects access to that output. The planner checks consumer
-authorization and, for cross-project references, the
-producer's grant. It records the producer UID, output contract, and observed
+permits it. An `appRef` identifies a producing project, App UID, and output.
+The producer's template declares the output type, while the producer App grants
+specific consumer projects access to that output. The planner validates the
+resolved value against the input type, checks consumer authorization and any
+cross-project grant, and records the producer UID, output contract, and observed
 output generation in the plan and consumer status, so name reuse or a stale
 plan cannot silently retarget a binding.
 
@@ -290,7 +289,7 @@ The producer template above declares `hostname` as a `string` output. The
 `orders-api` App in project `orders` supplies its value and grants
 project `shop` access. Its controller publishes the ready value in
 `status.outputs.hostname`. The consumer template declares a normal `string`
-input whose source must be an App output:
+input, which this installation will source from an App output:
 
 ```yaml
 # Relevant fields of the storefront template in project shop.
@@ -303,7 +302,6 @@ spec:
     - name: apiHost
       type: string
       required: true
-      allowedSources: [AppOutput]
   components:
     - name: storefront
       create:
@@ -317,10 +315,9 @@ spec:
           toPath: /spec/template/spec/runtime/sandbox/containers/0/env/0/value
 ```
 
-Here `allowedSources: [AppOutput]` requires an `appRef`, while `type: string`
-constrains the resolved output value. A template can also allow both `Value`
-and `AppOutput` when the installer should choose between a literal and another
-App's output.
+Here `type: string` constrains the resolved value. The installer can provide
+either a literal string or an `appRef` to a string output; both reach the same
+`fromInput: apiHost` binding after validation.
 
 The storefront App selects the producing installation and output. The client
 can obtain the producer UID while selecting the App; the API requires it in the
