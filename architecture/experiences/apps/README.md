@@ -12,8 +12,9 @@ API group does not require its implementation to live in the `milo-os/milo`
 repository. The Apps service and schemas remain owned by `datum-labs/apps` and
 are served through Milo's normal service API and discovery integration. Names
 and field shapes below are for review; service-specific manifests still use
-their native APIs. Authoring begins in a project. Every published
-`AppTemplate` version is stored and discoverable through the Platform context.
+their native APIs. An App may keep its definition in its project indefinitely;
+publication is optional. Every published `AppTemplate` version is stored and
+discoverable through the Platform context.
 Its `publisherRef` identifies Datum or an organization; publisher identity is
 metadata and authorization, not a second API scope. Apps and plans live in a
 project. The Platform list and get APIs filter published versions by visibility
@@ -24,10 +25,9 @@ deploying.
 
 | Resource | Purpose |
 | --- | --- |
-| `AppTemplateDraft` | Editable recipe in an authoring project; supports preview and test installations there. |
-| `AppPublication` | Project-scoped request to validate an exact draft revision and publish an immutable version in Platform context for an authorized publisher. |
+| `AppPublication` | Optional project-scoped request to publish an exact App revision as an immutable version in Platform context for an authorized publisher. |
 | `AppTemplate` | Platform-scoped immutable published version. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
-| `App` | Desired installation: template reference and input values. Its status reports the observed deployment. |
+| `App` | Desired installation: either an inline definition or a published template reference, plus inputs. Its status reports the observed deployment. |
 | `AppPlan` | Side-effect-free preview of a proposed App create or update. Creating a plan never enables services or creates components. |
 | `AppRevision` | Immutable record of an accepted App spec, used for history and rollback. It stores references rather than secret values. |
 
@@ -36,22 +36,26 @@ deletes an App with `Retain`. It is not a second installation.
 
 ### Project authoring and catalog discovery
 
-A project-scoped `AppTemplateDraft` is the working recipe. An author may build
-it directly or derive it from an App's accepted revision, then replace
-project-specific values with typed inputs and identify references that
-installers must supply. The draft can be planned and installed for testing only
-in its source project. An `AppPublication` names the exact draft revision,
-publisher identity, visibility, family, and version. Publishing checks the
-author's rights in the source project and publisher organization, target API
-schemas, bindings, required services, referenced-resource rules, and the
-absence of embedded credentials. It then stores an immutable published snapshot
-in Platform context. A live App or its resource
-state is never the template's ongoing source of truth.
+An App can contain an inline `spec.definition` with the same validated
+components, inputs, bindings, and outputs as a template. It can be planned,
+installed, updated, and rolled back within its project without publication.
+Each accepted change creates an immutable `AppRevision`; reconciliation uses
+that accepted snapshot. `spec.definition` and `spec.templateRef` are mutually
+exclusive, so an installation has one source of desired state.
 
-The published version records source project and revision, publisher identity,
-content digest, compatibility requirements, and lifecycle state. The discovery
-API exposes these along with required permissions, inputs, and outputs.
-Project drafts are private to their project. Platform discovery filters
+An optional `AppPublication` names an exact App UID and revision, publisher
+identity, visibility, family, and version. The author reviews which local
+values become typed inputs and which references installers must supply.
+Publishing checks rights in the source project and publisher identity,
+target API schemas, bindings, required services, reference rules, and the
+absence of embedded credentials. It then stores an immutable published
+snapshot in Platform context. Live App state never becomes the template's
+ongoing source of truth.
+
+The published version records source project, App UID and revision, publisher
+identity, content digest, compatibility requirements, and lifecycle state.
+Discovery exposes these along with required permissions, inputs, and outputs.
+Unpublished Apps remain in their project. Platform discovery filters
 published versions by visibility, publisher policy, and service availability;
 private organization versions are visible only to authorized callers in that
 organization. List, get, plan, and install must enforce the same visibility
@@ -60,6 +64,7 @@ includes publisher identity and immutable version identity, so equal family
 names cannot collide. The service assigns a unique Platform object name from
 that qualified identity; consumers do not infer publisher identity from a
 display name.
+
 Deprecation hides a version from recommended discovery while existing pinned
 Apps continue to work. Emergency revocation blocks new installs and upgrades;
 existing installations retain the snapshot needed for safe reconciliation,
@@ -131,17 +136,20 @@ spec:
       fromInput: hostname
 ```
 
-An `App` contains only customer choices; the controller resolves the pinned
-template and creates the declared components. Direct resource inputs include
-group, kind, name, and scope and resolve within the installation project.
+An `App` may use the pinned template shown below or carry an inline
+`spec.definition` using the template's component schema. The controller
+validates either form and creates the declared components. Direct resource
+inputs include group, kind, name, and scope and resolve within the installation
+project.
 Cross-project composition uses a typed `appRef` input naming the producing
-project and App plus a declared output. The producing template defines the
-output's type and whether it may be exported; the producing App explicitly
-grants access to the consuming project. The planner checks both the consumer's
-right to use it and the producer's grant. The consumer records the producer's
-UID and output contract, detects name reuse, and watches for relevant output
-or readiness changes. A missing producer, revoked grant, incompatible output,
-or dependency cycle blocks affected reconciliation with an actionable
+project and App plus a declared output. Its template or inline definition
+declares the output's type and whether it may be exported. The producing App
+explicitly grants access to the consuming project. The planner checks both
+the consumer's right to use it and the producer's grant. The consumer records
+the producer's UID and output contract, detects name reuse, and watches for
+relevant output or readiness changes. A missing producer, revoked grant,
+incompatible output, or dependency cycle blocks affected reconciliation with
+an actionable
 condition. The consumer never adopts or deletes the producer or its resources.
 For example, a database App in project `data` could export an `endpoint` to
 project `orders`; an API App in `orders` could bind that output to one of its
@@ -198,6 +206,11 @@ spec:
       value: orders.example.com
 ```
 
+For a project-only App, `spec.definition` replaces `spec.templateRef` in the
+same request. Its components and outputs remain private to that project unless
+the owner later publishes a selected revision. Editing the definition creates
+a new App revision; publication is never required for normal operations.
+
 The controller populates status; clients do not set it:
 
 ```yaml
@@ -220,10 +233,11 @@ status:
 ```
 
 The app controller reports `status.observedGeneration`, the resolved template
-version, conditions (`Accepted`, `Progressing`, `Ready`), per-component
-resource references and conditions, and declared outputs such as the hostname. A
-condition identifies the failed component and its actionable reason. Created
-resources carry a protected App installation UID marker and appear in the App's
+version or local revision, conditions (`Accepted`, `Progressing`, `Ready`),
+per-component resource references and conditions, and declared outputs such as
+the hostname. A condition identifies the failed component and its actionable
+reason. Created resources carry a protected App installation UID marker and
+appear in the App's
 inventory; referenced resources are never adopted.
 
 To preview a change, a client creates an `AppPlan` with `spec.app` containing
@@ -232,15 +246,14 @@ that name in the project. Its `status` returns the resources to create, update,
 or delete; required service enablements; permission or quota failures; and
 available cost estimates with their assumptions or an explicit unknown.
 Applying the App repeats validation because a plan can become stale. Every
-accepted App spec is retained as an `AppRevision`
-for audit; rollback reapplies a prior successful revision's template reference
-and inputs.
+accepted App spec is retained as an `AppRevision` for audit; rollback reapplies
+the prior successful local definition or template reference and inputs.
 Secrets are accepted only as references, never copied into plans, revisions,
 status, or generated activity messages.
 
-Updating `spec.templateRef` or `spec.inputs` reconciles only app-owned
-components. A failed component leaves the app `Ready=False` with partial
-progress visible and can be retried. Deleting an App removes its owned
+Updating `spec.definition`, `spec.templateRef`, or `spec.inputs` reconciles
+only app-owned components. A failed component leaves the app `Ready=False` with
+partial progress visible and can be retried. Deleting an App removes its owned
 components after a deletion preview; existing referenced resources and shared
 service entitlements remain. Native resource admission, permissions, and
 service-specific safety checks still apply to every generated change.
@@ -281,12 +294,13 @@ for release.
 
 The service has three parts:
 
-1. **Template API and admission:** Store immutable template versions. Check
-   publisher permissions, target API discovery, typed bindings, dependency
-   cycles, reference scope, and secret handling before publication. Require
+1. **App API and publication:** Validate inline App definitions and immutable
+   published template versions with the same schema. Check publisher
+   permissions, target API discovery, typed bindings, dependency cycles,
+   reference scope, and secret handling before publication. Require
    target APIs to validate their own resource specs. Templates cannot execute
    scripts or bypass service admission.
-2. **Shared planner:** Resolve a template version and App inputs into a stable
+2. **Shared planner:** Resolve an inline definition or template version and App inputs into a stable
    component graph. Validate references, project permissions, service
    entitlements, quotas, and service-specific admission. Diff that graph against
    the App's owned resources. Use the same planner for `AppPlan` and controller
