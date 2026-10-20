@@ -9,9 +9,9 @@ latest-milestone: "TBD"
 ## Summary
 
 Apps give customers one place to deploy and manage a complete application on
-Datum Cloud. An **App** is a project-scoped deployment that can contain its own
-definition or use a published **App Template**. A template is a versioned recipe
-for reuse; publishing is optional. A customer reviews the resources and
+Datum Cloud. An **App** is a project-scoped installation of a versioned
+**App Template**. Authors can keep templates private to a project or submit a
+version for publication. A customer reviews the resources and
 expected costs, then deploys. Datum shows one app-level view of readiness,
 endpoints, usage, and changes across the underlying resources.
 
@@ -63,11 +63,11 @@ a reusable offering that other projects can discover and install.
 
 | Concept | Customer meaning |
 | --- | --- |
-| App Template | A reusable, versioned recipe with a description, required services, configurable inputs, components, outputs, and an upgrade path. |
-| App | One project installation with its own definition or a pinned published template, inputs, and owned resources. |
+| App Template | A project-authored, versioned recipe with a description, required services, configurable inputs, components, outputs, and an upgrade path. Approved versions can be published to the Platform repository. |
+| App | One project installation pinned to a project template revision or published version, with its own inputs and owned resources. |
 | Component | A Datum resource created by the app, or a reference to an existing resource or managed service in its project. |
 
-A local definition or template can connect components by passing declared
+A template can connect components by passing declared
 outputs into later inputs, such as a Workload's service endpoint into an HTTP
 route. It can ask for an existing network or domain instead of creating one.
 The definition declares which components it owns; referenced resources remain
@@ -88,20 +88,22 @@ App's project.
 
 ### Author and publish
 
-An author can define, preview, deploy, and keep an App entirely within a
-project. Every accepted change creates a project revision for history and
-rollback. If the author later wants reuse elsewhere, they submit one revision
-for publication and choose which values become template inputs. A platform
+An author can define a template, retain its revision history, and install
+instances entirely within one project. Each App also keeps installation
+revisions for input changes and rollback. If the author later wants reuse
+elsewhere, they submit one template revision for publication. A platform
 operator reviews that exact snapshot and approves or rejects it. Only approved
 versions enter the platform app repository and become discoverable. The source
 project and revision remain as provenance, but installations depend on the
-immutable published version. Project-specific values and secret contents never
+immutable published version. Installation values and secret contents never
 enter the repository.
+The create flow may author a private template and its first App together, so a
+one-off deployment does not require a separate manual publishing step.
 
 Platform discovery shows approved versions from the single repository, with
 their source, version, required services and permissions, outputs, and lifecycle
 state. A publication may be visible to the source organization or to all
-customers, as approved by the platform operator. Unpublished Apps and their
+customers, as approved by the platform operator. Unpublished templates and their
 revision history remain in their projects. Publishing a new version does not
 change existing installations.
 
@@ -115,7 +117,7 @@ inputs connect existing Apps; they do not distribute or clone an App.
 
 ### Customer experience
 
-1. **Start:** Define an App in the project or browse published templates by use
+1. **Start:** Author or select a project template, or browse published templates by use
    case, services, required permissions, resources, and pricing dimensions.
 2. **Configure:** Select a project, name the app, choose a deployment location,
    provide a container image or artifact, and fill in the App's inputs.
@@ -124,9 +126,9 @@ inputs connect existing Apps; they do not distribute or clone an App.
    external resources the app will use, and estimated recurring cost. Deployment
    reports progress per component and gives a useful error when action is needed.
 4. **Operate:** Open the app to find its endpoint, health, recent activity,
-   component resources, and costs. Update its definition or inputs, or select a newer template
-   version after reviewing the resulting plan. Revert to a prior successful
-   version when an update fails.
+   component resources, and costs. Update its inputs or select a newer project
+   template revision or published version after reviewing the resulting plan.
+   Revert to a prior successful installation revision when an update fails.
 5. **Delete:** Preview what will be removed. App-owned resources are deleted;
    referenced resources and shared service entitlements are retained. Choose
    **keep resources** before deletion to graduate owned resources to direct
@@ -140,14 +142,14 @@ one, subject to that service's availability and permissions.
 
 ### Initial scope
 
-- Support project-only Apps alongside the first platform-curated template, then
+- Support project templates and their local App installations alongside the first platform-curated template, then
   enable operator-reviewed publication from customer projects once validation
   and approval are proven.
   Start with Workload, Gateway/HTTP route, domain, and references to existing
   services; add Function and new managed services as they mature.
 - Publish immutable template versions when reuse is wanted. Existing template
   installations stay on their selected version until an owner chooses an update;
-  project-only Apps keep their own revision history.
+  project templates and App installations keep their own revision histories.
 - Validate inputs and permissions, show a plan, reconcile created resources,
   and expose partial failure and retry at the component level.
 - Record app ownership on created resources so updates and deletion can
@@ -182,13 +184,14 @@ one, subject to that service's availability and permissions.
 
 ### API and ownership contract
 
-The proposed API stores operator-approved, immutable `AppTemplate` versions in
-one Platform-scoped repository, with source attribution and operator-controlled
-lifecycle state.
-It includes a project-scoped `App` with either an inline definition or a pinned
-template reference, side-effect-free `AppPlan` previews, and immutable
-`AppRevision` history. Definitions and templates declare the resources
-they create or reference, typed inputs and outputs, and required services. A
+The proposed API stores project-scoped `AppTemplate` definitions and immutable
+`AppTemplateRevision` history. Operator-approved, immutable
+`PublishedAppTemplate` versions live in one Platform-scoped repository, with
+source attribution and operator-controlled lifecycle state. Every project-scoped
+`App` pins one template revision or published version; `AppPlan` previews are
+side-effect-free, and `AppRevision` records installation changes. Templates
+declare the resources they create or reference, typed inputs and outputs, and
+required services. A
 plan shows expected resource changes and available cost estimates before the
 App is applied.
 
@@ -202,9 +205,9 @@ release sequence that preserves single ownership.
 
 ### Delivery sequence
 
-1. **First vertical slice:** A project-only Web API App and one platform-curated
+1. **First vertical slice:** A project Web API template and App installation, and one platform-curated
    Web API template, each using a Workload, an existing Gateway, and an HTTP
-   route. Ship `AppTemplate`, `App`, a shared planner, and ownership admission
+   route. Ship project `AppTemplate`, `PublishedAppTemplate`, `App`, a shared planner, and ownership admission
    through API and CLI before adding a template gallery. Resolve the
    Workload-to-route backend contract with Networking first.
 2. **Safe lifecycle:** Add plans, component status, deletion, retention and
@@ -218,7 +221,7 @@ release sequence that preserves single ownership.
    contracts.
 
 The first release succeeds when a project owner can preview, deploy, inspect,
-update, and remove both a project-only and curated Web API without manually
+update, and remove both a private-template and curated Web API without manually
 coordinating their component resources.
 
 ### Open decisions
@@ -241,7 +244,7 @@ stored App spec and resource inventory.
 
 ### Rollout, Upgrade and Rollback Planning
 
-Roll out the project-only and curated Web API flows to pilot projects. Template
+Roll out the private-template and curated Web API flows to pilot projects. Template
 versions are immutable, so publishing a new version does not alter existing
 Apps. Keep the controller compatible with stored revisions during upgrades and
 rollbacks.

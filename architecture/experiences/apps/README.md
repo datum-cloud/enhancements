@@ -12,8 +12,8 @@ API group does not require its implementation to live in the `milo-os/milo`
 repository. The Apps service and schemas remain owned by `datum-labs/apps` and
 are served through Milo's normal service API and discovery integration. Names
 and field shapes below are for review; service-specific manifests still use
-their native APIs. An App may keep its definition and revision history in its
-project indefinitely; publication is optional. Every approved `AppTemplate`
+their native APIs. A template may keep its definition and revision history in its
+project indefinitely; publication is optional. Every approved `PublishedAppTemplate`
 version is stored in one Platform-scoped app repository and discoverable through
 the Platform context. This is a logical repository served by the Apps API; its
 backing storage is an implementation choice distinct from the `datum-labs/apps`
@@ -23,9 +23,11 @@ installation project.
 
 | Resource | Purpose |
 | --- | --- |
-| `AppPublication` | Optional project-scoped request to submit an exact App revision for platform operator review. |
-| `AppTemplate` | Platform-scoped, operator-approved immutable version in the app repository. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
-| `App` | Desired installation: either an inline definition or a published template reference, plus inputs. Its status reports the observed deployment. |
+| `AppTemplate` | Project-scoped reusable definition; authoring changes create immutable revisions. |
+| `AppTemplateRevision` | Immutable project snapshot of one accepted template definition, used for local installs, history, rollback, and publication. |
+| `AppPublication` | Optional project-scoped request to submit an exact template revision for platform operator review. |
+| `PublishedAppTemplate` | Platform-scoped, operator-approved immutable version in the app repository. `spec.family` groups versions for discovery; `spec.version` identifies one release. |
+| `App` | Desired installation pinned to a project template revision or published version, plus inputs. Its status reports the observed deployment. |
 | `AppPlan` | Side-effect-free preview of a proposed App create or update. Creating a plan never enables services or creates components. |
 | `AppRevision` | Immutable record of an accepted App spec, used for history and rollback. It stores references rather than secret values. |
 
@@ -34,19 +36,25 @@ deletes an App with `Retain`. It is not a second installation.
 
 ### Project authoring and catalog discovery
 
-An App can contain an inline `spec.definition` with the same validated
-components, inputs, bindings, and outputs as a template. It can be planned,
-installed, updated, and rolled back within its project without publication.
-Each accepted change creates an immutable, project-scoped `AppRevision` with
-actor, timestamp, and change provenance; reconciliation and rollback use these
-snapshots. A project owner can list, compare, and roll back revisions without
-ever submitting one for publication. `spec.definition` and `spec.templateRef`
-are mutually exclusive, so an installation has one source of desired state.
+An author creates an `AppTemplate` in a project and declares components,
+inputs, bindings, and outputs. Each accepted edit creates an immutable
+`AppTemplateRevision` with actor, timestamp, digest, and change provenance.
+A project owner can preview, compare, and roll back template revisions without
+publishing. Every `App` has a `spec.templateRef` pinned either to an exact
+revision of a template in its own project or to an approved Platform version;
+there is no inline installation definition. Accepted App spec changes create
+separate immutable `AppRevision` records for installation history and rollback.
+Changing a template does not alter existing pinned installations.
+Keep a pinned project revision available while an App uses it, even if the
+authoring template is later deleted; garbage collection waits until no App or
+publication references the revision. Deleting the authoring template blocks new
+installs from its revisions. A published version retains its own
+immutable snapshot independently of the authoring project.
 
-An optional `AppPublication` names an exact App UID, immutable revision and
-content digest, plus proposed family, version, audience, and typed inputs. The author
-reviews which local values become inputs and which references installers must
-supply. Submission freezes the request. Validation checks source-project
+An optional `AppPublication` names an exact template UID, immutable revision,
+and content digest, plus proposed family, version, and audience. The author
+reviews which inputs and references installers must supply. Submission freezes
+the request. Validation checks source-project
 permission, target API schemas, bindings, required services, reference rules,
 and the absence of embedded credentials. The request then enters a Platform
 review queue as `PendingApproval`; it is not discoverable or installable.
@@ -57,11 +65,11 @@ kind: AppPublication
 metadata:
   name: orders-api-1-0-0
 spec:
-  appRef:
+  templateRef:
     name: orders-api
-    uid: "<app-uid>"
+    uid: "<template-uid>"
   revisionRef:
-    name: orders-api-r3
+    name: orders-api-template-r3
     digest: "sha256:<revision-digest>"
   family: orders-api
   version: 1.0.0
@@ -74,12 +82,12 @@ A platform operator reviews the exact digest, validation results, permissions,
 and example plan, then approves or rejects with an auditable identity, time,
 and reason. Only an operator may record that decision or change a published
 version's lifecycle state; the submitter cannot write approval status. Only
-the publication controller may create `AppTemplate` records from approved
+the publication controller may create `PublishedAppTemplate` records from approved
 requests, so direct API creation cannot bypass review. Before approval, recheck
 the frozen digest, source-project eligibility, and current target schemas.
-Changing the source App does not change the reviewed snapshot. Approval writes
-an immutable `AppTemplate` to the Platform repository and records its source
-project, App UID and revision, submitter, approver, digest, compatibility
+Changing the source template does not change the reviewed snapshot. Approval writes
+an immutable `PublishedAppTemplate` to the Platform repository and records its source
+project, template UID and revision, submitter, approver, digest, compatibility
 requirements, and lifecycle state. A rejected request stays unpublished.
 
 Platform list and get expose only approved versions allowed by their audience.
@@ -88,14 +96,14 @@ organization; `Public` versions are discoverable platform-wide. An operator
 approves the requested audience or rejects the request; broadening it requires
 a new submission by the author. List, get, plan, and install all enforce the
 approved audience. Project service availability and installer rights are checked at
-plan and install. Unpublished Apps and their revisions remain in their
+plan and install. Unpublished templates and their revisions remain in their
 projects. The repository assigns a unique canonical template identity, so
 equal display names do not collide. Live App state never becomes the
 template's ongoing source of truth.
 
 The repository distributes recipes, not running installations. Every install
 creates a new project App UID, revision history, and owned-resource inventory;
-the source App's project never owns the consumer's resources. An app company's
+the authoring project never owns the consumer's resources. An app company's
 public template may request a new instance of its provider-managed service via
 the normal Service Catalog entitlement and native service API. The provider
 operates that service; the customer controls the App installation and its
@@ -110,8 +118,10 @@ existing installations retain the snapshot needed for safe reconciliation,
 deletion, and graduation. The source project may be removed without changing
 published versions.
 
-An `AppTemplate` declares typed inputs, required catalog services, components,
-and public outputs. Each component either **creates** a service-native resource
+An `AppTemplate` or `PublishedAppTemplate` declares typed inputs, required
+catalog services, components, and outputs. The project template uses the same
+graph schema as the published version; publication adds family, version,
+audience, provenance, and approval state. Each component either **creates** a service-native resource
 or **references** an existing one. Typed bindings copy an input or another
 component's declared output into a field accepted by the target API. Publishing
 validates binding types, target schemas, and dependency cycles. This keeps
@@ -121,7 +131,7 @@ the app contract:
 
 ```yaml
 apiVersion: apps.miloapis.com/v1alpha1
-kind: AppTemplate
+kind: PublishedAppTemplate
 metadata:
   name: web-api-v1
 spec:
@@ -172,13 +182,13 @@ spec:
       fromInput: hostname
 ```
 
-An `App` may use the pinned template shown below or carry an inline
-`spec.definition` using the template's component schema. The controller
-validates either form and creates the declared components. Direct resource
+An `App` pins a revision of an `AppTemplate` in its project or an approved
+`PublishedAppTemplate` version from the Platform repository. The controller
+resolves that immutable snapshot and creates the declared components. Direct resource
 inputs include group, kind, name, and scope and resolve within the installation
 project.
 An `appRef` input names a producing project, App, and declared output. Its
-template or inline definition declares the expected output type. The producer
+template declares the expected output type. The producer
 declares whether the output is exportable and grants access to specific
 consumer projects for cross-project references. The planner checks consumer
 authorization for every reference and the producer's grant across projects. It resolves
@@ -251,7 +261,9 @@ metadata:
   namespace: default
 spec:
   templateRef:
+    source: Platform # Or Project with revision instead of version.
     name: web-api-v1
+    version: 1.0.0
   uninstallPolicy: Delete # Set to Retain before deleting to keep owned resources.
   inputs:
     image:
@@ -265,10 +277,19 @@ spec:
       value: orders.example.com
 ```
 
-For a project-only App, `spec.definition` replaces `spec.templateRef` in the
-same request. Its components and outputs remain private to that project unless
-the owner later publishes a selected revision. Editing the definition creates
-a new App revision; publication is never required for normal operations.
+For a project App, `spec.templateRef` uses `source: Project`, the local
+template name, UID, and immutable revision name. The template and its history
+remain private to that project unless the owner publishes a selected revision.
+Editing a template creates a new template revision; an installation adopts it
+only after its owner updates the App's pinned reference and reviews a plan.
+
+```yaml
+templateRef:
+  source: Project
+  name: orders-api
+  uid: "<template-uid>"
+  revision: orders-api-template-r3
+```
 
 The controller populates status; clients do not set it:
 
@@ -292,7 +313,7 @@ status:
 ```
 
 The app controller reports `status.observedGeneration`, the resolved template
-version or local revision, conditions (`Accepted`, `Progressing`, `Ready`),
+version or project template revision, conditions (`Accepted`, `Progressing`, `Ready`),
 per-component resource references and conditions, and declared outputs such as
 the hostname. A condition identifies the failed component and its actionable
 reason. Created resources carry a protected App installation UID marker and
@@ -306,11 +327,11 @@ or delete; required service enablements; permission or quota failures; and
 available cost estimates with their assumptions or an explicit unknown.
 Applying the App repeats validation because a plan can become stale. Every
 accepted App spec is retained as an `AppRevision` for audit; rollback reapplies
-the prior successful local definition or template reference and inputs.
+the prior successful template reference and inputs.
 Secrets are accepted only as references, never copied into plans, revisions,
 status, or generated activity messages.
 
-Updating `spec.definition`, `spec.templateRef`, or `spec.inputs` reconciles
+Updating `spec.templateRef` or `spec.inputs` reconciles
 only app-owned components. A failed component leaves the app `Ready=False` with
 partial progress visible and can be retried. Deleting an App removes its owned
 components after a deletion preview; existing referenced resources and shared
@@ -353,13 +374,13 @@ for release.
 
 The service has three parts:
 
-1. **App API and publication:** Validate inline App definitions and immutable
+1. **App API and publication:** Validate project template revisions and immutable
    published template versions with the same schema. Check submission rights,
    platform operator approval, target API discovery, typed bindings, dependency
    cycles, reference scope, and secret handling before publication. Require
    target APIs to validate their own resource specs. Templates cannot execute
    scripts or bypass service admission.
-2. **Shared planner:** Resolve an inline definition or template version and App inputs into a stable
+2. **Shared planner:** Resolve a pinned project template revision or published version and App inputs into a stable
    component graph. Validate references, project permissions, service
    entitlements, quotas, and service-specific admission. Diff that graph against
    the App's owned resources. Use the same planner for `AppPlan` and controller
