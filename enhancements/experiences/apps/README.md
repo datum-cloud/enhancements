@@ -93,7 +93,9 @@ flowchart LR
 ```
 
 Each arrow is a separately authorized output binding. The three Apps are
-independent installations with separate resources and deletion lifecycles.
+independent installations with separate resources and deletion lifecycles. The
+consumer App's `appRef` selects the producer's declared output; the consumer
+template binds the resolved value into one of its components.
 
 ### Author and publish
 

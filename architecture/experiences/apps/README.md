@@ -183,14 +183,17 @@ An `App` pins a revision of an `AppTemplate` in its project or an approved
 resolves that immutable snapshot and creates the declared components. Direct resource
 inputs include group, kind, name, and scope and resolve within the installation
 project.
-An `appRef` input names a producing project, App, and declared output. Its
-template declares the expected output type. The producer
-declares whether the output is exportable and grants access to specific
-consumer projects for cross-project references. The planner checks consumer
-authorization for every reference and the producer's grant across projects. It resolves
-the producer UID, output contract, and observed output generation into the plan
-and consumer status, so name reuse or a stale plan cannot silently retarget a
-binding.
+An `appRef` is one way to supply a template input. The template declares the
+resolved value's type, such as `string`; the App input supplies a literal
+`value`, an in-project `resourceRef`, or an `appRef` where its declared type
+permits it. An `appRef` identifies a producing project, App UID, and output. A
+template may restrict which source forms an input accepts. The producer's
+template declares the output type and whether it is exportable, while the
+producer App grants specific consumer projects access to that output. The
+planner checks consumer authorization and, for cross-project references, the
+producer's grant. It records the producer UID, output contract, and observed
+output generation in the plan and consumer status, so name reuse or a stale
+plan cannot silently retarget a binding.
 
 These references form a directed acyclic graph across projects. For example,
 `data/shared-db` can supply an endpoint to `orders/api`, which can supply its
@@ -206,46 +209,12 @@ producers, revoked grants, changed output contracts, and cycles set an
 actionable blocked condition and pause dependent writes while preserving their
 existing owned resources. Deletion never cascades through the graph.
 
-For the first link in that chain:
-
-```yaml
-# Consumer template input
-inputs:
-  - name: databaseEndpoint
-    type: appOutputRef
-    outputType: string
----
-# Producer App spec, in project data
-outputGrants:
-  - output: endpoint
-    projects: [orders]
----
-# Consumer App input, in project orders
-databaseEndpoint:
-  appRef:
-    project: data
-    name: shared-db
-    output: endpoint
----
-# API App spec, in project orders: a separate grant for its own output
-outputGrants:
-  - output: route
-    projects: [shop]
----
-# Storefront App input, in project shop
-apiRoute:
-  appRef:
-    project: orders
-    name: orders-api
-    output: route
-```
-
 Exports contain typed, non-secret values or service-defined scoped references,
 never credential contents. Each subsequent link requires its own declared
 output and grant; an upstream value may be re-exported only when its producer
 permits that propagation through an explicit `allowReexport` grant field.
-Derived outputs from the consumer's own components, such as the API route
-above, use that consumer's output contract and grant. A producer may change a value within its declared
+Derived outputs from the consumer's own components use that consumer's output
+contract and grant. A producer may change a value within its declared
 type, while consumers reconcile under their own authority. Output grants do
 not transfer ownership or grant access to upstream Apps further along a chain.
 
@@ -271,6 +240,9 @@ spec:
         name: shared-edge
     hostname:
       value: orders.example.com
+  outputGrants:
+    - output: hostname
+      projects: [shop]
 ```
 
 For a project App, `spec.templateRef` uses `source: Project`, the local
@@ -305,8 +277,88 @@ status:
         name: orders-api-api
       ready: true
   outputs:
-    hostname: orders.example.com
+    hostname:
+      type: string
+      value: orders.example.com
+      observedGeneration: 1
 ```
+
+### Wiring an output into another App
+
+The producer template above declares `hostname` as an exportable `string`
+output. The `orders-api` App in project `orders` supplies its value and grants
+project `shop` access. Its controller publishes the ready value in
+`status.outputs.hostname`. The consumer template declares a normal `string`
+input whose source must be an App output:
+
+```yaml
+# Relevant fields of the storefront template in project shop.
+apiVersion: apps.miloapis.com/v1alpha1
+kind: AppTemplate
+metadata:
+  name: storefront
+spec:
+  inputs:
+    - name: apiHost
+      type: string
+      required: true
+      allowedSources: [AppOutput]
+  components:
+    - name: storefront
+      create:
+        apiVersion: compute.datumapis.com/v1alpha
+        kind: Workload
+        # Service-native Workload spec omitted.
+      bindings:
+        - fromInput: apiHost
+          # Illustrative target; include the env entry in the Workload spec.
+          # Planner validation checks this path against the native API.
+          toPath: /spec/template/spec/runtime/sandbox/containers/0/env/0/value
+```
+
+Here `allowedSources: [AppOutput]` requires an `appRef`, while `type: string`
+constrains the resolved output value. A template can also allow both `Value`
+and `AppOutput` when the installer should choose between a literal and another
+App's output.
+
+The storefront App selects the producing installation and output. The client
+can obtain the producer UID while selecting the App; the API requires it in the
+accepted reference so deleting and recreating `orders-api` cannot silently
+switch the input to a new producer:
+
+```yaml
+# Relevant fields of the storefront App in project shop.
+apiVersion: apps.miloapis.com/v1alpha1
+kind: App
+metadata:
+  name: storefront-prod
+spec:
+  templateRef:
+    source: Project
+    name: storefront
+    uid: "<storefront-template-uid>"
+    revision: storefront-r2
+  inputs:
+    apiHost:
+      appRef:
+        project: orders
+        name: orders-api
+        uid: "<orders-api-app-uid>"
+        output: hostname
+```
+
+The planner resolves `apiHost` to `orders.example.com` only after checking the
+producer UID, `Ready` condition, output type and generation, consumer access,
+and `outputGrants`. The template binding then writes that resolved string into
+the storefront Workload field. In short, the value flows from
+`orders-api.status.outputs.hostname.value` through
+`storefront.spec.inputs.apiHost.appRef` to the template binding's
+`fromInput: apiHost`. `AppPlan` reports the producer UID and output
+generation; apply rechecks both. A new ready output generation replans the
+consumer and updates only its owned resources. If the producer is unavailable,
+the grant is revoked, or the output type changes, the consumer reports a blocked
+dependency and preserves its existing resources. Its desired App spec and
+`AppRevision` do not change merely because the producer's output changed.
 
 The app controller reports `status.observedGeneration`, the resolved template
 version or project template revision, conditions (`Accepted`, `Progressing`, `Ready`),
