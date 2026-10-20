@@ -115,19 +115,52 @@ spec:
         # resource for the api component.
   outputs:
     - name: hostname
+      type: string
+      exportable: true
       fromInput: hostname
 ```
 
 An `App` contains only customer choices; the controller resolves the pinned
-template and creates the declared components. Resource inputs include the
-target project, group, kind, name, and scope in the actual API. They may resolve
-across projects when the target service supports that reference and the
-resource's project explicitly grants its use. The App checks both the
-installer's right to use the reference and the resource project's sharing
-grant. It records the resolved target UID to detect deletion or name reuse.
-Revoked access or a missing target blocks dependent reconciliation and reports
-an actionable condition; it never causes the App to recreate or delete the
-target.
+template and creates the declared components. Direct resource inputs include
+group, kind, name, and scope and resolve within the installation project.
+Cross-project composition uses a typed `appRef` input naming the producing
+project and App plus a declared output. The producing template defines the
+output's type and whether it may be exported; the producing App explicitly
+grants access to the consuming project. The planner checks both the consumer's
+right to use it and the producer's grant. The consumer records the producer's
+UID and output contract, detects name reuse, and watches for relevant output
+or readiness changes. A missing producer, revoked grant, incompatible output,
+or dependency cycle blocks affected reconciliation with an actionable
+condition. The consumer never adopts or deletes the producer or its resources.
+For example, a database App in project `data` could export an `endpoint` to
+project `orders`; an API App in `orders` could bind that output to one of its
+inputs:
+
+```yaml
+# Consumer template input
+inputs:
+  - name: databaseEndpoint
+    type: appOutputRef
+    outputType: string
+---
+# Producer App spec, in project data
+outputGrants:
+  - output: endpoint
+    projects: [orders]
+---
+# Consumer App input, in project orders
+databaseEndpoint:
+  appRef:
+    project: data
+    name: shared-db
+    output: endpoint
+```
+
+Exports contain typed, non-secret values or service-defined scoped references,
+never credential contents. A consumer cannot re-export an output without its
+own explicit authorization. The producer may change an output value within its
+declared type; the consumer plans and reconciles that change under its own
+revision and permissions. Output grants do not transfer ownership.
 
 ```yaml
 apiVersion: apps.miloapis.com/v1alpha1
@@ -274,8 +307,8 @@ capabilities for readiness conditions, outputs, cost estimates, and special
 deletion behavior. A required component without a readiness contract leaves
 the App's readiness unknown, and a template cannot bind to an undeclared
 output. Plans and status show when capabilities are unavailable. Platform
-policy may still deny sensitive kinds or unsupported cross-project references;
-those are authorization decisions, not a fixed list of app-capable resources.
+policy may still deny sensitive kinds or App output exports; those are
+authorization decisions, not a fixed list of app-capable resources.
 
 Each generated resource gets a stable name and a protected owner marker
 containing the App's project and immutable UID. The App stores an inventory of
@@ -287,10 +320,11 @@ owner reference alone cannot establish ownership across control planes. Use
 server-side apply with a dedicated field manager for the desired fields; field
 ownership does not authorize direct customer edits while the App manages the
 resource. Referenced resources are checked for access and readiness but never
-marked, adopted, or deleted. This also applies when a referenced resource is
-managed by another App in a different project: it has one owner and a separate
-consumer. Cross-project reference checks use the target service's sharing
-contract; Apps does not grant itself write access in the target project.
+marked, adopted, or deleted. A cross-project `appRef` consumes only approved
+outputs from another App; it does not give the consumer direct access to that
+App's component resources. The producer and consumer each retain one owner and
+an independent lifecycle. Apps does not grant itself write access in the
+producer's project.
 
 ## Ownership protection
 
@@ -373,6 +407,12 @@ until each resource is released. The release record is durable and separate
 from the deleted App so retries survive controller restarts and App garbage
 collection. Retaining a stateful component keeps its data but does not promise
 the App's former readiness or connectivity after graduation.
+An App may be removed even when another App consumes one of its outputs; there
+is no cascading deletion or implicit finalizer on the producer. Deletion
+preview lists known consumers where the caller may see them, and consumers
+report a missing dependency after removal. The producer's output grant is
+removed with it. A replacement App using the same name has a different UID
+and requires the consumer to accept a new reference.
 
 Default deletion runs the graph in reverse dependency order and keeps the App
 finalizer until owned resources are removed or a clear intervention condition
@@ -384,7 +424,7 @@ record and exposes exactly which component needs attention.
 
 ## Scale and rollout checks
 
-Apps add four customer-facing API types, an internal release record, and API
+Apps add several customer-facing API types, an internal release record, and API
 calls proportional to component count. Bound template size and plan work,
 rate-limit reconciliation per project, and restrict per-project caches to
 needed resource kinds. Milo's provider currently registers project control

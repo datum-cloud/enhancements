@@ -42,12 +42,14 @@ a reusable offering that other projects can discover and install.
 
 - Deploy a useful multi-resource application through one guided flow or a
   declarative request.
-- Let template authors compose Datum resources and reference managed services
-  through explicit inputs and outputs.
+- Let template authors compose Datum resources and consume outputs from Apps in
+  other projects through explicit inputs and outputs.
 - Give customers one app-level view of deployment progress, failures, endpoints,
   component resources, and estimated and actual spend.
 - Make updates, rollbacks, and deletion predictable while keeping each
   underlying resource inspectable in its native service.
+- Let an App consume approved outputs from another App without changing either
+  App's ownership or lifecycle.
 
 ### Non-Goals
 
@@ -65,7 +67,7 @@ a reusable offering that other projects can discover and install.
 | --- | --- |
 | App Template | A reusable, versioned recipe with a description, required services, configurable inputs, components, outputs, and an upgrade path. |
 | App | One installation of a specific template version in a project, with its supplied inputs and owned resources. |
-| Component | A Datum resource created by the app, or a reference to an existing resource or managed service. |
+| Component | A Datum resource created by the app, or a reference to an existing resource or managed service in its project. |
 
 A template can connect components by passing declared outputs into later
 inputs, such as a Workload's service endpoint into an HTTP route. It can ask for
@@ -74,11 +76,14 @@ which components it owns; referenced resources remain under their existing
 owners. Required service enablement uses the Service Catalog's entitlement
 flow, with dependencies and price implications shown before deployment.
 
-An App may reference a resource in another project when that service supports
-the connection and the resource's project has granted access. The plan shows the
-target project, the required grant, and what happens if access is withdrawn.
-The referenced resource stays with its existing owner and is not deleted with
-the App.
+An App may consume declared outputs from another App, including one in a
+different project. The producing App grants access to specific outputs; the
+consumer sees the producer, its readiness, and the dependency in its plan.
+Each App manages only its own resources. A reference never makes the consumer
+the producer's parent or owner, and deleting either App does not cascade to
+the other. Direct resource references remain available within an App's project.
+For example, a database App can share its endpoint with an API App in another
+project while retaining its own deployment and deletion controls.
 
 ### Author and publish
 
@@ -193,8 +198,9 @@ release sequence that preserves single ownership.
    name reuse, partial failure, retry, drift, and preservation of referenced
    resources in end-to-end tests.
 3. **Broader composition:** Allow organization-owned templates after publishing
-   validation is proven. Add richer readiness, outputs, and cost estimates as
-   services publish App capability contracts.
+   validation is proven. Add cross-project App output references and richer
+   readiness, outputs, and cost estimates as services publish App capability
+   contracts.
 
 The first release succeeds when a project owner can preview, deploy, inspect,
 update, and remove the curated Web API without manually coordinating its
