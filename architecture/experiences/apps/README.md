@@ -128,17 +128,21 @@ template does not create a new API resource schema. The planner validates the
 selected branch after resolving input bindings and rejects fields from other
 branches. Components and outputs may use a declarative `when` on the branch
 selector. Each component either **creates** a service-native resource or
-**references** an existing one. A reserved `$input` marker occupies the exact
-target value inside the template's native resource shape; the planner replaces
-the entire marker with a typed resolved value before validating or applying
-the resource. A `$componentOutput` marker can refer to a declared output of an
-earlier component. There is no separate destination path or string
-interpolation. These markers are Apps template syntax and never reach a native
-service API. Publishing checks each marker against the target schema and input
-type; planning and apply validate the fully rendered resource through its
-native API. A marker that is missing, ambiguous, or type-incompatible fails
-validation. This keeps composition explicit without allowing
-arbitrary template code. The example below omits most of the service-native
+**references** an existing one. A component declares `replacements` alongside
+its native resource. Each replacement has a typed Apps `source` (`inputPath`
+or `componentOutput: {component, output}`) and Kustomize-style `targets` with
+`fieldPaths` into the component's resource. The target resource is the containing
+component, so no separate resource selector is needed. These are Apps
+replacements, not a Kustomize build step. List entries are selected by
+stable fields such as `[name=api]`, never by numeric position. The planner
+resolves sources and applies replacements to a fresh copy of the immutable
+template at each plan and reconciliation. Publishing checks that each target
+matches exactly one field, that sources and targets have compatible types, and
+that component dependencies are declared. Planning and apply validate the
+rendered resource through its native API. Missing or ambiguous targets fail;
+replacements do not create list entries or interpolate strings. This keeps
+composition explicit without allowing arbitrary template code. The example
+below omits most of the service-native
 Workload and HTTPRoute specs to focus on the App contract:
 
 ```yaml
@@ -170,7 +174,7 @@ spec:
               mode:
                 const: private
           - type: object
-            required: [mode, gateway, hostname]
+            required: [mode, gateway, hostnames]
             additionalProperties: false
             properties:
               mode:
@@ -178,8 +182,11 @@ spec:
               gateway:
                 type: resourceRef
                 resourceKind: Gateway
-              hostname:
-                type: string
+              hostnames:
+                type: array
+                minItems: 1
+                items:
+                  type: string
   requiredServices:
     - compute.datumapis.com
     - networking.datumapis.com
@@ -195,9 +202,14 @@ spec:
                 sandbox:
                   containers:
                     - name: api
-                      image:
-                        $input: /runtime/image
+                      image: ""
           # Other required Workload fields omitted.
+      replacements:
+        - source:
+            inputPath: /runtime/image
+          targets:
+            - fieldPaths:
+                - spec.template.spec.runtime.sandbox.containers.[name=api].image
     - name: route
       dependsOn: [api]
       when:
@@ -209,38 +221,50 @@ spec:
         kind: HTTPRoute
         spec:
           parentRefs:
-            - name:
-                $input: /exposure/gateway
-                field: metadata.name
-          hostnames:
-            - $input: /exposure/hostname
+            - name: gateway
+          hostnames: []
           # The backend references the api component through a declared
           # component output; other HTTPRoute fields omitted.
+      replacements:
+        - source:
+            inputPath: /exposure/gateway
+            fieldPath: metadata.name
+          targets:
+            - fieldPaths:
+                - spec.parentRefs.[name=gateway].name
+        - source:
+            inputPath: /exposure/hostnames
+          targets:
+            - fieldPaths: [spec.hostnames]
   outputs:
-    - name: hostname
-      type: string
+    - name: hostnames
+      type: array
       when:
         inputEquals:
           path: /exposure/mode
           value: public
-      fromInput: /exposure/hostname
+      fromInput: /exposure/hostnames
 ```
 
-The optional `field: metadata.name` projects a checked field from the resolved
-Gateway reference before filling the route's `parentRefs.name` string.
+The optional source `fieldPath: metadata.name` projects a checked field from
+the resolved Gateway reference before filling `parentRefs.name`. The
+`gateway` value in the template is a target selector; it is replaced before
+the HTTPRoute reaches the native API. A replacement targets the whole
+`hostnames` array because its string elements have no stable key.
 
 `spec.inputs` on an App mirrors this nested schema. Its leaf fields hold
 `value`, `resourceRef`, or `appRef` bindings; the schema describes the values
-after those bindings resolve. `$input`, `fromInput` in output declarations,
-and `when.inputEquals.path` use JSON Pointer paths into that resolved object,
-avoiding ambiguity in nested names. The `$input` marker remains attached to
-its named container or list element when surrounding arrays are reordered.
+after those bindings resolve. `source.inputPath`, `fromInput` in output
+declarations, and `when.inputEquals.path` use JSON Pointer paths into that
+resolved object. Target `fieldPaths` use Kustomize's dot-separated field path
+syntax with keyed list selectors. Apps requires each path to resolve to
+exactly one field, including after arrays are reordered.
 Compute's [Workload CRD](https://github.com/datum-cloud/compute/blob/main/config/base/crd/bases/compute.datumapis.com_workloads.yaml)
-declares `containers` and `env` as lists keyed by `name`; the template still
-names those entries, while Apps replaces only the marked leaf value.
-For `exposure.mode: public`, the planner requires `gateway` and `hostname` and
-includes the route. For `private`, it rejects those public-only fields and
-omits the route and `hostname` output. Switching branches in this example is
+declares `containers` and `env` as lists keyed by `name`; Apps selects these
+entries by name. For `exposure.mode: public`, the planner requires `gateway`
+and `hostnames` and includes the route. For `private`, it rejects those
+public-only fields and omits the route and `hostnames` output. Switching
+branches in this example is
 an App update whose plan shows any resulting resource deletion;
 downstream consumers become blocked if an output they use disappears. No
 arbitrary condition expressions are needed.
@@ -396,15 +420,20 @@ spec:
                     - name: storefront
                       env:
                         - name: API_HOST
-                          value:
-                            $input: /backend/apiHost
+                          value: ""
           # Other required Workload fields omitted.
+      replacements:
+        - source:
+            inputPath: /backend/apiHost
+          targets:
+            - fieldPaths:
+                - spec.template.spec.runtime.sandbox.containers.[name=storefront].env.[name=API_HOST].value
 ```
 
 Here `type: string` constrains the resolved value. The installer can provide
 either a literal string or an `appRef` to a string output; both fill the
-`$input: /backend/apiHost` marker after validation. Reordering `containers` or
-`env` entries cannot redirect that marker to another field.
+selected `API_HOST` value after validation. The target path uses named list
+selectors, so reordering `containers` or `env` entries cannot redirect it.
 
 The storefront App selects the producing installation and output. The client
 can obtain the producer UID while selecting the App; the API requires it in the
@@ -439,7 +468,7 @@ consumer access, and `outputGrants`. The template binding writes the resolved
 string into the storefront Workload field. The value flows from
 `orders-api.status.outputs.hostname.value` through
 `storefront.spec.inputs.backend.apiHost.appRef` to the template's
-`$input: /backend/apiHost` marker. `AppPlan` reports the producer UID and output
+`source.inputPath: /backend/apiHost` replacement. `AppPlan` reports the producer UID and output
 generation; apply rechecks both. A new ready output generation replans the
 consumer and updates only its owned resources. If the producer is unavailable,
 the grant is revoked, or the output type changes, the consumer reports a blocked

@@ -70,6 +70,9 @@ a reusable offering that other projects can discover and install.
 A template can connect components by passing declared
 outputs into later inputs, such as a Workload's service endpoint into an HTTP
 route. It can ask for an existing network or domain instead of creating one.
+Templates use Kustomize-style replacements to connect typed inputs and earlier
+component outputs to resource fields. Named list selectors keep these bindings
+stable when authors reorder containers or environment variables.
 The definition declares which components it owns; referenced resources remain
 under their existing owners. Required service enablement uses the Service Catalog's entitlement
 flow, with dependencies and price implications shown before deployment.
