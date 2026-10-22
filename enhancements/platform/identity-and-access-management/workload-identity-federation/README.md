@@ -567,7 +567,41 @@ pre-flight checks and one ongoing view:
 |---|---|---|
 | **Verify issuer** | Dry-run: fetches and parses the JWKS from the configured source, without creating or modifying anything. Available on WorkloadIdentityIssuer and, for platform admins, on TrustedIssuer. | `Verified` condition in `status.conditions` |
 | **Test rule** | Opens a 15-minute live window on a WorkloadIdentityRule. Trigger a real exchange (a CI run, a manual `datumctl` federated login) within the window and the console reports success or the specific failure reason (signature invalid, audience mismatch, condition not satisfied) in real time. Re-runnable anytime from the rule's detail page if the window elapses unused. | `status.testWindow.expiresAt`, `Verified` condition |
-| **Authentication history** | Per-rule (and per-issuer) log of every authentication *attempt*, success or failure — distinct from the Activity timeline ([Audit CI/CD Activity](#audit-cicd-activity)), which only records actions by an *already-authenticated* principal and so never sees a failed exchange. Lets a project owner tell "never tried" from "tried and was rejected," and spot a rule under sustained failed attempts (key rotation, claim drift, or misuse). | Rule detail page, `status.lastAuthenticationTime` |
+| **Authentication history** | Per-rule (and per-issuer) log of every authentication *attempt*, success or failure — distinct from the Activity timeline ([Audit CI/CD Activity](#audit-cicd-activity)), which only records actions by an *already-authenticated* principal and so never sees a failed exchange. Lets a project owner tell "never tried" from "tried and was rejected," and spot a rule under sustained failed attempts (key rotation, claim drift, or misuse). Recorded as Kubernetes Events on the rule/issuer (see [Authentication Events](#authentication-events)), plus a `status.lastAuthenticationTime` fast-path on the rule. | Rule detail page, `status.lastAuthenticationTime` |
+
+#### Authentication Events
+
+Each authentication *attempt* records a Kubernetes Event at the point the
+token-exchange decision is made, attached to the object resolved furthest —
+the matched `WorkloadIdentityRule` for rule-level outcomes, or the
+`WorkloadIdentityIssuer` for issuer-level ones. This is what backs the
+Authentication History view: unlike the Activity timeline, it captures failed
+exchanges, which never produce a principal.
+
+| Event | Type | Reason | Attached to |
+|---|---|---|---|
+| Exchange succeeded | Normal | `TokenExchangeSucceeded` | Rule |
+| Issuer disabled (kill switch) | Warning | `IssuerDisabled` | Issuer |
+| Referenced issuer not found | Warning | `IssuerNotFound` | Rule |
+| Token `iss` mismatched the issuer | Warning | `IssuerMismatch` | Issuer |
+| Signature failed / no matching key | Warning | `SignatureInvalid` | Issuer |
+| Audience not allowed by the rule | Warning | `AudienceMismatch` | Rule |
+| Token expired / not-yet-valid / future `iat` | Warning | `TokenExpired` | Rule |
+| `attributeCondition` not satisfied | Warning | `AttributeConditionNotSatisfied` | Rule |
+
+On success the rule's `status.lastAuthenticationTime` is stamped and its
+`Verified` condition flips to `True` (reason `TestExchangeSucceeded`), giving
+the console a fast-path without scanning Events. A referenced rule that does
+not resolve at all has no object to attach to, so that case is logged only.
+
+> [!NOTE]
+> Kubernetes Events are TTL'd (the apiserver garbage-collects them, ~1 hour by
+> default), so they are a live-tail signal for the console's real-time
+> Authentication History window, not a durable audit log. A production
+> deployment that needs long-lived authentication history would mirror these
+> events into a retained store; the Activity timeline already covers durable
+> attribution for *successful* exchanges (which become principal-attributed
+> actions).
 
 ### Authentication Flow
 
