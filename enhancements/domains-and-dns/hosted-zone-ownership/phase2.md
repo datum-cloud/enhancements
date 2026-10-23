@@ -18,7 +18,10 @@ change for each of them, and that cost grows with the customer base.
   because zones for the same name never share an address.
 - **Names stop being exclusive.** Several projects can have zones for the same
   name. Only the one the registry points to receives queries. Claims,
-  reservations, and contests from Phase 1 are retired.
+  reservations, contests, and grants from Phase 1 are retired.
+- **A recreated zone gets a new set.** That is what closes the dangling
+  delegation, and it means a customer who deletes and recreates a zone must
+  update their registrar, as on Route 53.
 - **The dependency becomes strictly one-way.** dns-operator allocates, serves,
   and publishes each zone's set, and never reads `Domain`.
   network-services-operator reads the set as evidence.

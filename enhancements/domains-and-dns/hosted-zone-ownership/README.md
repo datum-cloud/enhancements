@@ -61,6 +61,12 @@ Datum hosts. That design requires a TXT record for every domain. Under this
 proposal, hosted domains are verified by delegation, and the TXT record flow
 remains for domains hosted elsewhere and for contested names.
 
+It also completes
+[Wildcard Hostnames on ALBs](https://github.com/datum-cloud/enhancements/pull/914),
+which accepts a Datum DNS zone as proof for a wildcard once Datum serves it and
+the registry delegates to it. Verification by delegation is that proof, and the
+5-day lapse here is the re-verification that proposal lists as future work.
+
 ## Motivation
 
 ### The customer problem
@@ -71,13 +77,13 @@ delegate the domain somewhere else, add a TXT record there, wait, and then
 delegate it back. Separately, any project can claim any domain name first and
 block its rightful owner from using it on Datum.
 
-On 2026-09-30, two domains reproduced the dead end in production:
-
-| Time (UTC)     | What happened                                                                                                                                                                                           |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 22:15          | A zone for `example.org` was created. Its domain was already delegated to Datum. The zone published no nameservers, and verification reported `DNSZone ... is ready but has no status.nameservers yet`. |
-| 22:17          | Same for `example.io`. Its `Domain` also recorded no nameservers at all, because `.io` has no RDAP service and the recursive lookup that replaces it returned a stale answer, then SERVFAIL.            |
-| 23:03 to 23:14 | The domains were delegated back to their registrar's nameservers, the TXT records were added there, and both domains verified. Both zones went live.                                                    |
+Two domains reproduced the dead end in production. Both were already delegated
+to Datum when their zones were created. The zones published no nameservers, so
+verification reported that the zone was ready but had no nameservers to match.
+One of the two was under a TLD with no RDAP service, and the recursive lookup
+that replaces it returned a stale answer, then SERVFAIL. Both domains verified
+only after they were delegated back to their registrar's nameservers, the TXT
+records were added there, and the delegation was moved to Datum again.
 
 Delegating first is the natural order for anyone moving DNS to a new provider,
 and it's how Cloudflare and Route 53 work. On Datum it's a dead end with no
@@ -115,12 +121,15 @@ rightful owner take the name back.
 - A customer can create a zone and point their registrar at Datum in either
   order, and the zone serves.
 - A customer who hosts their DNS on Datum never needs a TXT record to use their
-  domain with ALBs and certificates.
+  domain with ALBs and certificates, including wildcard hostnames.
+- A project can grant a name under its zone to another project, so a parent and
+  child zone in different projects of the same organization don't conflict.
 - The rightful owner of a domain can always take it back from a project that
   claimed it first.
 - Deleting and recreating a zone never opens a window for another project to
   take the domain.
-- Verification by delegation is re-checked, not permanent.
+- Verification by delegation is re-checked, not permanent, and a customer who
+  moves DNS away is told what to do before it lapses.
 - dns-operator and network-services-operator can't deadlock on each other's
   status.
 - End-to-end tests observe each control refusing what it should refuse.
@@ -144,15 +153,15 @@ It's easy to confuse the many nouns under the DNS umbrella. So for clarity:
 
 - **domain**: a name like `datum.net` registered with a registrar.
 - **registrar**: a company that registers domains for customers. For example,
-  Datum registered `datum.net` through the registrar internet.bs.
+  `datum.net` is registered through a registrar.
 - **registry**: operates a top-level domain, runs its nameservers, and accredits
-  registrars. For example, Verisign runs `.net` and permits internet.bs to sell
+  registrars. For example, Verisign runs `.net` and permits registrars to sell
   `.net` names to customers.
 - **authoritative nameserver**: a nameserver that answers for a zone from its
   own data, rather than by asking other nameservers.
 - **delegation**: the parent zone naming the nameservers authoritative for a
   domain. The `.net` registry delegates `datum.net` to `ns1`, `ns2`, `ns3`, and
-  `ns4.datumdomains.net`, set through the registrar internet.bs.
+  `ns4.datumdomains.net`, set through the registrar.
 - **zone**: a collection of DNS records on an authoritative nameserver. The
   `datum.net` zone contains various DNS records.
 - **record**: a name, a type, and a value (plus a TTL which may or may not be
@@ -206,6 +215,33 @@ I delete my `example.org` zone by mistake while my domain is still delegated to
 Datum. The zone stops answering, but nobody else can claim the name. I recreate
 the zone and it answers again.
 
+#### Customer with a child zone in another project
+
+My organization hosts `example.com` in a production project. I create a
+development project and add a zone for `dev.example.com`. Datum refuses it and
+names the production project. From the production project, I grant
+`dev.example.com` to the development project, and its zone serves.
+
+#### Customer who moves a zone to another project
+
+I want `example.com` hosted from a new project. From the project that has it, I
+hand the name over to the new project. The new project's zone serves as soon as
+it exists, and the old zone stops answering.
+
+#### Customer who uses a wildcard hostname
+
+I host `example.com` on Datum and delegate it. I add `*.example.com` to an ALB.
+Datum accepts the wildcard on the strength of the delegation, creates the
+certificate's challenge record in my zone, and issues the certificate. I never
+add a TXT record.
+
+#### Customer who moves DNS away from Datum
+
+I move `example.com` to another DNS provider but keep `www.example.com` on a
+Datum ALB. Datum tells me that my ownership proof lapses in 5 days and shows me
+the TXT record and the certificate challenge record to publish at my new
+provider. I publish them, and nothing goes down.
+
 #### Customer who keeps DNS elsewhere
 
 I keep DNS at my registrar and point `www.example.com` at a Datum ALB with a
@@ -217,6 +253,12 @@ CNAME. I prove ownership with a TXT or HTTP record, as I do today.
   `www.example.com` on an ALB or certificate, even when Datum doesn't host
   `example.com`'s DNS. Ownership therefore lives on the `Domain`
   (network-services-operator), not on the `DNSZone` (dns-operator).
+- **The delegate-first story is the one Phase 1 can't fully protect.** This
+  proposal encourages delegating first, and accepts that a domain delegated to
+  Datum before any zone exists goes to whoever creates the zone first. Phase 2
+  closes it. A cheaper middle step, a per-project nameserver set drawn from a
+  pool as Cloudflare does per account, is listed under
+  [Alternatives](#alternatives).
 - **Shared nameservers allow one served zone per name.** In Phase 1, two
   projects can't both be served for `example.com`, because Datum's nameservers
   can't tell which one a resolver means. Phase 1 keeps names exclusive and adds
@@ -226,13 +268,14 @@ CNAME. I prove ownership with a TXT or HTTP record, as I do today.
 
 ### Risks and Mitigations
 
-| Risk                                                                                                                                                               | Phase 1 mitigation                                                                                                                                                                                                                     | Phase 2                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| **Dangling delegation:** a domain still delegated to Datum with no zone can be claimed by anyone, who then receives its traffic. Vercel carries the same exposure. | A deleted zone's name stays reserved while the domain is delegated to Datum, which closes the case where a zone existed. A domain that was delegated to Datum but never had a zone stays exposed, and this proposal accepts that risk. | Closed. A new zone gets new nameservers, so a stale delegation never matches it. |
-| **Contest trap:** the rightful owner of a squatted domain who has already delegated to Datum can't publish a TXT record, because Datum serves the squatter's zone. | A support path: support verifies ownership out of band and releases the name. This is expected to be rare.                                                                                                                             | Closed. Delegation itself identifies the owner.                                  |
-| **Subdomain takeover:** another project creates a zone under your zone, and Datum's nameservers answer for that part of your domain from its zone.                 | Claims cover subtrees, so the other project's zone is Contested and never served.                                                                                                                                                      | Closed. Parent and child zones never share an address.                           |
-| **Removing the verification gate** makes every zone currently waiting for verification start serving at once.                                                      | Before enabling in production, list every waiting zone whose domain is already delegated to Datum and review it, because those zones are the takeover case above.                                                                      | Not applicable                                                                   |
-| **A registry lookup failure** looks like a delegation change and revokes verification.                                                                             | Failed lookups never count as a change. The 5-day grace period starts only from a confirmed change.                                                                                                                                    | Same                                                                             |
+| Risk                                                                                                                                                                                             | Phase 1 mitigation                                                                                                                                                                                                                                                                                                                                                                   | Phase 2                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| **Dangling delegation:** a domain still delegated to Datum with no zone can be claimed by anyone, who then receives its traffic and is verified by delegation. Vercel carries the same exposure. | A deleted zone's name stays reserved while the domain is delegated to Datum, which closes the case where a zone existed. A domain that was delegated to Datum but never had a zone stays exposed, and this proposal accepts that risk. A zone created for a name that is already delegated to Datum with no prior claim is flagged in status and alerted on, so the case is visible. | Closed. A new zone gets new nameservers, so a stale delegation never matches it. |
+| **Contest trap:** the rightful owner of a squatted domain who has already delegated to Datum can't publish a TXT record, because Datum serves the squatter's zone.                               | A support path: support verifies ownership out of band and releases the name. This is expected to be rare.                                                                                                                                                                                                                                                                           | Closed. Delegation itself identifies the owner.                                  |
+| **Subdomain takeover:** another project creates a zone under your zone, and Datum's nameservers answer for that part of your domain from its zone.                                               | Claims cover subtrees, so the other project's zone is Contested and never served.                                                                                                                                                                                                                                                                                                    | Closed. Parent and child zones never share an address.                           |
+| **Removing the verification gate** makes every zone currently waiting for verification start serving at once, and each one becomes an Active claim on its name.                                  | Before enabling in production, review every waiting zone. Those whose domain is already delegated to Datum are the takeover case above. The rest become claims that block the rightful owner until a contest, which Phase 1a resolves only through support.                                                                                                                          | Not applicable                                                                   |
+| **A registry lookup failure** looks like a delegation change and revokes verification.                                                                                                           | Failed lookups never count as a change. The 5-day grace period starts only from a confirmed change.                                                                                                                                                                                                                                                                                  | Same                                                                             |
+| **A lapse breaks a customer who moved DNS away but kept an ALB.** Their hostnames and certificates stop.                                                                                         | The grace period is a re-prove window. Status says the proof lapses, and names the TXT record and the certificate challenge record to publish elsewhere.                                                                                                                                                                                                                             | Same                                                                             |
 
 ## Design Details
 
@@ -269,9 +312,8 @@ Sources:
 
 - 2026-09-29: dns-operator v0.9.0 and network-services-operator v0.31.0 ship
   delegation-as-proof. It has no effect in production.
-- 2026-09-30: The delegate-first dead end is reproduced on `example.org` and
-  `example.io`.
-- 2026-10-02: Proposal drafted.
+- 2026-10-02: Proposal drafted, after the delegate-first dead end was reproduced
+  in production.
 
 ## Drawbacks
 
@@ -279,6 +321,8 @@ Sources:
   to Datum but never had a zone.
 - Phase 1 needs a manual support path for contested domains already delegated to
   Datum.
+- Phase 1 needs an explicit grant for a child zone in another project, where
+  Phase 2 needs none.
 - Phase 2 costs multiple domains, many glue records, per-address serving, and a
   migration for every customer.
 
@@ -294,6 +338,13 @@ Sources:
   unique to their claim at the registrar. This avoids the support path but needs
   a host record at Verisign for each challenge. It's a candidate if contests
   turn out to be common.
+- **Per-project nameserver sets.** Each project gets its own set of nameserver
+  names drawn from a pool, as Cloudflare assigns per account. Delegation then
+  identifies the project, which closes the dangling delegation, the contest
+  trap, and the parent-and-child conflict with far fewer addresses than Phase 2.
+  Two projects that draw the same set fall back to Phase 1 rules against each
+  other. It still needs per-address serving. It's a candidate if Phase 2 is
+  deferred for long.
 - **Phase 2 only.** It's the stronger design, but a much larger investment
   before customers see any improvement.
 
