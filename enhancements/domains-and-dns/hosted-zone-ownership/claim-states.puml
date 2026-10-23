@@ -39,7 +39,7 @@ Reserved -up-> Active : same project\nrecreates it
 
 Active -down-> Displaced : another project\nproves ownership
 Displaced -right-> Contested : contests\nback
-Contested -up-> Active : proves\nownership
+Contested -up-> Active : proves ownership\nby TXT, or is\ngranted the name
 
 Active -[dashed,#4D6356]left-> Released : deleted, not\ndelegated to Datum
 Reserved -[dashed,#4D6356]up-> Released : delegation leaves,\nor support releases
