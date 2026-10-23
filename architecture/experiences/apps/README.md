@@ -1,0 +1,840 @@
+# Apps architecture
+
+This document describes the proposed APIs, project runtime, resource ownership
+protection, and graduation flow for [Apps on Datum Cloud](../../../enhancements/experiences/apps/README.md).
+It is a design proposal; API names and fields remain subject to review.
+
+## API design
+
+The API uses `apps.miloapis.com/v1alpha1` as a proposed group. Apps coordinates
+project resources across services, like other Milo platform capabilities; its
+API group does not require its implementation to live in the `milo-os/milo`
+repository. The Apps service and schemas remain owned by `datum-labs/apps` and
+are served through Milo's normal service API and discovery integration. Names
+and field shapes below are for review; service-specific manifests still use
+their native APIs. A template may keep its definition and revision history in its
+project indefinitely; publication is optional. Every approved `PublishedAppTemplate`
+version is stored in one Platform-scoped app repository and discoverable through
+the Platform context. This is a logical repository served by the Apps API; its
+backing storage is an implementation choice distinct from the `datum-labs/apps`
+source repository. There are no organization-scoped Apps, templates, or
+catalogs. Apps and plans live in a project. Publication requires a
+platform operator's approval. Template use still requires authorization in the
+installation project.
+
+| Resource | Purpose |
+| --- | --- |
+| `AppTemplate` | Project-scoped reusable definition; authoring changes create immutable revisions. |
+| `AppTemplateRevision` | Immutable project snapshot of one accepted template definition, used for local installs, history, rollback, and publication. |
+| `AppPublication` | Optional project-scoped request to submit an exact template revision for platform operator review. |
+| `PublishedAppTemplate` | Platform-scoped, operator-approved immutable version in the app repository, discoverable by all customers. `spec.family` groups versions; `spec.version` identifies one release. |
+| `App` | Desired installation pinned to a project template revision or published version, plus inputs. Its status reports the observed deployment. |
+| `AppPlan` | Side-effect-free preview of App create, update, or delete. Creating a plan never enables services or changes components. |
+| `AppRevision` | Immutable record of an accepted App spec, used for history and rollback. It stores references rather than secret values. |
+| `AppOutputOffer` | Read-only, consumer-project view of outputs explicitly granted to that project; it is not a template catalog or another owner. |
+
+`AppRelease` is a controller-owned, durable handoff record created when a customer
+deletes an App. It is not a second installation. Authorized customers may get,
+list, and watch its progress after the App disappears; only trusted controllers
+may create or update it.
+
+### Project authoring and catalog discovery
+
+An author creates an `AppTemplate` in a project and declares components,
+inputs, bindings, and outputs. Each accepted edit creates an immutable
+`AppTemplateRevision` with actor, timestamp, digest, and change provenance.
+A project owner can preview, compare, and roll back template revisions without
+publishing. Every `App` has a `spec.templateRef` pinned either to an exact
+revision of a template in its own project or to an approved Platform version;
+there is no inline installation definition. Accepted App spec changes create
+separate immutable `AppRevision` records for installation history and rollback.
+Changing a template does not alter existing pinned installations.
+Keep a pinned project revision available while an App uses it, even if the
+authoring template is later deleted; garbage collection waits until no App or
+publication references the revision. Deleting the authoring template blocks new
+installs from its revisions. A published version retains its own
+immutable snapshot independently of the authoring project.
+
+An optional `AppPublication` names an exact template UID, immutable revision,
+and content digest, plus proposed family and version. The author
+reviews which inputs and references installers must supply. Submission freezes
+the request. Validation checks source-project
+permission, target API schemas, bindings, required services, reference rules,
+and the absence of embedded credentials. The request then enters a Platform
+review queue as `PendingApproval`; it is not discoverable or installable.
+
+```yaml
+apiVersion: apps.miloapis.com/v1alpha1
+kind: AppPublication
+metadata:
+  name: orders-api-1-0-0
+spec:
+  templateRef:
+    name: orders-api
+    uid: "<template-uid>"
+  revisionRef:
+    name: orders-api-template-r3
+    digest: "sha256:<revision-digest>"
+  family: orders-api
+  version: 1.0.0
+# status.phase: PendingApproval; operator decision is written through a
+# restricted approval path, never by the submitter.
+```
+
+A platform operator reviews the exact digest, validation results, permissions,
+and example plan, then approves or rejects with an auditable identity, time,
+and reason. Only an operator may record that decision or change a published
+version's lifecycle state; the submitter cannot write approval status. Only
+the publication controller may create `PublishedAppTemplate` records from approved
+requests, so direct API creation cannot bypass review. Before approval, recheck
+the frozen digest, source-project eligibility, and current target schemas.
+Changing the source template does not change the reviewed snapshot. Approval writes
+an immutable `PublishedAppTemplate` to the Platform repository and records its source
+project, template UID and revision, submitter, approver, digest, compatibility
+requirements, and lifecycle state. A rejected request stays unpublished.
+
+Platform list and get expose approved versions to all customers. An operator
+approves or rejects the exact submitted revision; pending and rejected requests
+never enter discovery. Plan and install still check project service
+availability and installer rights. Unpublished templates and their revisions
+remain in their projects. The repository assigns a unique canonical template identity, so
+equal display names do not collide. Live App state never becomes the
+template's ongoing source of truth.
+
+The repository distributes recipes, not running installations. Every install
+creates a new project App UID, revision history, and owned-resource inventory;
+the authoring project never owns the consumer's resources. An app company's
+public template may request a new instance of its provider-managed service via
+the normal Service Catalog entitlement and native service API. The provider
+operates that service; the customer controls the App installation and its
+project resources. Publication grants the provider no direct write access to
+those resources. A new published template version does not silently update
+existing installations. Cross-project `appRef` is a separate composition
+feature for consuming an existing App's outputs.
+
+Deprecation hides a version from recommended discovery while existing pinned
+Apps continue to work. Emergency revocation blocks new installs and upgrades;
+existing installations retain the snapshot needed for safe reconciliation,
+deletion, and graduation. The source project may be removed without changing
+published versions.
+
+An `AppTemplate` or `PublishedAppTemplate` declares an `inputSchema`, required
+catalog services, components, and outputs. The project template uses the same
+graph schema as the published version; publication adds family, version,
+provenance, and approval state. `inputSchema` describes the resolved values as
+nested objects with required fields and a bounded `oneOf` for mutually
+exclusive choices. The Apps service supports a documented schema subset,
+including primitive types, `resourceRef`, objects, arrays, enums, and
+discriminated `oneOf`; it rejects unsupported keywords rather than silently
+ignoring them. The schema is template data validated by the Apps service; each
+template does not create a new API resource schema. The planner validates the
+selected branch after resolving input bindings and rejects fields from other
+branches. Components and outputs may use a declarative `when` on the branch
+selector. Each component either **creates** a service-native resource or
+**references** an existing one. A component declares `replacements` alongside
+its native resource. Each replacement has a typed Apps `source` (`inputPath`
+or `componentOutput: {component, output}`) and Kustomize-style `targets` with
+`fieldPaths` into the component's resource. The target resource is the containing
+component, so no separate resource selector is needed. These are Apps
+replacements, not a Kustomize build step. List entries are selected by
+stable fields such as `[name=api]`, never by numeric position. The planner
+resolves sources and applies replacements to a fresh copy of the immutable
+template at each plan and reconciliation. Publishing checks that each target
+matches exactly one field, that sources and targets have compatible types, and
+that component dependencies are declared. Planning and apply validate the
+rendered resource through its native API. Missing or ambiguous targets fail;
+replacements do not create list entries or interpolate strings. This keeps
+composition explicit without allowing arbitrary template code. The example
+below omits most of the service-native
+Workload and HTTPRoute specs to focus on the App contract:
+
+```yaml
+apiVersion: apps.miloapis.com/v1alpha1
+kind: PublishedAppTemplate
+metadata:
+  name: web-api-v1
+spec:
+  family: web-api
+  version: 1.0.0
+  inputSchema:
+    type: object
+    required: [runtime, exposure]
+    additionalProperties: false
+    properties:
+      runtime:
+        type: object
+        required: [image]
+        additionalProperties: false
+        properties:
+          image:
+            type: string
+      exposure:
+        oneOf:
+          - type: object
+            required: [mode]
+            additionalProperties: false
+            properties:
+              mode:
+                const: private
+          - type: object
+            required: [mode, gateway, hostnames]
+            additionalProperties: false
+            properties:
+              mode:
+                const: public
+              gateway:
+                type: resourceRef
+                resourceKind: Gateway
+              hostnames:
+                type: array
+                minItems: 1
+                items:
+                  type: string
+  requiredServices:
+    - compute.datumapis.com
+    - networking.datumapis.com
+  components:
+    - name: api
+      create:
+        apiVersion: compute.datumapis.com/v1alpha
+        kind: Workload
+        spec:
+          template:
+            spec:
+              runtime:
+                sandbox:
+                  containers:
+                    - name: api
+                      image: ""
+          # Other required Workload fields omitted.
+      replacements:
+        - source:
+            inputPath: /runtime/image
+          targets:
+            - fieldPaths:
+                - spec.template.spec.runtime.sandbox.containers.[name=api].image
+    - name: route
+      dependsOn: [api]
+      when:
+        inputEquals:
+          path: /exposure/mode
+          value: public
+      create:
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        spec:
+          parentRefs:
+            - name: gateway
+          hostnames: []
+          # Backend fields are omitted pending the native Workload-to-route
+          # contract with Networking; this excerpt is not a deployable route.
+      replacements:
+        - source:
+            inputPath: /exposure/gateway
+            fieldPath: metadata.name
+          targets:
+            - fieldPaths:
+                - spec.parentRefs.[name=gateway].name
+        - source:
+            inputPath: /exposure/hostnames
+          targets:
+            - fieldPaths: [spec.hostnames]
+  outputs:
+    - name: hostname
+      type: string
+      when:
+        inputEquals:
+          path: /exposure/mode
+          value: public
+      fromInput: /exposure/hostnames/0
+```
+
+The optional source `fieldPath: metadata.name` projects a checked field from
+the resolved Gateway reference before filling `parentRefs.name`. The
+`gateway` value in the template is a target selector; it is replaced before
+the HTTPRoute reaches the native API. A replacement targets the whole
+`hostnames` array because its string elements have no stable key. The first
+hostname supplied by the installer is the declared primary `hostname` output;
+that input order is intentional, unlike target array order. The Workload-to-route
+backend contract remains a prerequisite for an executable Web API template.
+
+`spec.inputs` on an App mirrors this nested schema. Its leaf fields hold
+`value`, `resourceRef`, or `appRef` bindings; the schema describes the values
+after those bindings resolve. `source.inputPath`, `fromInput` in output
+declarations, and `when.inputEquals.path` use JSON Pointer paths into that
+resolved object. Target `fieldPaths` use Kustomize's dot-separated field path
+syntax with keyed list selectors. Apps requires each path to resolve to
+exactly one field, including after arrays are reordered.
+Compute's [Workload CRD](https://github.com/datum-cloud/compute/blob/main/config/base/crd/bases/compute.datumapis.com_workloads.yaml)
+declares `containers` and `env` as lists keyed by `name`; Apps selects these
+entries by name. For `exposure.mode: public`, the planner requires `gateway`
+and `hostnames` and includes the route. For `private`, it rejects those
+public-only fields and omits the route and `hostname` output. Switching
+branches in this example is an App update whose plan shows any resulting
+resource deletion;
+downstream consumers become blocked if an output they use disappears. No
+arbitrary condition expressions are needed.
+
+An `App` pins a revision of an `AppTemplate` in its project or an approved
+`PublishedAppTemplate` version from the Platform repository. The controller
+resolves that immutable snapshot and creates the declared components. Direct
+`resourceRef` inputs include API version, kind, scope, name, and immutable
+resource UID within the installation project. Plan, acceptance, and
+reconciliation recheck its UID. A recreated same-name resource blocks dependent
+writes until the owner explicitly updates the App reference; that edit creates
+an `AppRevision`. A `resourceRef` resolves to an opaque typed reference by
+default. Replacements may project identity fields such as `metadata.name`, or
+service-declared non-secret fields with field-level authorization. They cannot
+project arbitrary resource contents or credentials. Secret material stays in
+native secret references and never enters plans, status, revisions, or activity.
+An `appRef` is one way to supply a template input. The template declares the
+resolved value's type, such as `string`; the App input supplies a literal
+`value`, an in-project `resourceRef`, or an `appRef` where its declared type
+permits it. An `appRef` identifies a producing project UID, App UID, and output.
+The producer's template declares the output type, while the producer App grants
+specific consumer project UIDs access to that output. The planner validates the
+resolved value against the input type, checks consumer authorization and any
+cross-project grant, and records producer project and App UIDs, output contract
+digest, and output revision in the plan and consumer status. Names alone never
+retarget a binding.
+
+A read-only `AppOutputOffer` view in the consumer project lists outputs granted
+to that project's UID. Each offer shows the producer project and App names and
+UIDs, output name and type, and readiness, but no output value or component
+resource. The caller needs consumer-project read/use rights. It does not grant
+access to list or get the producer's App. An index makes listing practical;
+each result and exact `appRef` resolution rechecks the live grant, producer
+UID, and caller authority. Revocation removes the offer and blocks future
+dependent writes; it cannot erase non-secret values already materialized in
+consumer-owned resources.
+
+These references form a directed acyclic graph across projects. For example,
+`data/shared-db` can supply an endpoint to `orders/api`, which can supply its
+own route to `shop/storefront`. Each App has its own installation, resources,
+revision history, and lifecycle. A new dependency is checked against the
+current graph at plan and apply time, with a service-maintained dependency index
+to avoid a platform-wide scan for every reconciliation. Concurrent edits that
+would introduce a cycle must fail one apply. An upstream output change triggers
+replanning and reconciliation of affected consumers in dependency order; this
+does not create a new `AppRevision` unless the consumer's desired spec changes.
+`status.outputRevision` increments atomically whenever a declared output's
+typed value, contract, or availability changes, including disappearance and
+return, without depending on the App's spec generation. A reverse index keyed
+by producer project UID, App UID, and output enqueues consumers. Each consumer
+checks all dependencies before writes and again as it progresses; a concurrent
+change stops further writes and retries. This is eventual convergence, not a
+cross-project transaction. Consumer status records the last applied dependency
+revisions separately from the latest observed revisions. An intermediate App
+publishes ready derived outputs only after its own reconciliation succeeds.
+Consumers bind only to ready, type-compatible outputs. Missing or unready
+producers, revoked grants, changed output contracts, and cycles set an
+actionable blocked condition and pause dependent writes while preserving their
+existing owned resources. Deletion never cascades through the graph.
+Rollback of a consumer `AppRevision` restores its previous desired spec and
+resolves current producer outputs; it does not restore historical upstream
+values. To revert such a value, roll back or update the producer App.
+
+App outputs contain typed, non-secret values or service-defined scoped
+references, never credential contents. A declared output needs no separate
+`exportable` flag: same-project use follows project authorization, and
+cross-project use requires an output grant from the producing App. A consumer
+may declare an output derived from its own inputs or components and grant access
+to that output. This does not give a downstream App direct access to an earlier
+producer; every direct `appRef` is authorized against its named producer. A
+producer may change a value within its declared type, while consumers reconcile
+under their own authority. Output grants do
+not transfer ownership or grant access to upstream Apps further along a chain.
+
+```yaml
+apiVersion: apps.miloapis.com/v1alpha1
+kind: App
+metadata:
+  name: orders-api
+  namespace: default
+spec:
+  templateRef:
+    source: Platform # Or Project with revision instead of version.
+    name: web-api-v1
+    version: 1.0.0
+  uninstallPolicy: Delete # Set to Retain before deleting to keep owned resources.
+  inputs:
+    runtime:
+      image:
+        value: registry.example.com/orders@sha256:...
+    exposure:
+      mode:
+        value: public
+      gateway:
+        resourceRef:
+          apiVersion: gateway.networking.k8s.io/v1
+          kind: Gateway
+          name: shared-edge
+          uid: "<gateway-uid>"
+      hostnames:
+        value: [orders.example.com]
+  outputGrants:
+    - output: hostname
+      projects:
+        - name: shop
+          uid: "<shop-project-uid>"
+```
+
+For a project App, `spec.templateRef` uses `source: Project`, the local
+template name, UID, and immutable revision name. The template and its history
+remain private to that project unless the owner publishes a selected revision.
+Editing a template creates a new template revision; an installation adopts it
+only after its owner updates the App's pinned reference and reviews a plan.
+
+```yaml
+templateRef:
+  source: Project
+  name: orders-api
+  uid: "<template-uid>"
+  revision: orders-api-template-r3
+```
+
+The controller populates status; clients do not set it:
+
+```yaml
+status:
+  observedGeneration: 1
+  outputRevision: 1
+  templateVersion: 1.0.0
+  currentRevision: orders-api-r1
+  conditions:
+    - type: Ready
+      status: "True"
+  components:
+    - name: api
+      resourceRef:
+        apiVersion: compute.datumapis.com/v1alpha
+        kind: Workload
+        name: orders-api-api
+      ready: true
+  outputs:
+    hostname:
+      type: string
+      value: orders.example.com
+      contractDigest: "sha256:<output-contract-digest>"
+```
+
+### Wiring an output into another App
+
+The producer template above declares `hostname` as a `string` output. The
+`orders-api` App in project `orders` supplies its value and grants
+project `shop` access. Its controller publishes the ready value in
+`status.outputs.hostname`. The consumer template declares a normal `string`
+input, which this installation will source from an App output:
+
+```yaml
+# Relevant fields of the storefront template in project shop.
+apiVersion: apps.miloapis.com/v1alpha1
+kind: AppTemplate
+metadata:
+  name: storefront
+spec:
+  inputSchema:
+    type: object
+    required: [backend]
+    additionalProperties: false
+    properties:
+      backend:
+        type: object
+        required: [apiHost]
+        additionalProperties: false
+        properties:
+          apiHost:
+            type: string
+  components:
+    - name: storefront
+      create:
+        apiVersion: compute.datumapis.com/v1alpha
+        kind: Workload
+        spec:
+          template:
+            spec:
+              runtime:
+                sandbox:
+                  containers:
+                    - name: storefront
+                      env:
+                        - name: API_HOST
+                          value: ""
+          # Other required Workload fields omitted.
+      replacements:
+        - source:
+            inputPath: /backend/apiHost
+          targets:
+            - fieldPaths:
+                - spec.template.spec.runtime.sandbox.containers.[name=storefront].env.[name=API_HOST].value
+```
+
+Here `type: string` constrains the resolved value. The installer can provide
+either a literal string or an `appRef` to a string output; both fill the
+selected `API_HOST` value after validation. The target path uses named list
+selectors, so reordering `containers` or `env` entries cannot redirect it.
+
+The storefront App selects the producing installation and output. The client
+can obtain the producer UID while selecting the App; the API requires it in the
+accepted reference so deleting and recreating `orders-api` cannot silently
+switch the input to a new producer:
+
+```yaml
+# Relevant fields of the storefront App in project shop.
+apiVersion: apps.miloapis.com/v1alpha1
+kind: App
+metadata:
+  name: storefront-prod
+spec:
+  templateRef:
+    source: Project
+    name: storefront
+    uid: "<storefront-template-uid>"
+    revision: storefront-r2
+  inputs:
+    backend:
+      apiHost:
+        appRef:
+          project: orders
+          projectUID: "<orders-project-uid>"
+          name: orders-api
+          uid: "<orders-api-app-uid>"
+          output: hostname
+```
+
+The planner resolves `backend.apiHost` to `orders.example.com` only after
+checking the producer project and App UIDs, `Ready` condition, output type and
+revision, consumer access, and `outputGrants`. The template binding writes the resolved
+string into the storefront Workload field. The value flows from
+`orders-api.status.outputs.hostname.value` through
+`storefront.spec.inputs.backend.apiHost.appRef` to the template's
+`source.inputPath: /backend/apiHost` replacement. `AppPlan` reports the producer
+UID, output revision, and contract digest; apply rechecks all three. A new ready
+output revision replans the
+consumer and updates only its owned resources. If the producer is unavailable,
+the grant is revoked, or the output type changes, the consumer reports a blocked
+dependency and preserves its existing resources. Its desired App spec and
+`AppRevision` do not change merely because the producer's output changed.
+
+The app controller reports `status.observedGeneration`, the resolved template
+version or project template revision, conditions (`Accepted`, `Progressing`, `Ready`),
+per-component resource references and conditions, and declared outputs such as
+the hostname. A condition identifies the failed component and its actionable
+reason. Created resources carry a protected App installation UID marker and
+appear in the App's
+inventory; referenced resources are never adopted.
+
+To preview create or update, a client creates an `AppPlan` with
+`spec.operation: Apply` and `spec.app` containing the proposed App name and
+spec. The plan compares it with any existing App of that name in the project.
+For deletion, the client uses `spec.operation: Delete` and `spec.appRef` with
+the current App name and UID. The plan reports the observed App resourceVersion,
+uninstall policy, inventory digest, and exact resource identities and Delete or
+Retain actions, plus visible dependents and warnings. Apply plans also report
+required service enablements, permission or quota failures, and available cost
+estimates with their assumptions or an explicit unknown.
+
+```yaml
+apiVersion: apps.miloapis.com/v1alpha1
+kind: AppPlan
+metadata:
+  name: orders-api-removal
+spec:
+  operation: Delete
+  appRef:
+    name: orders-api
+    uid: "<orders-api-app-uid>"
+# status.observedAppResourceVersion and status.inventoryDigest bind the
+# point-in-time preview; status.actions lists exact resource UIDs and actions.
+```
+
+The preview is advisory. To retain resources, the owner first changes
+`spec.uninstallPolicy` to `Retain`, then obtains a fresh delete plan. The client
+deletes the App with UID and resourceVersion preconditions matching that plan.
+If either differs, it replans rather than deleting a different installation or
+acting on stale inventory. The API rechecks authority and current identities;
+the plan is not an authorization token.
+Applying the App repeats validation because a plan can become stale. Every
+accepted App spec is retained as an `AppRevision` for audit; rollback reapplies
+the prior successful template reference and inputs.
+Secrets are accepted only as references, never copied into plans, revisions,
+status, or generated activity messages.
+
+Updating `spec.templateRef` or `spec.inputs` reconciles
+only app-owned components. A failed component leaves the app `Ready=False` with
+partial progress visible and can be retried. Deleting an App removes its owned
+components after a deletion preview; existing referenced resources and shared
+service entitlements remain. Native resource admission, permissions, and
+service-specific safety checks still apply to every generated change.
+
+`spec.uninstallPolicy` defaults to `Delete`. An owner can change it to `Retain`,
+review a fresh plan that lists every resource to keep, then delete the App.
+The App is the installation: there is no separate installation object to leave
+behind. Retained resources become directly editable only after that App has
+been removed and their ownership markers have been released. A failed release
+shows progress through a customer-readable `AppRelease` and retries; it never
+silently grants direct control.
+
+## Runtime and reconciliation
+
+Build Apps in the new [`datum-labs/apps`](https://github.com/datum-labs/apps)
+repository as a control-plane service that registers the APIs above with Milo
+and reconciles project Apps through existing Datum service APIs. The Apps API,
+planner, controllers, curated templates, packaging, and service-owned tests
+live there. Milo admission changes stay in `milo-os/milo`; the automated
+end-to-end environment and Flux deployment fixtures live in
+[`datum-cloud/test-infra`](https://github.com/datum-cloud/test-infra). Apps does
+not run application traffic or replace the Workload, Networking, DNS, or
+managed-service controllers. Milo's [multicluster runtime provider](https://github.com/milo-os/milo/blob/main/pkg/multicluster-runtime/milo/provider.go)
+provides project discovery and per-project clients and caches. It watches
+ready Projects through the core API and connects to their project control
+planes; internal deployments can instead watch ready ProjectControlPlanes and
+use service addresses. The Apps controller uses the mode appropriate to its
+deployment, scopes each reconciliation to one project, and disengages when a
+project becomes unavailable. Cluster engagement must run on every replica,
+using Milo's `WithoutAutoStart` and `EngageAlways` wiring until the upstream
+leader-election issue is fixed.
+
+Apps deployment manifests live under `datum-labs/apps/config` and use
+Kustomize bases, optional components, and environment overlays, following the
+relevant layout in [`datum-cloud/compute/config`](https://github.com/datum-cloud/compute/tree/main/config).
+The automated test environment consumes an Apps overlay or published Kustomize
+bundle through Flux, so tests exercise the same deployment manifests intended
+for release.
+
+The service has three parts:
+
+1. **App API and publication:** Validate project template revisions and immutable
+   published template versions with the same schema. Check submission rights,
+   platform operator approval, target API discovery, typed bindings, dependency
+   cycles, reference scope, and secret handling before publication. Require
+   target APIs to validate their own resource specs. Templates cannot execute
+   scripts or bypass service admission.
+2. **Shared planner:** Resolve a pinned project template revision or published version and App inputs into a stable
+   component graph. Validate references, project permissions, service
+   entitlements, quotas, and service-specific admission. Diff that graph against
+   the App's owned resources. Use the same planner for `AppPlan` and controller
+   reconciliation; the controller rechecks the plan at apply time. Plans expire
+   and are advisory because resources and prices can change.
+3. **App controller:** Enable required services through the Service Catalog's
+   normal entitlement flow, wait for them to become usable, then apply the graph
+   in dependency order. Watch native resource conditions where their meaning is
+   known, publish component status and outputs, and retry failed steps with
+   backoff. Persist an `AppRevision` for each accepted spec and mark it
+   successful only when the App is ready.
+
+```mermaid
+flowchart LR
+  CLIENT["Project client"] --> API["Milo project API"]
+  API --> APPS["Apps API and shared planner"]
+  APPS --> STORE["Templates, Apps, revisions, inventory"]
+  STORE --> CTRL["Apps controller"]
+  PROVIDER["Milo multicluster runtime provider"] -->|"ready project clients and watches"| CTRL
+  CTRL -->|"scoped service identity"| API
+  API --> GUARD["Project ownership admission"]
+  GUARD --> RES["Native service resources"]
+  RES -->|"readiness and outputs"| CTRL
+```
+
+The admission path applies to writes of managed native resources. The
+controller's inventory and resource UID checks handle ownership across
+restarts; the admission guard prevents unauthorized direct writes at the
+project API boundary.
+
+Composition should be open to any project resource reachable through Milo's
+standard API, subject to project authorization, target admission, and an Apps
+service identity scoped to that project. Generic integration provides create,
+update, reference, and delete using API discovery and an ownership inventory.
+The installer must have permission for the resulting resource actions, or a
+project administrator must grant a template-specific install permission; the
+controller receives only the corresponding project-scoped rights. Define the
+durable delegation behind that statement: record the template version,
+component kinds, verbs, project, and authorizing grant for each installation;
+check authority on install, spec changes, and later reconciliation. Revoking
+the grant must prevent new privileged actions while preserving safe cleanup
+or graduation. Privileged kinds such as RBAC and admission policy resources
+require an explicit platform allowlist before publication. Generic
+integration can report that a resource was accepted, but cannot infer health
+or usage cost from an unfamiliar kind. Services can register optional App
+capabilities for readiness conditions, outputs, cost estimates, and special
+deletion behavior. A required component without a readiness contract leaves
+the App's readiness unknown, and a template cannot bind to an undeclared
+output. Plans and status show when capabilities are unavailable. Platform
+policy may still deny sensitive kinds or cross-project output grants; those are
+authorization decisions, not a fixed list of app-capable resources.
+
+Each generated resource gets a stable name and a protected owner marker
+containing the App's project and immutable UID. The App stores an inventory of
+component GVK, name, namespace, and resource UID so it can detect drift, name
+reuse, and partial failures. The marker and inventory must agree before an
+update or deletion. On restart, the controller also discovers marked resources
+to recover a create that succeeded before its inventory write. A Kubernetes
+owner reference alone cannot establish ownership across control planes. Use
+server-side apply with a dedicated field manager for the desired fields; field
+ownership does not authorize direct customer edits while the App manages the
+resource. Referenced resources are checked for access and readiness but never
+marked, adopted, or deleted. A cross-project `appRef` consumes only approved
+outputs from another App; it does not give the consumer direct access to that
+App's component resources. The producer and consumer each retain one owner and
+an independent lifecycle. Apps does not grant itself write access in the
+producer's project.
+
+## Ownership protection
+
+One App installation owns a resource at a time. The controller refuses to
+create over an existing unmarked resource or one marked by a different App.
+Future adoption of an existing resource requires a separate, explicit transfer
+flow; it is not part of the first release. Only dedicated Apps controller and
+release identities may create or remove an owner marker. Project users,
+including project admins, cannot update or delete a marked resource directly;
+they update the App instead.
+Normal status updates and necessary service-controller finalizer writes must
+continue through narrowly scoped subresource or service-identity rules. No
+general exception for privileged project users or field managers is allowed.
+Reject external owner references on App-owned top-level resources so deleting
+an unrelated owner cannot [cascade into them](https://kubernetes.io/docs/concepts/architecture/garbage-collection/).
+Block namespace deletion while it
+contains managed resources or incomplete releases, and coordinate project
+deletion at the Platform boundary before tearing down its control plane. An
+Apps finalizer is only a recovery backstop: Kubernetes [sets a deletion timestamp
+before finalizers run](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/),
+so a resource reached by garbage collection is already
+unavailable for normal management. Test namespace, project, and garbage
+collector deletion through real control planes.
+
+Enforce this at the project API's admission boundary, after authentication and
+authorization, for every supported component kind. Check the old object on
+update and delete so a client cannot strip the marker in the same request.
+Reject marker forgery on create and marker changes by other identities. Give
+the Apps controller a dedicated credential with scoped permissions; customers
+must not be able to impersonate it. Keep a project-level admission guard
+active even when new App installations are disabled, or existing resources
+would become unprotected.
+
+A shared CEL `ValidatingAdmissionPolicy` and `Deny` binding could make the
+common marker and caller checks local to each API server, with constant policy
+count per project rather than one policy per App or component. However,
+[Milo currently exposes admissionregistration resources only in Platform
+context](https://github.com/milo-os/milo/blob/main/config/discovery/core/discovery-context-policy.yaml),
+and [its project control planes are not seeded with
+policies](https://github.com/milo-os/milo/blob/main/internal/apiserver/admission/plugin/emailverification/admission.go).
+Enabling the plugin alone therefore does not protect project writes. Use a
+small compiled Milo guard on project API servers for the first release. A later
+VAP rollout
+must prove policy availability before the API accepts App ownership, fail
+closed when policy distribution fails, and measure admission latency and policy
+sync at project scale. CEL can inspect the request and old object but cannot
+look up the live App, so the controller remains responsible for the ownership
+inventory and release state. Recheck any component APIs that bypass Milo's
+project admission path before allowing them in templates.
+
+Policy failure behavior needs a separate bootstrap guarantee: Kubernetes
+[ignores a binding whose policy is missing](https://kubernetes.io/docs/reference/kubernetes-api/admissionregistration/validating-admission-policy-binding-v1/),
+and [admissionregistration resources are exempt from validating admission
+policy](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/).
+`failurePolicy: Fail` alone cannot secure a project where the policy or binding
+was never installed or was removed. Gate marker creation and project readiness
+on a verified guard, protect guard administration with platform authorization,
+and independently deny writes to *existing marked resources* while that guard
+is absent. The compiled guard enforces both guarantees in the first release.
+Exercise startup, reconnection, and deletion
+of the policy and binding on a real project API server.
+
+## Graduation and removal
+
+There are two deletion outcomes, shown in the App plan:
+
+1. **Delete resources (default):** The controller freezes reconciliation and
+   persists an `AppRelease` snapshot, then the App finalizer deletes owned
+   components in reverse dependency order after checking their resource UIDs.
+   It removes the installation only after cleanup succeeds. Referenced
+   resources and shared entitlements stay.
+2. **Keep resources:** The user first sets `spec.uninstallPolicy: Retain` and
+   reviews the retained inventory, then deletes the App. The App controller
+   freezes reconciliation, persists an `AppRelease` record with the exact
+   inventory, and removes the App finalizer. The release worker waits until the
+   App UID is absent, then clears owner markers only on matching resource UIDs.
+   It records per-resource progress and retries failures. A resource remains
+   protected until its marker is cleared, and an incomplete release is visible
+   for repair.
+
+`AppRelease` is named by the deleted App UID and has a customer-readable phase
+(`PendingAppRemoval`, `Deleting`, `Releasing`, `Completed`, or `Blocked`) and
+per-resource action and result. Customers with current project permission to
+view releases may get, list, and watch records; they cannot create or modify them. A
+completed record remains available for a bounded audit retention period before
+garbage collection. Incomplete records remain until repaired. App-name reuse
+does not change the release record's subject.
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant App as App API
+  participant Controller as Apps controller
+  participant Release as AppRelease record
+  participant Worker as Release worker
+  participant Resource as Project resource
+  User->>App: Set Retain, preview, delete App
+  App->>Controller: Deletion with finalizer
+  Controller->>Controller: Freeze reconciliation
+  Controller->>Release: Persist App and resource UID snapshot
+  Controller->>App: Remove App finalizer
+  Worker->>App: Confirm App UID is absent
+  Worker->>Resource: Verify resource UID and owner marker
+  Worker->>Resource: Clear matching owner marker
+  Note over User,Resource: Direct management is allowed after marker removal
+```
+
+Only the trusted App controller may create an `AppRelease` and advance Delete
+progress; only the release worker may advance Retain progress or clear ownership
+markers. Persist a snapshot
+of the uninstall policy and exact App and resource UIDs before App removal;
+customers cannot forge or edit that snapshot. The worker independently checks
+the App UID is absent and each resource UID and marker match before release.
+
+The release worker must not apply App templates. This ordering ensures that a
+user can take over a resource only after deleting the managing installation;
+there is no dual ownership during a partial release. A new App cannot claim a
+marked resource. Direct edits and deletes are denied throughout the handoff
+until each resource is released. The release record is durable and separate
+from the deleted App so retries survive controller restarts and App garbage
+collection. Retaining a stateful component keeps its data but does not promise
+the App's former readiness or connectivity after graduation.
+An App may be removed even when another App consumes one of its outputs; there
+is no cascading deletion or implicit finalizer on the producer. Deletion
+preview lists known consumers where the caller may see them, and consumers
+report a missing dependency after removal. The producer's output grant is
+removed with it. A replacement App using the same name has a different UID
+and requires the consumer to accept a new reference.
+
+Default deletion runs the graph in reverse dependency order and keeps the App
+finalizer until owned resources are removed or a clear intervention condition
+is set.
+Shared service entitlements remain enabled. Rollback selects a prior successful
+revision and reconciles its desired spec; it cannot undo external side effects
+or stateful data changes. A failed rollout preserves the previous revision
+record and exposes exactly which component needs attention.
+
+## Scale and rollout checks
+
+Apps add several customer-facing API types, an internal release record, and API
+calls proportional to component count. Bound template size and plan work,
+rate-limit reconciliation per project, and restrict per-project caches to
+needed resource kinds. Milo's provider currently registers project control
+planes serially; measure project engagement time, memory, watch count, and API
+request rates before expanding adoption. Ownership admission must use request
+metadata and identity without per-write App lookups. Measure deny rate and
+latency separately from reconciliation work.
+
+Before enabling a component kind, verify that all writes pass through the
+project ownership guard and that its normal status and finalizer updates still
+work. Test controller restart, a create that succeeds before inventory is
+written, project disconnection, name reuse, partial deletion, and partial
+release. Keep reconciliation and release enabled when new installations are
+disabled.
+
+## Open question
+
+Can project policy bootstrap and administration meet fail-closed availability
+and latency targets, allowing the ownership guard to move from a Milo plugin
+to one shared validating admission policy and binding per project?
