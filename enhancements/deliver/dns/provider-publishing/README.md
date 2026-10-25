@@ -98,8 +98,8 @@ slice directly into the serving path. The serving fleet merges a zone's slices.
   records, zone defaults and ownership markers) plus each granted provider's
   slice. Each slice is atomic on its own; the zone as a whole is not atomic across
   slices, and nothing may depend on cross-slice atomicity.
-- **Name ownership.** Providers own the names of their own resources, and serving
-  settles overlaps with fixed local rules; see below.
+- **Name ownership.** Providers own the names of their own resources, under
+  scopes granted per resource kind; see below.
 - **Status.** The platform aggregates per-slice acknowledgements from serving
   members into the grant's status, and into the status of the names it carries,
   through the API. Visibility stays bounded by API latency, which is acceptable
@@ -113,25 +113,35 @@ the project: two instances in a project cannot share a name, wherever they run.
 The provider is the single writer of those names, so it needs no claim, lease or
 compile step before publishing.
 
-Two kinds of overlap remain, and serving settles both with fixed rules applied
-locally, not by a central decision:
+### Scopes
 
-- **A provider name and a tenant's own record at the same name.** A fixed
-  precedence decides which is answered. The proposal is that the tenant's record
-  wins, so a tenant can always override an automatic name. The provider's status
-  for that name reports that it is shadowed.
-- **Two providers producing the same name**, for example an instance and a
-  database both called `db`. Resource names are unique per resource type, not
-  across providers. Either each provider's names carry something that keeps them
-  apart, or grants give providers disjoint name scopes in a zone and serving
-  answers only the provider whose scope covers the name.
+A grant gives a provider one or more scopes in a zone. A scope is a label under
+which that provider alone publishes, named for the kind of resource it serves:
+
+| Scope | Names | Answers |
+| --- | --- | --- |
+| `instances` | `<instance>.instances.<zone>` | the instance's addresses |
+| `workloads` | `<workload>.workloads.<zone>` | the addresses of the workload's ready instances, for service discovery |
+| `databases` (a future provider) | `<database>.databases.<zone>` | the database's endpoints |
+
+Compute holds the `instances` and `workloads` scopes. Resource names are unique
+per kind within a project, and each kind has its own scope, so names never
+collide between providers or kinds. Scope labels are unique in a zone, checked
+once when a grant is created. Serving's check is a suffix match on the scope.
+
+Tenants' own records cannot be created inside a granted scope, so a scope's names
+are only ever answered by its provider.
+
+This changes the automatic names today's design gives instances
+(`<instance>.datum.internal`). Whether the bare form stays as an alias for
+`instances` names during a migration is an open decision.
 
 Serving checks every slice entry against the provider's grant: zone, name scope,
 record types and TTL. Because providers are trusted publishers, serving does not
 verify that the provider really owns the resource behind each name; the grant's
 name scope bounds what a misbehaving provider could publish.
 
-Deleting a workload is the provider withdrawing the name in its next slice
+Deleting an instance or workload is the provider withdrawing its name in its next slice
 version. If a provider stops publishing, its slice lease expires and its names
 stop being answered.
 
@@ -178,8 +188,8 @@ and operators can audit what a provider published and when.
   objects. Slice status per grant, and a read API over served names, keep them
   visible.
 - **Two sources for one zone.** Each slice is versioned and loaded atomically, but
-  the zone is not atomic across slices. Fixed precedence means a name has one
-  answer at a time even while two slices both carry it.
+  the zone is not atomic across slices. Scopes keep each name in one slice, so a
+  name never has two answers.
 - **One provider affecting others.** Slices must not share the control plane's
   stream limits, de-duplication window or bootstrap keys. Each provider gets its
   own stream or account, its own quotas and its own bootstrap keys. Before any
@@ -197,9 +207,9 @@ and operators can audit what a provider published and when.
 <<[UNRESOLVED]>>
 Decisions needed before this is implementable:
 
-1. How two providers' names are kept apart in a flat namespace: a per-provider
-   name element, or disjoint name scopes in grants. Also the precedence between
-   tenant records and provider names.
+1. Migration from today's flat instance names to `instances` scope names, and
+   whether the flat form remains as an alias. What a `workloads` name answers:
+   all ready instances, or only those in the querying network's region.
 2. How grants reach serving (the serving snapshot) and how the edge enforcement
    primitive maps provider identity to publish permissions.
 3. Placement and fan-out: whether a provider follows a zone's region and shard
