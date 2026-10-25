@@ -80,17 +80,20 @@ server registered with Milo through an `APIService`, with custom storage.
 
 | Component | Responsibility |
 | --- | --- |
-| **feedback-apiserver** | Serves `feedback.miloapis.com/v1alpha1`. `FeedbackSource` uses the standard etcd registry; everything else uses custom `rest.Storage` backed by Postgres. |
+| **feedback-apiserver** | Serves `feedback.miloapis.com/v1alpha1`. `FeedbackSource` uses the standard etcd registry; everything else uses custom `rest.Storage` backed by Postgres. The only component that connects to Postgres. |
 | **feedback-webhook** | Public HTTPS endpoint for GitHub App webhooks. Verifies `X-Hub-Signature-256`, drops events for private repos, publishes to NATS JetStream. No other processing. |
-| **feedback-sync** | Consumes webhook events and runs periodic GraphQL reconciliation. Upserts posts, releases and changelog entries. The only component with GitHub write access: creates approved issues and mirrors vote totals. |
-| **feedback-controller** | Runs submission triage, computes embeddings, applies review outcomes, queues delivery tracking events, and builds digest emails. |
+| **feedback-sync** | Consumes webhook events and runs periodic GraphQL reconciliation. Creates and updates posts, releases and changelog entries through the Feedback API. The only component with GitHub write access: creates approved issues and mirrors vote totals. |
+| **feedback-controller** | Runs submission triage, applies review outcomes, queues delivery tracking events, and builds digest emails. Writes its results through the Feedback API. |
 | **feedback-mcp** | MCP server exposing feedback tools to Patch. |
 
 Backing services:
 
 - **Postgres + pgvector** for posts, votes, submissions, subscriptions,
-  releases and changelog entries. Full-text search uses `tsvector`;
-  similarity uses pgvector embeddings.
+  releases and changelog entries. Similarity search uses pgvector
+  embeddings.
+- **Search service** ([`milo-os/search`][search]) for keyword search over
+  posts, releases and changelog entries, indexed from the audit log like
+  any other platform resource.
 - **NATS JetStream** to buffer webhook events.
 - **Internal AI gateway** for embeddings and triage drafts.
 - **Object storage** for private attachments.
@@ -101,20 +104,41 @@ Backing services:
 extras (`iam.miloapis.com/parent-type`, `parent-name`). User-owned resources
 are keyed by the Milo user UID.
 
+**Writes go through the API.** Every write, including those from
+`feedback-sync` and `feedback-controller`, is a request to the Feedback API.
+No component other than the apiserver writes to Postgres. That puts every
+change in the audit log, lets the search service index feedback resources,
+and keeps authorization in one place.
+
 **API contexts.**
 
-| Resource | Platform context (staff) | User context | Storage |
-| --- | --- | --- | --- |
-| `FeedbackSource` | read/write | none | etcd |
-| `Post` | read, hide/unhide | read | Postgres |
-| `PostQuery` | create | create | not stored |
-| `Release`, `ChangelogEntry` | read | read | Postgres |
-| `Vote` | list all | CRUD own | Postgres |
-| `Submission` | list all, review | create, read own | Postgres |
-| `Subscription` | list all | CRUD own | Postgres |
+| Resource | Platform context (staff) | Platform context (`feedback-sync`) | User context | Storage |
+| --- | --- | --- | --- | --- |
+| `FeedbackSource` | read/write | read | none | etcd |
+| `Post` | read, hide/unhide | create, update, delete, update `status` | read | Postgres |
+| `PostQuery` | create | none | create | not stored |
+| `Release`, `ChangelogEntry` | read | create, update, delete, update `status` | read | Postgres |
+| `Vote` | list all | none | CRUD own | Postgres |
+| `Submission` | list all, review | read, update `status.postRef` | create, read own | Postgres |
+| `Subscription` | list all | none | CRUD own | Postgres |
 
 `Post`, `Release` and `ChangelogEntry` are readable by any authenticated
-principal, including the datum.net service account.
+principal, including the datum.net service account. Their GitHub-derived
+fields live in `status` and can only be written by the `feedback-sync`
+service account; staff can only patch `spec.hidden`.
+
+`feedback-controller` runs as its own service account with `update` on the
+`status` subresources it owns: `Submission` triage and `Post` delivery
+tracking.
+
+Side effects of a request are written by the apiserver in the same
+transaction, so they are covered by that request's audit entry: the
+`Subscription` created with a `Vote`, the submitter's `Vote` and
+`Subscription` when a review approves or merges, and recomputed
+`votes.total` and `trendingScore`. Embeddings and the hourly trending
+refresh are internal to the apiserver and only touch derived data.
+
+[search]: https://github.com/milo-os/search
 
 ## API Resources
 
@@ -187,8 +211,9 @@ or `changelog` block.
 ### Post
 
 A public item synced from a GitHub issue. Every `Post` is backed by a GitHub
-issue; unreviewed feedback is a `Submission`, never a `Post`. Posts are
-read-only through the API except for staff hiding.
+issue; unreviewed feedback is a `Submission`, never a `Post`. Only
+`feedback-sync` creates, updates and deletes posts; for everyone else they
+are read-only except for staff hiding.
 
 ```yaml
 apiVersion: feedback.miloapis.com/v1alpha1
@@ -256,7 +281,7 @@ It is not persisted; `status` carries results and facets.
 apiVersion: feedback.miloapis.com/v1alpha1
 kind: PostQuery
 spec:
-  text: wildcard hostnames         # full-text search, optional
+  text: wildcard hostnames         # keyword search, optional
   similarTo: |                     # draft feedback text, optional
     I want to route *.example.com to one ALB
   filter:
@@ -296,9 +321,24 @@ Sorts:
 - `recentlyChanged`: latest `delivery.history` entry first. Used by My
   feedback.
 
+`text` is answered by the search service. The apiserver runs a
+`ResourceSearchQuery` against the posts index with its own service
+account, then applies the filters and `votedByMe`/`followedByMe` in
+Postgres and keeps search's ranking for `relevance`. Vote, follow and
+delivery state stay in Postgres because search can't filter or sort on
+them.
+
 `similarTo` embeds the text through the AI gateway and runs a pgvector
-nearest-neighbour search, blended with full-text rank. It drives the
-"similar feedback" list and the duplicate checks in datumctl and Patch.
+nearest-neighbour search. The search service has no vector search, so this
+stays in Postgres. It drives the "similar feedback" list and the duplicate
+checks in datumctl and Patch.
+
+**Search index.** A `ResourceIndexPolicy` per kind indexes `Post`,
+`Release` and `ChangelogEntry`: title, summary or body text, categories,
+labels and status. Derived fields (`votes`, `trendingScore`, `delivery`)
+are not indexed, since they change as side effects and would go stale in
+the index. Hidden posts are excluded by the policy's CEL condition. This
+also makes feedback findable through platform search.
 
 ### Vote
 
@@ -477,10 +517,12 @@ either org.
 trusting the webhook payload. That keeps one code path for webhooks and
 reconciliation and picks up fields payloads lack (project Status, issue
 type, `bodyHTML`). It then applies the source's include/exclude rules, maps
-status and categories, sanitises HTML, re-embeds if title or body changed,
-and upserts. If an item no longer matches (label removed, repo private,
-issue deleted) the `Post` is removed and its votes are kept for 30 days in
-case it returns.
+status and categories, sanitises HTML, and writes the result through the
+Feedback API: `create` for a new item, otherwise an `update` of the `status`
+subresource, skipped when nothing changed. The apiserver re-embeds the post
+in the background when the title or body changed. If an item no longer matches (label removed, repo
+private, issue deleted) the sync worker deletes the `Post` and its votes
+are kept for 30 days in case it returns.
 
 **Reconciliation.**
 
@@ -743,6 +785,7 @@ context for:
 | Exposing something sensitive from a public repo | `feedback:hide` label, per-source repo allow and deny lists, staff `spec.hidden`. |
 | Leaking private attachments | Private bucket, served only through the apiserver to the submitter and staff. |
 | Approval bypass | Review subresource authorised only for staff in the Platform context. |
+| Synced content changed outside GitHub | Create, update and delete on `Post`, `Release` and `ChangelogEntry` granted only to the `feedback-sync` service account. Staff can only patch `spec.hidden`. Every write is audited. |
 | GitHub rate limits | Installation tokens per org, GraphQL batching, incremental reconcile, 👍 sweep limited to open tracked posts. |
 
 ## Rollout
@@ -750,9 +793,9 @@ context for:
 Matches the [product rollout][product]:
 
 1. **Read.** `FeedbackSource` for both orgs, GitHub App, webhook endpoint,
-   sync worker, `Post`, `PostQuery`, `Release`, `ChangelogEntry`. datum.net
-   pages move to the service behind a flag, side by side with the old
-   code, then its GitHub integration is removed.
+   sync worker, `Post`, `PostQuery`, `Release`, `ChangelogEntry`, search
+   index policies. datum.net pages move to the service behind a flag, side
+   by side with the old code, then its GitHub integration is removed.
 2. **Vote and track.** `Vote`, `Subscription`, 👍 sweep and dedupe, Votes
    field mirroring, website login gate, delivery tracking and work items,
    My feedback, daily digest, avatar opt-in.
@@ -782,6 +825,7 @@ does.
 - Delivery stage transitions per day, and posts whose work items failed to
   refresh.
 - API latency and errors per resource, especially `PostQuery`.
+- Lag from a `Post` write to it appearing in the search index.
 
 Alerts: reconcile failing three runs in a row, rate limit under 10%, oldest
 pending submission older than five business days, digest run failing.
@@ -793,7 +837,8 @@ pending submission older than five business days, digest run failing.
 | GitHub API / webhooks | Data goes stale; reads keep working. |
 | Postgres + pgvector | Service unavailable. |
 | NATS JetStream | Webhooks are lost; reconcile catches up. |
-| AI gateway | `similarTo` falls back to full-text; triage is empty. |
+| Search service | `PostQuery` with `text` fails; browsing, filters and `similarTo` keep working. |
+| AI gateway | `similarTo` falls back to keyword search; triage is empty. |
 | Milo email | Digests retry next run. |
 | Object storage | Submissions without attachments still work. |
 | Fraud service | Triage has no fraud score. |
@@ -822,18 +867,29 @@ Which embedding model and dimension the AI gateway will serve for this.
 Changing it later means re-embedding all posts, which is cheap at this size.
 <<[/UNRESOLVED]>>
 
+<<[UNRESOLVED audit events for aggregated APIs]>>
+The search indexer reads the `responseObject` of Milo audit events. Milo's
+apiserver proxies `feedback.miloapis.com` requests to the aggregated
+server, and may not record request or response bodies for proxied
+requests. If it doesn't, `feedback-apiserver` needs its own audit backend
+publishing to the same stream. To confirm against how `activity` and
+`search` resources are audited today.
+<<[/UNRESOLVED]>>
+
 ## Alternatives
 
 **CRDs in etcd instead of an aggregated apiserver.** Fine for
-`FeedbackSource`, but full-text and similarity search, vote aggregation and
+`FeedbackSource`, but keyword and similarity search, vote aggregation and
 trending sorts don't fit etcd and label selectors. Same reason `activity`
 and `search` use custom storage.
 
-**Index posts in the existing search service (Meilisearch).** It would give
-full-text search for free, but votes, submissions and subscriptions need a
-transactional store anyway. One Postgres database with `tsvector` and
-pgvector keeps a single source of truth. Revisit if search quality needs
-more than Postgres offers.
+**Sync workers write Postgres directly.** Simpler, but those writes would
+skip the audit log and the search indexer, and authorization would be split
+between the API and database credentials.
+
+**Full-text search in Postgres (`tsvector`).** Keeps keyword and
+similarity search in one query, but builds a second search stack next to
+`milo-os/search` and keeps feedback out of platform-wide search.
 
 **Each client calls GitHub directly.** What datum.net does today. Separate
 credentials, caches and status logic per client, no shared votes, no
@@ -853,6 +909,9 @@ can't tie demand to Datum users or organizations.
 - `Votes` number field on the Enhancements project, and an `Infrastructure`
   label in both orgs.
 - Feedback digest `EmailTemplate`.
+- `ResourceIndexPolicy` for `Post`, `Release` and `ChangelogEntry`.
+- Service accounts for `feedback-sync` and `feedback-controller`, with
+  roles scoped to the writes above.
 
 ## Implementation History
 
@@ -860,3 +919,5 @@ can't tie demand to Datum users or organizations.
 - 2026-10-09: Product enhancement merged
   ([#923](https://github.com/datum-cloud/enhancements/pull/923)).
 - 2026-10-09: Architecture proposal.
+- 2026-10-25: All writes go through the Feedback API; keyword search moves
+  to `milo-os/search`.
