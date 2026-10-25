@@ -110,6 +110,16 @@ No component other than the apiserver writes to Postgres. That puts every
 change in the audit log, lets the search service index feedback resources,
 and keeps authorization in one place.
 
+**Audit.** `feedback-apiserver` runs its own audit backend and logs writes
+at `RequestResponse`. Milo can't do this for it: request and response
+bodies are recorded by the handlers in the server that owns the resource,
+and Milo's aggregator only proxies the request, so its events for
+`feedback.miloapis.com` carry metadata only. The search indexer skips
+events with no `responseObject`. The apiserver uses the generic apiserver
+`--audit-policy-file` and `--audit-webhook-config-file` options and sends
+to the same Vector webhook in `activity-system` as Milo, so its events
+reach the audit log, activity and search the same way.
+
 **API contexts.**
 
 | Resource | Platform context (staff) | Platform context (`feedback-sync`) | User context | Storage |
@@ -867,15 +877,6 @@ Which embedding model and dimension the AI gateway will serve for this.
 Changing it later means re-embedding all posts, which is cheap at this size.
 <<[/UNRESOLVED]>>
 
-<<[UNRESOLVED audit events for aggregated APIs]>>
-The search indexer reads the `responseObject` of Milo audit events. Milo's
-apiserver proxies `feedback.miloapis.com` requests to the aggregated
-server, and may not record request or response bodies for proxied
-requests. If it doesn't, `feedback-apiserver` needs its own audit backend
-publishing to the same stream. To confirm against how `activity` and
-`search` resources are audited today.
-<<[/UNRESOLVED]>>
-
 ## Alternatives
 
 **CRDs in etcd instead of an aggregated apiserver.** Fine for
@@ -910,6 +911,8 @@ can't tie demand to Datum users or organizations.
   label in both orgs.
 - Feedback digest `EmailTemplate`.
 - `ResourceIndexPolicy` for `Post`, `Release` and `ChangelogEntry`.
+- Audit policy and webhook config for `feedback-apiserver`, pointing at the
+  `activity-system` Vector webhook.
 - Service accounts for `feedback-sync` and `feedback-controller`, with
   roles scoped to the writes above.
 
