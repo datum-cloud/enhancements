@@ -148,8 +148,7 @@ until its TTL expires.
 
 A tenant removes a provider's grant. The edge rejects the provider's new
 publishes immediately, and serving drops the provider's slice when the revocation
-reaches it through the serving snapshot, at control-plane latency. The provider's
-claims in that zone are released. A tenant can revoke the platform-held grant in
+reaches it through the serving snapshot, at control-plane latency. A tenant can revoke the platform-held grant in
 a managed `datum.internal` namespace the same way; the provider's automatic names
 in that network then stop resolving.
 
