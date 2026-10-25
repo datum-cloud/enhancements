@@ -76,17 +76,21 @@ zone and grants providers a slice. Each provider publishes and versions its own
 slice directly into the serving path. The serving fleet merges a zone's slices.
 
 - **Publishing grants (API, in the tenant's project).** A grant names a
-  provider, a zone, the record types it may publish and their limits, such as the
-  maximum TTL. Creating a grant is a tenant or platform decision, recorded and
+  provider, a zone, a name scope, the record types it may publish and their
+  limits, such as the maximum TTL. A grant is the only source of a provider's
+  permission to publish into a zone. NS, SOA, the zone apex and wildcard owners
+  can never be granted. Creating a grant is a tenant or platform decision, recorded and
   visible like any other access binding. In zones the platform owns, such as a
   network's managed `datum.internal` namespace, the platform holds the grant;
   see the open decisions.
 - **Edge enforcement (platform primitive).** Enforcing a tenant's grants where
   data enters the edge is not specific to DNS, so it will be defined as its own
-  platform primitive in a follow-up enhancement. The broker can only check a
-  provider's identity and the subjects it publishes to; it cannot see names or
-  record types inside a slice. Serving is therefore the authoritative check of
-  zone, name, type and TTL against the grant, and drops anything outside it.
+  platform primitive in a follow-up enhancement. A provider's publish subjects
+  are derived from its grants, so it cannot publish into a project or zone it
+  holds no grant for. The broker cannot see names or record types inside a
+  slice, so serving is the authoritative check: every slice entry must name a
+  record the provider has claimed (below), within its grant's name scope, types
+  and TTL. Serving drops anything else.
 - **Slices.** A provider publishes whole versions of its slice of a zone, numbered
   and fenced like today's zone versions. A serving member loads a slice version
   atomically and catches up by taking the latest one.
@@ -122,6 +126,17 @@ policies applied across all of them. Two options keep that decided:
 The recommendation is (a): it keeps today's naming, naming policies and conflict
 status, and it still removes the per-change API write and recompile.
 
+Under (a), each claim is a DNSRegistration that names the publishing provider.
+The serving snapshot carries the set of names each provider holds, and serving
+answers a slice entry only if the provider holds that name. When a slice entry
+collides with a tenant's record or another claim, the central claim decides, as
+it does today: the losing entry is not served and its claim reports the conflict.
+
+Deleting a workload deletes its claim through the API. The provider should
+withdraw the name in its next slice version, but the claim's deletion reaching
+serving through the snapshot also drops the name, whether or not the provider
+does.
+
 ### User Stories
 
 #### An instance's address change is answered quickly
@@ -133,14 +148,26 @@ until its TTL expires.
 
 #### A tenant revokes a provider
 
-A tenant removes a provider's grant. Serving drops the provider's slice from the
-zone within a stated bound, and the provider can no longer publish into it.
+A tenant removes a provider's grant. The edge rejects the provider's new
+publishes immediately, and serving drops the provider's slice when the revocation
+reaches it through the serving snapshot, at control-plane latency. The provider's
+claims in that zone are released. A tenant can revoke the platform-held grant in
+a managed `datum.internal` namespace the same way; the provider's automatic names
+in that network then stop resolving.
 
 #### A provider stops publishing
 
-A provider has an outage. Serving keeps its last slice version, as it keeps all
-applied state through outages today, until the grant is revoked or the slice's
-lease, if one is adopted, expires.
+A provider has an outage. Serving keeps its last slice version until the slice's
+lease expires. The lease is required, so a provider that stops renewing it stops
+being answered instead of serving stale addresses indefinitely. Deregistering a
+provider revokes all of its grants.
+
+#### A tenant finds where a name comes from
+
+A tenant lists the names served in a zone and sees, for each, whether it is their
+own record or a provider's, and which version of which provider's slice. Slice
+publishes are recorded with the publishing identity and version, so the tenant
+and operators can audit what a provider published and when.
 
 ### Risks and Mitigations
 
@@ -158,7 +185,9 @@ lease, if one is adopted, expires.
   keeps a name in one slice at a time.
 - **One provider affecting others.** Slices must not share the control plane's
   stream limits, de-duplication window or bootstrap keys. Each provider gets its
-  own stream or account, its own quotas and its own bootstrap keys.
+  own stream or account, its own quotas and its own bootstrap keys. Before any
+  third party is admitted, providers also need a kill switch that stops a
+  provider everywhere at once.
 - **Wedged or resurrected slices.** A provider that publishes an extreme version
   could block its slice forever, and one that loses state could be ignored as
   stale. Slice versions are bound to the grant's identity and generation, the
@@ -175,7 +204,9 @@ Decisions needed before this is implementable:
 2. How grants reach serving (the serving snapshot) and how the edge enforcement
    primitive maps provider identity to publish permissions.
 3. Placement and fan-out: whether a provider follows a zone's region and shard
-   placement, or the broker maps a provider-level subject onto placement.
+   placement, or the broker maps a provider-level subject onto placement. Slices
+   must follow the same placement as compiled zones, which today publish only to
+   shards where one of the zone's networks has a resolver binding.
 4. Slice fencing: epoch source, binding to the grant, and recovery from a bad
    high-water mark.
 5. Zone readiness with several slices: per-slice required versions in the
@@ -185,10 +216,14 @@ Decisions needed before this is implementable:
 6. Rules that span slices today, such as SRV targets that must resolve in the
    zone: drop them, or check them at serving time.
 7. Who aggregates acknowledgements into status, and where.
-8. Revocation semantics and its time bound.
+8. Revocation semantics and its time bound, the window between the edge
+   rejecting new publishes and serving dropping the slice. Required before alpha.
 9. Migration from compute's contributions to a compute slice without a window
-   where a name is served twice or not at all, rollback to the central path,
-   and mixed serving versions during upgrade.
+   where a name is served twice or not at all, including alongside per-zone
+   compile in the control plane, rollback to the central path, and mixed serving
+   versions during upgrade.
+11. The audit trail for slice publishes, and the read API that lists served names
+    by origin.
 10. A per-hop latency budget that shows the gain over the faster central compile.
 <<[/UNRESOLVED]>>
 
