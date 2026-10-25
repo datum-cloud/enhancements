@@ -121,10 +121,11 @@ which that provider alone publishes, named for the kind of resource it serves:
 | Scope | Names | Answers |
 | --- | --- | --- |
 | `instances` | `<instance>.instances.<zone>` | the instance's addresses |
-| `workloads` | `<workload>.workloads.<zone>` | the addresses of the workload's ready instances, for service discovery |
+| `workloads` (later) | `<workload>.workloads.<zone>` | the addresses of the workload's ready instances, for service discovery |
 | `databases` (a future provider) | `<database>.databases.<zone>` | the database's endpoints |
 
-Compute holds the `instances` and `workloads` scopes. Resource names are unique
+Compute holds the `instances` scope, and later a `workloads` scope for service
+discovery. Resource names are unique
 per kind within a project, and each kind has its own scope, so names never
 collide between providers or kinds. Scope labels are unique in a zone, checked
 once when a grant is created. Serving's check is a suffix match on the scope.
@@ -132,9 +133,9 @@ once when a grant is created. Serving's check is a suffix match on the scope.
 Tenants' own records cannot be created inside a granted scope, so a scope's names
 are only ever answered by its provider.
 
-This changes the automatic names today's design gives instances
-(`<instance>.datum.internal`). Whether the bare form stays as an alias for
-`instances` names during a migration is an open decision.
+This changes the automatic names today's design gives instances, from
+`<instance>.datum.internal` to `<instance>.instances.datum.internal`. The old
+form is not kept as an alias.
 
 Serving checks every slice entry against the provider's grant: zone, name scope,
 record types and TTL. Because providers are trusted publishers, serving does not
@@ -207,9 +208,10 @@ and operators can audit what a provider published and when.
 <<[UNRESOLVED]>>
 Decisions needed before this is implementable:
 
-1. Migration from today's flat instance names to `instances` scope names, and
-   whether the flat form remains as an alias. What a `workloads` name answers:
-   all ready instances, or only those in the querying network's region.
+1. Moving existing instance names to the `instances` scope, and how users are told
+   the names changed. The `workloads` scope is a later addition with its own
+   decisions, such as whether it answers all ready instances or only those in the
+   querying network's region.
 2. How grants reach serving (the serving snapshot) and how the edge enforcement
    primitive maps provider identity to publish permissions.
 3. Placement and fan-out: whether a provider follows a zone's region and shard
