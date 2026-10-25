@@ -58,6 +58,8 @@ for them under the same rules.
 
 ### Non-Goals
 
+- Designing how the edge enforces tenancy RBAC. That is a platform primitive
+  with its own follow-up enhancement; this proposal consumes it.
 - Changing how tenants write their own records. User-written record sets keep
   their current API.
 - Public DNS. This covers private zones served to networks.
@@ -74,9 +76,12 @@ slice directly into the serving path. The serving fleet merges a zone's slices.
   compute may publish `A` and `AAAA` records for `*.instances.<zone>`. Creating a
   grant is a tenant or platform decision, recorded and visible like any other
   access binding.
-- **Provider credentials.** Each provider has a broker identity scoped to the
-  slices its grants allow. The broker refuses anything else, so a misbehaving or
-  compromised provider cannot publish into a zone it has no grant for.
+- **Edge enforcement (platform primitive).** Enforcing a tenant's grants where
+  data enters the edge is not specific to DNS, so it will be defined as its own
+  platform primitive in a follow-up enhancement. This proposal relies on it to
+  ensure a provider can only publish the slices its grants allow, so a
+  misbehaving or compromised provider cannot publish into a zone it has no grant
+  for.
 - **Slices.** A provider publishes whole versions of its slice of a zone, numbered
   and fenced like today's zone versions. A serving member loads a slice version
   atomically and catches up by taking the latest one.
@@ -104,11 +109,12 @@ databases come and go, without access to any other part of the zone.
 
 ### Risks and Mitigations
 
-- **A provider publishes outside its grant.** The broker enforces the grant on
-  every publish, and serving rejects slice content outside the grant's names and
+- **A provider publishes outside its grant.** The platform's edge enforcement
+  rejects it, and serving rejects slice content outside the grant's names and
   types as a second check.
-- **A grant is revoked.** Revocation removes the provider's broker permission and
-  tells serving to drop the slice, both driven from the API object.
+- **A grant is revoked.** Revocation withdraws the provider's permission through
+  the edge enforcement primitive and tells serving to drop the slice, both driven
+  from the API object.
 - **Visibility.** Tenants could lose sight of names that never become API
   objects. Slice status per grant, and a read API over served names, keep them
   visible.
@@ -118,10 +124,9 @@ databases come and go, without access to any other part of the zone.
 ## Design Details
 
 <<[UNRESOLVED]>>
-- Grant API shape, and where provider identity comes from (service accounts,
-  workload identity, an extension of existing service provider APIs).
-- How grants map to broker permissions: per-provider accounts or subjects, and
-  how they are rotated.
+- Grant API shape for DNS slices.
+- How DNS grants are expressed in the platform's edge enforcement primitive
+  (provider identity, permissions, rotation), once that primitive is proposed.
 - Slice format, fencing and ordering across providers; whether the zone owner's
   slice stays compiled by the current control plane.
 - How serving merges slices and enforces grant boundaries a second time.
