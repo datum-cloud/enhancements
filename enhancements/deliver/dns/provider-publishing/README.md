@@ -88,9 +88,9 @@ slice directly into the serving path. The serving fleet merges a zone's slices.
   platform primitive in a follow-up enhancement. A provider's publish subjects
   are derived from its grants, so it cannot publish into a project or zone it
   holds no grant for. The broker cannot see names or record types inside a
-  slice, so serving is the authoritative check: every slice entry must name a
-  record the provider has claimed (below), within its grant's name scope, types
-  and TTL. Serving drops anything else.
+  slice, so serving is the authoritative check: every slice entry must fall
+  within its grant's zone, name scope, types and TTL. Serving drops anything
+  else.
 - **Slices.** A provider publishes whole versions of its slice of a zone, numbered
   and fenced like today's zone versions. A serving member loads a slice version
   atomically and catches up by taking the latest one.
@@ -98,8 +98,8 @@ slice directly into the serving path. The serving fleet merges a zone's slices.
   records, zone defaults and ownership markers) plus each granted provider's
   slice. Each slice is atomic on its own; the zone as a whole is not atomic across
   slices, and nothing may depend on cross-slice atomicity.
-- **Name ownership.** Which slice may answer a name is decided before any slice
-  is published; see below.
+- **Name ownership.** Providers own the names of their own resources, and serving
+  settles overlaps with fixed local rules; see below.
 - **Status.** The platform aggregates per-slice acknowledgements from serving
   members into the grant's status, and into the status of the names it carries,
   through the API. Visibility stays bounded by API latency, which is acceptable
@@ -107,35 +107,33 @@ slice directly into the serving path. The serving fleet merges a zone's slices.
 
 ### Name ownership
 
-Names are not naturally disjoint between providers. Compute names today are flat
-(`<resource>.datum.internal`) and share a namespace with other providers and with
-tenants' own records. The control plane decides conflicts: tenants' records claim
-first, then registrations in creation order, with CNAME exclusivity and naming
-policies applied across all of them. Two options keep that decided:
+No central control plane decides provider names. A provider publishes names for
+resources it owns, and the resource API already makes those names unique within
+the project: two instances in a project cannot share a name, wherever they run.
+The provider is the single writer of those names, so it needs no claim, lease or
+compile step before publishing.
 
-- **(a) Names stay central, records move.** A provider keeps claiming a name
-  through the API once per workload lifetime, and that claim is still compiled
-  and conflict-checked centrally. Only the record content and eligibility for
-  names it holds, which is the part that changes often, move into its slice.
-  A brand-new name still goes through the API path; address and health changes
-  take the fast path.
-- **(b) Providers own subtrees.** Grants assign each provider a subtree, and
-  admission prevents tenants' records and other grants from overlapping it. This
-  changes the flat naming users see today.
+Two kinds of overlap remain, and serving settles both with fixed rules applied
+locally, not by a central decision:
 
-The recommendation is (a): it keeps today's naming, naming policies and conflict
-status, and it still removes the per-change API write and recompile.
+- **A provider name and a tenant's own record at the same name.** A fixed
+  precedence decides which is answered. The proposal is that the tenant's record
+  wins, so a tenant can always override an automatic name. The provider's status
+  for that name reports that it is shadowed.
+- **Two providers producing the same name**, for example an instance and a
+  database both called `db`. Resource names are unique per resource type, not
+  across providers. Either each provider's names carry something that keeps them
+  apart, or grants give providers disjoint name scopes in a zone and serving
+  answers only the provider whose scope covers the name.
 
-Under (a), each claim is a DNSRegistration that names the publishing provider.
-The serving snapshot carries the set of names each provider holds, and serving
-answers a slice entry only if the provider holds that name. When a slice entry
-collides with a tenant's record or another claim, the central claim decides, as
-it does today: the losing entry is not served and its claim reports the conflict.
+Serving checks every slice entry against the provider's grant: zone, name scope,
+record types and TTL. Because providers are trusted publishers, serving does not
+verify that the provider really owns the resource behind each name; the grant's
+name scope bounds what a misbehaving provider could publish.
 
-Deleting a workload deletes its claim through the API. The provider should
-withdraw the name in its next slice version, but the claim's deletion reaching
-serving through the snapshot also drops the name, whether or not the provider
-does.
+Deleting a workload is the provider withdrawing the name in its next slice
+version. If a provider stops publishing, its slice lease expires and its names
+stop being answered.
 
 ### User Stories
 
@@ -181,8 +179,8 @@ and operators can audit what a provider published and when.
   objects. Slice status per grant, and a read API over served names, keep them
   visible.
 - **Two sources for one zone.** Each slice is versioned and loaded atomically, but
-  the zone is not atomic across slices. Ownership decided centrally (option a)
-  keeps a name in one slice at a time.
+  the zone is not atomic across slices. Fixed precedence means a name has one
+  answer at a time even while two slices both carry it.
 - **One provider affecting others.** Slices must not share the control plane's
   stream limits, de-duplication window or bootstrap keys. Each provider gets its
   own stream or account, its own quotas and its own bootstrap keys. Before any
@@ -200,7 +198,9 @@ and operators can audit what a provider published and when.
 <<[UNRESOLVED]>>
 Decisions needed before this is implementable:
 
-1. Name ownership: option (a) or (b).
+1. How two providers' names are kept apart in a flat namespace: a per-provider
+   name element, or disjoint name scopes in grants. Also the precedence between
+   tenant records and provider names.
 2. How grants reach serving (the serving snapshot) and how the edge enforcement
    primitive maps provider identity to publish permissions.
 3. Placement and fan-out: whether a provider follows a zone's region and shard
@@ -233,6 +233,10 @@ To be completed when the design is implementable.
 
 ## Alternatives
 
+- **Central name claims.** A provider would claim each name through the API once
+  per workload, and a central control plane would settle conflicts, as today.
+  Rejected: names of resources are already unique within a project, and keeping a
+  central decision in the path is what this proposal removes.
 - **Faster central compile.** Making the control plane recompile only the
   changed zone from cached reads is in progress, with an expected 0.8 to 1 s p50
   from write to authoritative answer. It keeps every change passing through the
