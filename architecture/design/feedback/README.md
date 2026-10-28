@@ -16,6 +16,7 @@ latest-milestone: "v0.1"
   - [PostQuery](#postquery)
   - [Vote](#vote)
   - [Submission](#submission)
+  - [SecurityReport](#securityreport)
   - [Subscription](#subscription)
   - [Release](#release)
   - [ChangelogEntry](#changelogentry)
@@ -23,6 +24,7 @@ latest-milestone: "v0.1"
 - [Status and Category Mapping](#status-and-category-mapping)
 - [Votes](#votes)
 - [Submissions and Staff Review](#submissions-and-staff-review)
+- [Security Reports](#security-reports)
 - [Delivery Tracking](#delivery-tracking)
 - [Notifications](#notifications)
 - [Clients](#clients)
@@ -118,7 +120,9 @@ and Milo's aggregator only proxies the request, so its events for
 events with no `responseObject`. The apiserver uses the generic apiserver
 `--audit-policy-file` and `--audit-webhook-config-file` options and sends
 to the same Vector webhook in `activity-system` as Milo, so its events
-reach the audit log, activity and search the same way.
+reach the audit log, activity and search the same way. `Submission` and
+`SecurityReport` are logged at `Metadata` only, so private context and
+vulnerability details never reach the audit log, activity or search.
 
 **API contexts.**
 
@@ -130,6 +134,8 @@ reach the audit log, activity and search the same way.
 | `Release`, `ChangelogEntry` | read | create, update, delete, update `status` | read | Postgres |
 | `Vote` | list all | none | CRUD own | Postgres |
 | `Submission` | list all, review | read, update `status.postRef` | create, read own | Postgres |
+| `SecurityReport` | Security Team only: list all, triage | none | create, read own | Postgres |
+| `SecurityAcknowledgement` | read | none | read | Postgres (view) |
 | `Subscription` | list all | none | CRUD own | Postgres |
 
 `Post`, `Release` and `ChangelogEntry` are readable by any authenticated
@@ -423,6 +429,66 @@ status:
 Submitters can read their own `phase`, `postRef` and rejection `reason`.
 They cannot read `triage`, `fraudScore` or the reviewer.
 
+### SecurityReport
+
+A private vulnerability report. It is a separate resource from
+`Submission` so it can have its own role: only the Security Team can list
+or triage reports, and general feedback reviewers can't see them.
+
+```yaml
+apiVersion: feedback.miloapis.com/v1alpha1
+kind: SecurityReport
+metadata:
+  name: sec-4m8q1
+spec:
+  title: Project viewer can read connector credentials
+  description: |
+    A user with the viewer role on a project can ...
+  affected: connectors          # free text, helps routing
+  stepsToReproduce: |
+    1. ...
+  impact: Credential disclosure across users in one project
+  attachments:
+    - name: poc.sh
+      contentType: text/x-shellscript
+      uploadRef: att-c71e
+  credit:                       # how the reporter wants to be credited
+    public: true
+    name: Ada L.
+    url: https://example.com
+  reporter:                     # set only for reports logged by the Security Team
+    email: ""
+    githubLogin: ""
+  context:
+    client: patch               # website | portal | datumctl | patch | email | github
+    filedByAgent: true
+    organization: acme-corp
+    clientVersion: patch@2026.10.2
+status:
+  phase: Triaged                # Received | Triaged | Fixing | Fixed | Disclosed | NotApplicable | Duplicate
+  severity: high                # critical | high | medium | low | informational
+  cvssVector: "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+  reason: ""                    # shown to the reporter for NotApplicable and Duplicate
+  timeline:                     # reporter-visible
+    - {phase: Received, at: "2026-10-27T09:12:00Z"}
+    - {phase: Triaged, at: "2026-10-27T15:40:00Z", note: Confirmed, fix in progress soon}
+  advisory:
+    url: https://github.com/datum-cloud/datum/security/advisories/GHSA-xxxx
+    cve: ""
+  reward:
+    kind: credits               # none | thanks | swag | credits
+    amount: "250.00"
+    creditGrantRef: {name: security-sec-4m8q1}   # billing CreditGrant
+    grantedAt: "2026-11-04T10:00:00Z"
+  internal:                     # Security Team only
+    assignee: staff:jdoe@datum.net
+    duplicateOf: ""
+    tracking: ""                # private issue or draft advisory
+    notes: "..."
+```
+
+Reporters can read their own report except `status.internal`.
+
 ### Subscription
 
 Links a user to a post they follow. Created when a user votes or when their
@@ -635,6 +701,57 @@ The GitHub issue body never contains the submitter's identity, org, project,
 logs or attachments. A footer links to the submission in the staff portal,
 which only staff can open.
 
+## Security Reports
+
+Security reports use the same API and clients as feedback, with a separate
+resource, role and queue.
+
+1. **Report.** The client uploads attachments to the
+   `securityreports/attachments` subresource, then creates the
+   `SecurityReport`. There is no `similarTo` step: reports are never matched
+   against posts or shown to anyone but the reporter and the Security Team.
+2. **Acknowledge.** On create the controller emails `security@datum.net`
+   with a link to the report in the staff portal (never its contents), and
+   emails the reporter that it was received.
+3. **Triage and fix.** The Security Team works the queue in the staff
+   portal and moves the report through its phases by updating `status`,
+   which only their role can write. The fix itself is tracked wherever the
+   Security Team chooses, usually a private repo or a GitHub draft
+   security advisory; the report keeps a link in `status.internal`.
+4. **Update.** Every phase change emails the reporter straight away, not
+   through the daily digest, with the phase and the timeline note.
+5. **Disclose.** When an advisory is published the team sets
+   `status.advisory`, and the report moves to `Disclosed`.
+
+**Reports from email and GitHub.** `security@datum.net` and GitHub private
+vulnerability reporting stay open for people without a Datum account. The
+Security Team logs those reports as a `SecurityReport` with
+`spec.reporter` set, so they are tracked in the same queue. Updates to
+external reporters go to `spec.reporter.email`.
+
+**Misfiled reports.** If a `Submission` turns out to be a security issue,
+staff move it with the `submissions/to-security-report` subresource. The
+apiserver creates a `SecurityReport` from it, moves its attachments, and
+deletes the submission in one transaction, so it leaves the feedback queue.
+The submission triage prompt flags likely security issues for this.
+
+**Rewards.** The Security Team records the reward on `status.reward`.
+Credits are a billing `CreditGrant` (reason `Goodwill`) on the billing
+account of an organization the reporter belongs to, created by the staff
+member granting it and referenced from the report. Swag and thanks are
+recorded only.
+
+**Acknowledgements.** Reports in `Fixed` or `Disclosed` whose reporter
+chose `credit.public` appear as `SecurityAcknowledgement`: a read-only view
+holding only the credited name, link, month and severity. The datum.net
+service account reads it for the acknowledgements page; nothing else from
+the report is readable outside the Security Team and the reporter.
+
+**What reports skip.** Reports are never synced to GitHub, embedded, sent
+to the AI gateway, indexed by search, or written to the audit log beyond
+metadata. Their attachments are stored under a separate prefix readable
+only by the apiserver on behalf of the reporter and the Security Team.
+
 ## Delivery Tracking
 
 ![Delivery tracking: inputs from GitHub derive a stage, and only a new highest stage queues a digest event](./diagrams/delivery-tracking.svg)
@@ -731,6 +848,14 @@ which already handle session, CORS and rate limiting:
   `Vote`.
 - `GET /api/website/feedback/me` returns the user's votes and submissions so
   pages render the voted state.
+- `POST /api/website/security-reports` creates a `SecurityReport`.
+
+datum.net also serves `/.well-known/security.txt` ([RFC 9116][rfc9116])
+listing the report form, `security@datum.net`, the disclosure policy and the
+acknowledgements page, so researchers and agents that look for it find all
+of them.
+
+[rfc9116]: https://www.rfc-editor.org/rfc/rfc9116
 
 Once migrated, `src/libs/githubRoadmap.ts`, the GitHub parts of
 `src/libs/datum.ts`, the backlog pages' GitHub calls, the Redis roadmap
@@ -753,18 +878,27 @@ datumctl feedback vote datum-cloud.enhancements.913
 datumctl feedback unvote datum-cloud.enhancements.913
 datumctl feedback submit --title "..." --body-file notes.md --attach err.log
 datumctl feedback mine
+datumctl security report --title "..." --body-file report.md --attach poc.sh
+datumctl security reports
 ```
 
 `mine` lists submissions under review and every followed post with its
 delivery stage and last change. `submit` runs a `similarTo` query first and
 asks whether a match covers it.
 Context includes the datumctl version and active org and project.
+`security report` skips the similar-items check and marks the report as
+agent-filed when datumctl runs non-interactively.
 
 **Patch.** `feedback-mcp` exposes `feedback__search` (including
 `similarTo`), `feedback__get`, `feedback__vote`, `feedback__unvote`,
 `feedback__submit` (always confirmed by the user in chat) and
 `feedback__mine`, which answers "what's happening with my requests?" from
-the delivery tracker.
+the delivery tracker. It also exposes `security__report` and
+`security__mine`. `feedback__submit`'s description tells the model to use
+`security__report` instead for anything that looks like a vulnerability,
+and `security__report` tells it never to include credentials or other
+customers' data. `security__report` is always confirmed by the user in chat
+and sets `context.filedByAgent`.
 
 `CapabilityBinding`s are per project, but feedback belongs to the user. We
 register feedback as a platform service entitled for every project so a
@@ -795,6 +929,8 @@ context for:
 | Exposing something sensitive from a public repo | `feedback:hide` label, per-source repo allow and deny lists, staff `spec.hidden`. |
 | Leaking private attachments | Private bucket, served only through the apiserver to the submitter and staff. |
 | Approval bypass | Review subresource authorised only for staff in the Platform context. |
+| Vulnerability details leaking before a fix | Separate `SecurityReport` resource and role. Never synced, embedded, sent to the AI gateway or indexed; audited at metadata only; notification emails carry links, not contents; attachments readable only by the reporter and the Security Team. |
+| Security issue filed as public feedback | Every client offers the security track; triage flags likely security submissions; staff move them with `submissions/to-security-report` before any review. |
 | Synced content changed outside GitHub | Create, update and delete on `Post`, `Release` and `ChangelogEntry` granted only to the `feedback-sync` service account. Staff can only patch `spec.hidden`. Every write is audited. |
 | GitHub rate limits | Installation tokens per org, GraphQL batching, incremental reconcile, 👍 sweep limited to open tracked posts. |
 
@@ -811,8 +947,10 @@ Matches the [product rollout][product]:
    My feedback, daily digest, avatar opt-in.
 3. **Submit.** `Submission`, attachments, `similarTo`, triage, staff review
    queue, issue creation on approval, website submit form.
-4. **Everywhere.** Portal panel, `datumctl feedback`, Patch MCP tools, staff
-   analytics.
+   `SecurityReport`, its queue and emails, `SecurityAcknowledgement`,
+   `security.txt` and the disclosure policy pages.
+4. **Everywhere.** Portal panel, `datumctl feedback` and `datumctl security`,
+   Patch MCP tools, staff analytics.
 
 ## Production Readiness
 
@@ -831,6 +969,7 @@ does.
 - Reconcile duration, items changed and errors per source.
 - GitHub rate limit remaining per installation.
 - Review queue size and age of the oldest pending submission.
+- Security reports by phase, and age of the oldest report in `Received`.
 - Digest events queued by type, and digest emails created and failed.
 - Delivery stage transitions per day, and posts whose work items failed to
   refresh.
@@ -838,7 +977,8 @@ does.
 - Lag from a `Post` write to it appearing in the search index.
 
 Alerts: reconcile failing three runs in a row, rate limit under 10%, oldest
-pending submission older than five business days, digest run failing.
+pending submission older than five business days, a security report in
+`Received` for more than one business day, digest run failing.
 
 **Dependencies and degradation.**
 
@@ -915,6 +1055,9 @@ can't tie demand to Datum users or organizations.
   `activity-system` Vector webhook.
 - Service accounts for `feedback-sync` and `feedback-controller`, with
   roles scoped to the writes above.
+- A Security Team group and role for `SecurityReport` triage.
+- `EmailTemplate`s for security report updates.
+- `security.txt`, disclosure policy and acknowledgements pages on datum.net.
 
 ## Implementation History
 
