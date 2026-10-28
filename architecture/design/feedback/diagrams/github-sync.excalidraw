@@ -22,12 +22,12 @@
       "frameId": null,
       "index": "a0",
       "roundness": null,
-      "seed": 1142859761,
+      "seed": 306219390,
       "version": 2,
-      "versionNonce": 1071304383,
+      "versionNonce": 1203963292,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "GitHub sync: webhooks for speed, reconcile for correctness",
@@ -61,9 +61,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1652040315,
+      "seed": 1122561203,
       "version": 2,
-      "versionNonce": 1527627953,
+      "versionNonce": 1309585956,
       "isDeleted": false,
       "boundElements": [
         {
@@ -75,17 +75,17 @@
           "id": "evt->hook"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
     {
       "id": "evt-t",
       "type": "text",
-      "x": 82.34374999999999,
-      "y": 120,
-      "width": 165.3125,
-      "height": 80,
+      "x": 78.14208984374999,
+      "y": 122.5,
+      "width": 173.7158203125,
+      "height": 75,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -98,17 +98,17 @@
       "frameId": null,
       "index": "a2",
       "roundness": null,
-      "seed": 1428898565,
+      "seed": 281383721,
       "version": 2,
-      "versionNonce": 1982897887,
+      "versionNonce": 1695019548,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
-      "text": "GitHub event\nissues · labels · comments\nprojects_v2_item\nmilestone · discussion",
-      "originalText": "GitHub event\nissues · labels · comments\nprojects_v2_item\nmilestone · discussion",
-      "fontSize": 16,
+      "text": "GitHub event\nissues · labels · sub_issues\nprojects_v2_item · milestone\ndiscussion · repository",
+      "originalText": "GitHub event\nissues · labels · sub_issues\nprojects_v2_item · milestone\ndiscussion · repository",
+      "fontSize": 15,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
@@ -137,9 +137,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1525628970,
+      "seed": 753327194,
       "version": 2,
-      "versionNonce": 970228369,
+      "versionNonce": 1161612708,
       "isDeleted": false,
       "boundElements": [
         {
@@ -155,7 +155,7 @@
           "id": "hook->queue"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
@@ -178,12 +178,12 @@
       "frameId": null,
       "index": "a4",
       "roundness": null,
-      "seed": 1879228503,
+      "seed": 746612088,
       "version": 2,
-      "versionNonce": 1570204415,
+      "versionNonce": 1408978588,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "Webhook endpoint\nverify HMAC signature\ndedupe delivery ID",
@@ -217,9 +217,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1867759636,
+      "seed": 1811275674,
       "version": 2,
-      "versionNonce": 2049443953,
+      "versionNonce": 1998289188,
       "isDeleted": false,
       "boundElements": [
         {
@@ -239,7 +239,7 @@
           "id": "gql->queue"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
@@ -262,12 +262,12 @@
       "frameId": null,
       "index": "a6",
       "roundness": null,
-      "seed": 151611371,
+      "seed": 1493598394,
       "version": 2,
-      "versionNonce": 579842847,
+      "versionNonce": 894376732,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "Work queue\nkeyed by issue",
@@ -301,9 +301,9 @@
       "roundness": {
         "type": 2
       },
-      "seed": 306219390,
+      "seed": 686941570,
       "version": 2,
-      "versionNonce": 1439683153,
+      "versionNonce": 1595454628,
       "isDeleted": false,
       "boundElements": [
         {
@@ -316,14 +316,14 @@
         },
         {
           "type": "arrow",
-          "id": "scope->upsert"
+          "id": "scope->write"
         },
         {
           "type": "arrow",
-          "id": "scope->hide"
+          "id": "scope->del"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
@@ -346,12 +346,12 @@
       "frameId": null,
       "index": "a8",
       "roundness": null,
-      "seed": 1122561203,
+      "seed": 1372151925,
       "version": 2,
-      "versionNonce": 227145535,
+      "versionNonce": 1131763612,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "In scope?",
@@ -365,12 +365,12 @@
       "lineHeight": 1.25
     },
     {
-      "id": "upsert",
+      "id": "write",
       "type": "rectangle",
       "x": 1220,
-      "y": 75,
-      "width": 290,
-      "height": 170,
+      "y": 85,
+      "width": 300,
+      "height": 150,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "#b2f2bb",
@@ -385,39 +385,39 @@
       "roundness": {
         "type": 3
       },
-      "seed": 281383721,
+      "seed": 868145259,
       "version": 2,
-      "versionNonce": 1638096945,
+      "versionNonce": 1524793380,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "upsert-t"
+          "id": "write-t"
         },
         {
           "type": "arrow",
-          "id": "scope->upsert"
+          "id": "scope->write"
         },
         {
           "type": "arrow",
-          "id": "upsert->embed"
+          "id": "write->api"
         },
         {
           "type": "arrow",
-          "id": "upsert->changed"
+          "id": "write->changed"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
     {
-      "id": "upsert-t",
+      "id": "write-t",
       "type": "text",
-      "x": 1291.3828125,
-      "y": 100,
-      "width": 147.234375,
-      "height": 120,
+      "x": 1274.015625,
+      "y": 110,
+      "width": 191.96875,
+      "height": 100,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -430,30 +430,30 @@
       "frameId": null,
       "index": "aA",
       "roundness": null,
-      "seed": 753327194,
+      "seed": 30665814,
       "version": 2,
-      "versionNonce": 82229087,
+      "versionNonce": 446694428,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
-      "text": "Upsert Post, Release,\nChangelogEntry\nlabels -> categories\nProject Status -> status\nsanitise markdown\n👍 count",
-      "originalText": "Upsert Post, Release,\nChangelogEntry\nlabels -> categories\nProject Status -> status\nsanitise markdown\n👍 count",
+      "text": "Write via Feedback API\ncreate, or update status\nlabels -> categories\nProject Status -> status\nsanitise markdown · 👍 count",
+      "originalText": "Write via Feedback API\ncreate, or update status\nlabels -> categories\nProject Status -> status\nsanitise markdown · 👍 count",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "upsert",
+      "containerId": "write",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "embed",
+      "id": "api",
       "type": "rectangle",
-      "x": 1590,
+      "x": 1650,
       "y": 100,
-      "width": 230,
+      "width": 250,
       "height": 120,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -469,35 +469,39 @@
       "roundness": {
         "type": 3
       },
-      "seed": 746612088,
+      "seed": 297496037,
       "version": 2,
-      "versionNonce": 730477073,
+      "versionNonce": 1650908068,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "embed-t"
+          "id": "api-t"
         },
         {
           "type": "arrow",
-          "id": "upsert->embed"
+          "id": "write->api"
         },
         {
           "type": "arrow",
-          "id": "embed->pg"
+          "id": "api->pg"
+        },
+        {
+          "type": "arrow",
+          "id": "api->audit"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
     {
-      "id": "embed-t",
+      "id": "api-t",
       "type": "text",
-      "x": 1628.7421875,
-      "y": 140,
-      "width": 152.515625,
-      "height": 40,
+      "x": 1714.15234375,
+      "y": 130,
+      "width": 121.6953125,
+      "height": 60,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -510,28 +514,28 @@
       "frameId": null,
       "index": "aC",
       "roundness": null,
-      "seed": 1811275674,
+      "seed": 1503069846,
       "version": 2,
-      "versionNonce": 1324774271,
+      "versionNonce": 12656796,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
-      "text": "Embed title + body\nAI gateway -> pgvector",
-      "originalText": "Embed title + body\nAI gateway -> pgvector",
+      "text": "feedback-apiserver\nre-embeds if title\nor body changed",
+      "originalText": "feedback-apiserver\nre-embeds if title\nor body changed",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "embed",
+      "containerId": "api",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
       "id": "pg",
       "type": "rectangle",
-      "x": 1900,
+      "x": 1980,
       "y": 110,
       "width": 170,
       "height": 100,
@@ -549,9 +553,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1493598394,
+      "seed": 2121091970,
       "version": 2,
-      "versionNonce": 410765297,
+      "versionNonce": 1070843684,
       "isDeleted": false,
       "boundElements": [
         {
@@ -560,17 +564,17 @@
         },
         {
           "type": "arrow",
-          "id": "embed->pg"
+          "id": "api->pg"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
     {
       "id": "pg-t",
       "type": "text",
-      "x": 1954.49755859375,
+      "x": 2034.49755859375,
       "y": 148.75,
       "width": 61.0048828125,
       "height": 22.5,
@@ -586,12 +590,12 @@
       "frameId": null,
       "index": "aE",
       "roundness": null,
-      "seed": 686941570,
+      "seed": 2094754465,
       "version": 2,
-      "versionNonce": 335129503,
+      "versionNonce": 764063004,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "Postgres",
@@ -605,7 +609,7 @@
       "lineHeight": 1.25
     },
     {
-      "id": "hide",
+      "id": "del",
       "type": "rectangle",
       "x": 940,
       "y": 330,
@@ -625,31 +629,31 @@
       "roundness": {
         "type": 3
       },
-      "seed": 1372151925,
+      "seed": 58368490,
       "version": 2,
-      "versionNonce": 41918929,
+      "versionNonce": 1201095332,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "hide-t"
+          "id": "del-t"
         },
         {
           "type": "arrow",
-          "id": "scope->hide"
+          "id": "scope->del"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
     {
-      "id": "hide-t",
+      "id": "del-t",
       "type": "text",
-      "x": 991.7568359374999,
-      "y": 352.5,
-      "width": 96.486328125,
-      "height": 45,
+      "x": 980.67578125,
+      "y": 355,
+      "width": 118.6484375,
+      "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -662,21 +666,21 @@
       "frameId": null,
       "index": "aG",
       "roundness": null,
-      "seed": 868145259,
+      "seed": 1581018663,
       "version": 2,
-      "versionNonce": 539025343,
+      "versionNonce": 309242268,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
-      "text": "Hide existing\nPost",
-      "originalText": "Hide existing\nPost",
-      "fontSize": 18,
+      "text": "Delete Post\nvotes kept 30 days",
+      "originalText": "Delete Post\nvotes kept 30 days",
+      "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "hide",
+      "containerId": "del",
       "autoResize": true,
       "lineHeight": 1.25
     },
@@ -685,7 +689,7 @@
       "type": "rectangle",
       "x": 1220,
       "y": 330,
-      "width": 290,
+      "width": 300,
       "height": 90,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -701,9 +705,9 @@
       "roundness": {
         "type": 3
       },
-      "seed": 30665814,
+      "seed": 523107110,
       "version": 2,
-      "versionNonce": 380452785,
+      "versionNonce": 274681380,
       "isDeleted": false,
       "boundElements": [
         {
@@ -712,19 +716,19 @@
         },
         {
           "type": "arrow",
-          "id": "upsert->changed"
+          "id": "write->changed"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
     {
       "id": "changed-t",
       "type": "text",
-      "x": 1293.015625,
+      "x": 1291.37109375,
       "y": 355,
-      "width": 143.96875,
+      "width": 157.2578125,
       "height": 40,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -738,16 +742,16 @@
       "frameId": null,
       "index": "aI",
       "roundness": null,
-      "seed": 297496037,
+      "seed": 414178167,
       "version": 2,
-      "versionNonce": 1703710687,
+      "versionNonce": 580851228,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
-      "text": "Status changed?\nemit notification event",
-      "originalText": "Status changed?\nemit notification event",
+      "text": "Delivery stage changed?\ncontroller queues digest",
+      "originalText": "Delivery stage changed?\ncontroller queues digest",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
@@ -757,12 +761,88 @@
       "lineHeight": 1.25
     },
     {
+      "id": "audit",
+      "type": "rectangle",
+      "x": 1650,
+      "y": 330,
+      "width": 250,
+      "height": 90,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "#e9ecef",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aJ",
+      "roundness": {
+        "type": 3
+      },
+      "seed": 1919206401,
+      "version": 2,
+      "versionNonce": 723118500,
+      "isDeleted": false,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "audit-t"
+        },
+        {
+          "type": "arrow",
+          "id": "api->audit"
+        }
+      ],
+      "updated": 1793218868969,
+      "link": null,
+      "locked": false
+    },
+    {
+      "id": "audit-t",
+      "type": "text",
+      "x": 1725.62109375,
+      "y": 355,
+      "width": 98.7578125,
+      "height": 40,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "aK",
+      "roundness": null,
+      "seed": 931885404,
+      "version": 2,
+      "versionNonce": 453898908,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1793218868969,
+      "link": null,
+      "locked": false,
+      "text": "Audit event\n-> search index",
+      "originalText": "Audit event\n-> search index",
+      "fontSize": 16,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "audit",
+      "autoResize": true,
+      "lineHeight": 1.25
+    },
+    {
       "id": "rules",
       "type": "rectangle",
-      "x": 970,
-      "y": -40,
+      "x": 1000,
+      "y": -110,
       "width": 360,
-      "height": 100,
+      "height": 110,
       "angle": 0,
       "strokeColor": "#868e96",
       "backgroundColor": "transparent",
@@ -773,13 +853,13 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aJ",
+      "index": "aL",
       "roundness": {
         "type": 3
       },
-      "seed": 1503069846,
+      "seed": 757330327,
       "version": 2,
-      "versionNonce": 1932272017,
+      "versionNonce": 1526011172,
       "isDeleted": false,
       "boundElements": [
         {
@@ -787,15 +867,15 @@
           "id": "rules-t"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
     {
       "id": "rules-t",
       "type": "text",
-      "x": 1029.58984375,
-      "y": -20,
+      "x": 1059.58984375,
+      "y": -85,
       "width": 240.8203125,
       "height": 60,
       "angle": 0,
@@ -808,14 +888,14 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aK",
+      "index": "aM",
       "roundness": null,
-      "seed": 2121091970,
+      "seed": 1371944413,
       "version": 2,
-      "versionNonce": 1045249023,
+      "versionNonce": 1248673564,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "In scope = public repo listed in a\nFeedbackSource, matching issue type\nor label, and no opt-out label",
@@ -845,13 +925,13 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aL",
+      "index": "aN",
       "roundness": {
         "type": 3
       },
-      "seed": 2094754465,
+      "seed": 1984207538,
       "version": 2,
-      "versionNonce": 87279473,
+      "versionNonce": 1298059428,
       "isDeleted": false,
       "boundElements": [
         {
@@ -863,7 +943,7 @@
           "id": "timer->gql"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
@@ -884,14 +964,14 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aM",
+      "index": "aO",
       "roundness": null,
-      "seed": 58368490,
+      "seed": 435693851,
       "version": 2,
-      "versionNonce": 1852007455,
+      "versionNonce": 1496251292,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "Reconcile timer\nevery 10 min (updatedAt)\nfull pass nightly",
@@ -921,13 +1001,13 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aN",
+      "index": "aP",
       "roundness": {
         "type": 3
       },
-      "seed": 1581018663,
+      "seed": 1868420059,
       "version": 2,
-      "versionNonce": 655077713,
+      "versionNonce": 1376066596,
       "isDeleted": false,
       "boundElements": [
         {
@@ -943,7 +1023,7 @@
           "id": "gql->queue"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
@@ -964,14 +1044,14 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aO",
+      "index": "aQ",
       "roundness": null,
-      "seed": 523107110,
+      "seed": 1851517047,
       "version": 2,
-      "versionNonce": 1707051071,
+      "versionNonce": 293939228,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "GraphQL fetch per org\nissues, 👍 reactions, project items,\nmilestones, changelog discussions",
@@ -1001,13 +1081,13 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aP",
+      "index": "aR",
       "roundness": {
         "type": 3
       },
-      "seed": 414178167,
+      "seed": 686821815,
       "version": 2,
-      "versionNonce": 2114674481,
+      "versionNonce": 316012452,
       "isDeleted": false,
       "boundElements": [
         {
@@ -1015,7 +1095,7 @@
           "id": "why-t"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false
     },
@@ -1036,18 +1116,18 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aQ",
+      "index": "aS",
       "roundness": null,
-      "seed": 1919206401,
+      "seed": 2055113776,
       "version": 2,
-      "versionNonce": 1111631967,
+      "versionNonce": 660718748,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
-      "text": "Why reconcile? GitHub sends no webhooks for\nreactions, and webhook deliveries can be\nmissed. Missing items become hidden.",
-      "originalText": "Why reconcile? GitHub sends no webhooks for\nreactions, and webhook deliveries can be\nmissed. Missing items become hidden.",
+      "text": "Why reconcile? GitHub sends no webhooks for\nreactions, and webhook deliveries can be\nmissed. Items that no longer match are deleted.",
+      "originalText": "Why reconcile? GitHub sends no webhooks for\nreactions, and webhook deliveries can be\nmissed. Items that no longer match are deleted.",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
@@ -1073,16 +1153,16 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aR",
+      "index": "aT",
       "roundness": {
         "type": 2
       },
-      "seed": 931885404,
+      "seed": 1962751472,
       "version": 2,
-      "versionNonce": 412766481,
+      "versionNonce": 1275028260,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1127,16 +1207,16 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aS",
+      "index": "aU",
       "roundness": {
         "type": 2
       },
-      "seed": 757330327,
+      "seed": 787566226,
       "version": 2,
-      "versionNonce": 297518207,
+      "versionNonce": 7786780,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1181,16 +1261,16 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aT",
+      "index": "aV",
       "roundness": {
         "type": 2
       },
-      "seed": 1371944413,
+      "seed": 361320065,
       "version": 2,
-      "versionNonce": 1278215921,
+      "versionNonce": 66018980,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1219,7 +1299,7 @@
       "elbowed": false
     },
     {
-      "id": "scope->upsert",
+      "id": "scope->write",
       "type": "arrow",
       "x": 1146,
       "y": 160,
@@ -1235,21 +1315,21 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aU",
+      "index": "aW",
       "roundness": {
         "type": 2
       },
-      "seed": 1984207538,
+      "seed": 1050928733,
       "version": 2,
-      "versionNonce": 1408031903,
+      "versionNonce": 2083933596,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "scope->upsert-label"
+          "id": "scope->write-label"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1269,7 +1349,7 @@
         "gap": 6
       },
       "endBinding": {
-        "elementId": "upsert",
+        "elementId": "write",
         "focus": 0,
         "gap": 6
       },
@@ -1278,7 +1358,7 @@
       "elbowed": false
     },
     {
-      "id": "scope->upsert-label",
+      "id": "scope->write-label",
       "type": "text",
       "x": 1170.00244140625,
       "y": 150.625,
@@ -1294,14 +1374,14 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aV",
+      "index": "aX",
       "roundness": null,
-      "seed": 435693851,
+      "seed": 1077818016,
       "version": 2,
-      "versionNonce": 1398014161,
+      "versionNonce": 1129572900,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "yes",
@@ -1310,12 +1390,12 @@
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "scope->upsert",
+      "containerId": "scope->write",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "scope->hide",
+      "id": "scope->del",
       "type": "arrow",
       "x": 1040,
       "y": 241,
@@ -1331,21 +1411,21 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aW",
+      "index": "aY",
       "roundness": {
         "type": 2
       },
-      "seed": 1868420059,
+      "seed": 877350632,
       "version": 2,
-      "versionNonce": 1015410879,
+      "versionNonce": 1003633180,
       "isDeleted": false,
       "boundElements": [
         {
           "type": "text",
-          "id": "scope->hide-label"
+          "id": "scope->del-label"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1365,7 +1445,7 @@
         "gap": 6
       },
       "endBinding": {
-        "elementId": "hide",
+        "elementId": "del",
         "focus": 0,
         "gap": 6
       },
@@ -1374,7 +1454,7 @@
       "elbowed": false
     },
     {
-      "id": "scope->hide-label",
+      "id": "scope->del-label",
       "type": "text",
       "x": 1032.5,
       "y": 273.125,
@@ -1390,14 +1470,14 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aX",
+      "index": "aZ",
       "roundness": null,
-      "seed": 1851517047,
+      "seed": 851318916,
       "version": 2,
-      "versionNonce": 731758257,
+      "versionNonce": 1293616548,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "no",
@@ -1406,16 +1486,16 @@
       "fontFamily": 5,
       "textAlign": "center",
       "verticalAlign": "middle",
-      "containerId": "scope->hide",
+      "containerId": "scope->del",
       "autoResize": true,
       "lineHeight": 1.25
     },
     {
-      "id": "upsert->embed",
+      "id": "write->api",
       "type": "arrow",
-      "x": 1516,
+      "x": 1526,
       "y": 160,
-      "width": 68,
+      "width": 118,
       "height": 0,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -1427,16 +1507,21 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aY",
+      "index": "aa",
       "roundness": {
         "type": 2
       },
-      "seed": 686821815,
+      "seed": 1643154796,
       "version": 2,
-      "versionNonce": 891781343,
+      "versionNonce": 1782355612,
       "isDeleted": false,
-      "boundElements": [],
-      "updated": 1791537528331,
+      "boundElements": [
+        {
+          "type": "text",
+          "id": "write->api-label"
+        }
+      ],
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1445,18 +1530,18 @@
           0
         ],
         [
-          68,
+          118,
           0
         ]
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "upsert",
+        "elementId": "write",
         "focus": 0,
         "gap": 6
       },
       "endBinding": {
-        "elementId": "embed",
+        "elementId": "api",
         "focus": 0,
         "gap": 6
       },
@@ -1465,9 +1550,46 @@
       "elbowed": false
     },
     {
-      "id": "embed->pg",
+      "id": "write->api-label",
+      "type": "text",
+      "x": 1561.08447265625,
+      "y": 151.25,
+      "width": 47.8310546875,
+      "height": 17.5,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ab",
+      "roundness": null,
+      "seed": 1286185502,
+      "version": 2,
+      "versionNonce": 1450357028,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1793218868969,
+      "link": null,
+      "locked": false,
+      "text": "via Milo",
+      "originalText": "via Milo",
+      "fontSize": 14,
+      "fontFamily": 5,
+      "textAlign": "center",
+      "verticalAlign": "middle",
+      "containerId": "write->api",
+      "autoResize": true,
+      "lineHeight": 1.25
+    },
+    {
+      "id": "api->pg",
       "type": "arrow",
-      "x": 1826,
+      "x": 1906,
       "y": 160,
       "width": 68,
       "height": 0,
@@ -1481,16 +1603,16 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aZ",
+      "index": "ac",
       "roundness": {
         "type": 2
       },
-      "seed": 2055113776,
+      "seed": 895756827,
       "version": 2,
-      "versionNonce": 867483793,
+      "versionNonce": 69690140,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1505,7 +1627,7 @@
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "embed",
+        "elementId": "api",
         "focus": 0,
         "gap": 6
       },
@@ -1519,12 +1641,66 @@
       "elbowed": false
     },
     {
-      "id": "upsert->changed",
+      "id": "api->audit",
       "type": "arrow",
-      "x": 1365,
-      "y": 251,
+      "x": 1775,
+      "y": 226,
       "width": 0,
-      "height": 73,
+      "height": 98,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "ad",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 929257791,
+      "version": 2,
+      "versionNonce": 1053355172,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1793218868969,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          98
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "api",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "audit",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "write->changed",
+      "type": "arrow",
+      "x": 1370,
+      "y": 241,
+      "width": 0,
+      "height": 83,
       "angle": 0,
       "strokeColor": "#1e1e1e",
       "backgroundColor": "transparent",
@@ -1535,16 +1711,16 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "aa",
+      "index": "ae",
       "roundness": {
         "type": 2
       },
-      "seed": 1962751472,
+      "seed": 2133552661,
       "version": 2,
-      "versionNonce": 526519551,
+      "versionNonce": 537173916,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1554,12 +1730,12 @@
         ],
         [
           0,
-          73
+          83
         ]
       ],
       "lastCommittedPoint": null,
       "startBinding": {
-        "elementId": "upsert",
+        "elementId": "write",
         "focus": 0,
         "gap": 6
       },
@@ -1589,16 +1765,16 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "ab",
+      "index": "af",
       "roundness": {
         "type": 2
       },
-      "seed": 787566226,
+      "seed": 1009778747,
       "version": 2,
-      "versionNonce": 156272241,
+      "versionNonce": 1204533284,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1643,13 +1819,13 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "ac",
+      "index": "ag",
       "roundness": {
         "type": 2
       },
-      "seed": 361320065,
+      "seed": 1148134090,
       "version": 2,
-      "versionNonce": 1454773535,
+      "versionNonce": 906382364,
       "isDeleted": false,
       "boundElements": [
         {
@@ -1657,7 +1833,7 @@
           "id": "gql->queue-label"
         }
       ],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "points": [
@@ -1702,14 +1878,14 @@
       "opacity": 100,
       "groupIds": [],
       "frameId": null,
-      "index": "ad",
+      "index": "ah",
       "roundness": null,
-      "seed": 1050928733,
+      "seed": 1940107304,
       "version": 2,
-      "versionNonce": 658018385,
+      "versionNonce": 1298731940,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1791537528331,
+      "updated": 1793218868969,
       "link": null,
       "locked": false,
       "text": "enqueue changed\nitems",

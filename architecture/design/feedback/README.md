@@ -72,7 +72,7 @@ These shape most of the design:
 
 ## Architecture
 
-![Feedback service architecture: clients, Milo, feedback apiserver, Postgres, GitHub orgs, AI gateway, email](./diagrams/architecture.svg)
+![Feedback service architecture: clients, Milo, feedback-sync and feedback-controller writing through the Feedback API, Postgres, search service, GitHub orgs, AI gateway, email](./diagrams/architecture.svg)
 
 *System context. The editable sources for every diagram in this document
 are the `.excalidraw` files in [`diagrams/`](./diagrams).*
@@ -566,9 +566,10 @@ status:
 
 ## GitHub Sync
 
-![GitHub sync: webhooks and periodic reconciliation feeding Postgres](./diagrams/github-sync.svg)
+![GitHub sync: webhooks and periodic reconciliation writing through the Feedback API](./diagrams/github-sync.svg)
 
-*Webhook and reconcile paths share the same upsert logic.*
+*Webhook and reconcile paths share the same write path through the
+Feedback API.*
 
 **GitHub App.** One app, "Datum Feedback", installed on `datum-cloud` and
 `milo-os`. Permissions:
@@ -702,6 +703,10 @@ logs or attachments. A footer links to the submission in the staff portal,
 which only staff can open.
 
 ## Security Reports
+
+![Security reports: sources, private phases, rewards and acknowledgements](./diagrams/security-reports.svg)
+
+*Nothing about a report is public until the Security Team discloses it.*
 
 Security reports use the same API and clients as feedback, with a separate
 resource, role and queue.
