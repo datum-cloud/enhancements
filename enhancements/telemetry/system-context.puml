@@ -1,0 +1,23 @@
+@startuml system-context
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+!include https://raw.githubusercontent.com/datum-cloud/enhancements/main/enhancements/datum-theme.puml
+
+title Telemetry System — Context
+
+Person(customer, "Datum Cloud Customer", "Configures telemetry export and queries logs from their workloads via datumctl or ExportPolicy")
+Person(operator, "Platform Operator", "Monitors platform health, investigates incidents, and manages internal observability")
+
+System(telemetry, "Telemetry System", "Collects, durably stores, and exposes telemetry (metrics, logs, traces, flows) from all Datum Cloud services and infrastructure")
+
+System_Ext(datum_service, "Datum Cloud Service", "Platform service or customer workload running on Datum infrastructure that produces telemetry over OpenTelemetry")
+System_Ext(third_party, "3rd Party Telemetry Platform", "Customer-operated observability platform (e.g. Grafana Cloud, Datadog) that ingests data via OTLP or Prometheus Remote Write")
+
+Rel_R(datum_service, telemetry, "Publishes telemetry to", "OTLP")
+Rel_R(telemetry, third_party, "Exports customer telemetry to", "OTLP / Prometheus Remote Write")
+Rel_D(customer, telemetry, "Configures export policies\nand queries logs", "API / datumctl")
+Rel_L(customer, datum_service, "Creates and manages workloads on")
+Rel_D(operator, telemetry, "Monitors platform health", "Grafana")
+
+SHOW_LEGEND()
+@enduml

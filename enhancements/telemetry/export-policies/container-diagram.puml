@@ -1,0 +1,30 @@
+@startuml container-diagram
+!$NEW_C4_STYLE = 1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include https://raw.githubusercontent.com/datum-cloud/enhancements/main/enhancements/datum-theme.puml
+
+title Telemetry System — Export Policies
+
+Person(customer, "Datum Cloud Customer", "Creates and manages ExportPolicy resources to control how telemetry is forwarded to their platform")
+
+System_Ext(datum_service, "Datum Cloud Service", "Platform service or customer workload that produces metrics and logs over OpenTelemetry")
+System_Ext(third_party, "3rd Party Telemetry Platform", "Customer-operated observability platform that receives data via OTLP or Prometheus Remote Write")
+
+System_Boundary(telemetry, "Telemetry System") {
+    Container(api, "Telemetry API", "Kubernetes / Project Control Plane", "Hosts ExportPolicy CRDs; the surface through which customers declare how their telemetry should be exported")
+    Container(operator, "Telemetry Operator", "Go, Kubernetes Controller", "Watches ExportPolicy resources and provisions and configures a dedicated exporter instance per policy")
+    Container(collector, "OTel Collector", "OpenTelemetry Collector", "Receives OTLP telemetry from platform services; enriches with resource attributes and routes to storage")
+    ContainerDb(metrics_store, "Metrics Store", "VictoriaMetrics", "Stores all platform metrics; queried by export agents using MetricsQL")
+    Container(exporter, "Export Agent", "OTel Collector", "One instance per ExportPolicy; reads tenant-scoped metrics from the store and forwards to the configured sink")
+}
+
+Rel_D(customer, api, "Creates ExportPolicy", "API / UI / CLI")
+Rel(datum_service, collector, "Publishes telemetry to", "OTLP")
+Rel_D(collector, metrics_store, "Writes metrics to", "Remote Write")
+Rel(operator, api, "Watches ExportPolicy resources")
+Rel_D(operator, exporter, "Provisions and configures")
+Rel(exporter, metrics_store, "Queries tenant metrics", "MetricsQL")
+Rel(exporter, third_party, "Forwards telemetry to", "OTLP / Prometheus Remote Write")
+
+SHOW_LEGEND()
+@enduml
