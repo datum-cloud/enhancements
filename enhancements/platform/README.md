@@ -88,6 +88,7 @@ template.
   - [Integrated Service Catalog](#integrated-service-catalog)
   - [User Stories](#user-stories)
     - [Customer w/ no commitment](#customer-w-no-commitment)
+    - [Customer paying by invoice](#customer-paying-by-invoice)
     - [Customer with 1 year revenue commitment](#customer-with-1-year-revenue-commitment)
     - [Customer w/ guaranteed capacity](#customer-w-guaranteed-capacity)
     - [Customer w/ guaranteed capacity and no overage](#customer-w-guaranteed-capacity-and-no-overage)
@@ -365,6 +366,23 @@ Each **Project** created under an **Organization**'s resource hierarchy will be
 linked to the **Billing Account** that will be charged for any resources
 consumed by the **Project**.
 
+> [!NOTE]
+>
+> **Status (2026-11-04).** Billing accounts, project links, payment methods,
+> payment terms, Offers and entitlements, discounts and contracts are built in
+> [milo-os/billing](https://github.com/milo-os/billing). In the built system:
+>
+> - **Payment profiles** are `PaymentMethod` resources (cards, through Stripe),
+>   or a `BillingArrangement` for invoice terms such as Net 30 or Net 60.
+> - **Invoice dates.** Accounts are invoiced on the 1st. Contracts are invoiced
+>   on their start day.
+> - **Commitments** are not built as a resource. Contracts with discounts and
+>   fixed fees cover most of the cases above (see [User Stories](#user-stories)).
+> - **Minimum spend reconciliation** is not built.
+> - **Billing sub-accounts** are not built.
+>
+> See the [billing platform overview](./billing/README.md).
+
 ### Channel Partners
 
 Milo must be able to support an Organization's channel partner strategy for
@@ -443,40 +461,141 @@ the system. The goal here is to make this feel real for users without getting
 bogged down.
 -->
 
+> [!NOTE]
+>
+> **Status (2026-11-04).** These stories were written before billing was
+> built. Each one now shows how it is handled in
+> [milo-os/billing](https://github.com/milo-os/billing). The `Commitment` and
+> `Lien` resources sketched below were not built. Contracts are made from:
+>
+> - a customer's own `Offer`, which can include a discount
+> - `OneTime` and `Recurring` `ServicePricing`s for fixed fees
+> - a contract start date on the account's `BillingEntitlement`
+> - a `BillingArrangement` for invoice terms
+>
+> Staff set all of this up with the staff portal's "Set up contract" flow. See
+> [contract billing][contract-billing] and the
+> [billing platform overview](./billing/README.md).
+>
+> Not built yet:
+>
+> - minimum spend reconciliation and true-ups
+> - the end of a contract's term
+> - liens that stop committed resources from being deleted
+
 #### Customer w/ no commitment
 
-Customer's without a commitment would simply have an entitlement created for the
-services the customer has purchased. The billing account would be billed for any
-usage consumed by resources provisioned by the service at list pricing.
+Customers without a commitment have an entitlement to the services they use,
+and their billing account is billed for any usage at list pricing.
+
+**Built.** Every new billing account gets a `BillingEntitlement` to the
+platform's default Offer, which the service catalog assigns. Usage is billed at
+the Offer's list prices, invoiced monthly on the 1st, and charged to the card
+on file.
+
+```yaml
+apiVersion: billing.miloapis.com/v1alpha1
+kind: BillingEntitlement
+metadata:
+  name: be-<account-uid>-default
+  namespace: organization-acme
+spec:
+  billingAccountRef:
+    name: acme
+  # The platform's default Offer, set in the billing ServiceConfiguration.
+  offerRef:
+    name: pay-as-you-go
+```
+
+#### Customer paying by invoice
+
+A customer wants to pay by invoice on Net 30 or Net 60 terms, with their PO
+number on every invoice, instead of by card.
+
+**Built.** The customer applies for payment terms in the cloud portal, or staff
+grant them directly. The terms are a `BillingArrangement`. While it's active,
+Stripe emails invoices to the account's invoice email instead of charging a
+card. Applying in the portal sets that email to the accounts payable address.
+Invoices are due after `netDays` and print the PO number and agreement
+reference. The account doesn't need a card.
+
+```yaml
+apiVersion: billing.miloapis.com/v1alpha1
+kind: BillingArrangement
+metadata:
+  name: acme-net60
+  namespace: organization-acme
+spec:
+  billingAccountRef:
+    name: acme
+  type: Invoice
+  invoice:
+    netDays: 60
+    # Recorded for staff; not enforced yet.
+    creditLimit: "50000"
+    accountsPayableEmail: ap@acme.example
+    purchaseOrderNumber: PO-4471
+    agreementReference: MSA-2026-014
+  startsAt: "2026-11-01T00:00:00Z"
+  reason: Signed MSA
+```
 
 #### Customer with 1 year revenue commitment
 
 Customer wishes to make a revenue commit ($1,000,000/year) and thus receive a
 15% discount off of list pricing for on-demand services.
 
-This customer would have a commitment created for their billing account that
-provides them with a 15% discount accross all SKUs with a minimum spend
-commitment of $1,000,000 USD over a 1 year period.
+**Partly built.** The discount and the contract dates are built. Staff publish
+an Offer for the customer that selects the platform's usage pricings with a
+15% discount. They then point the account's entitlement at it, with the
+contract's start date. Invoices show list price, the discount and the net
+amount. The account is billed on the contract's start day each month, and
+usually pays by invoice (see above).
+
+The minimum spend isn't tracked. Nothing checks the $1,000,000 against actual
+spend or charges a true-up at the end of the year. The 12-month term isn't
+recorded either: what happens when a term ends is designed in
+[contract billing][contract-billing] but not built yet. The plan is to continue
+month-to-month by default and flag the account for renewal 90 days before the
+end.
 
 ```yaml
-name: accounts/1ABE-46DF-79GI/commitments/2BC3-57FG-09DI
-minimumSpend:
-  amount: 1000000
-  currencyCode: USD
-  # The commitment is valid for 12 months.
-  termLengthMonths: 12
-  # Defines how the billing account's spend should be aggregated to determine
-  # if the commitment isn't being met.
-  aggregationInfo:
-    # Billing account must spend the amount over a 1 year period.
-    interval: Yearly
-    # Commitment applies to all SKUs on the billing account.
-    skuSelectors: []
-# Apply a 15% discount across all SKUs on the billing account
-skuDiscounts:
-- discount:
+apiVersion: billing.miloapis.com/v1alpha1
+kind: Offer
+metadata:
+  name: acme-commit-2027
+  annotations:
+    kubernetes.io/display-name: ACME 2027 commitment
+spec:
+  chargeTypes: [Usage]
+  # Published. Billing snapshots the pricings and the Offer can't change.
+  launchStage: GA
+  # 15% off everything in the Offer. A pricing can also carry its own discount.
+  discount:
     percentage: 15
-  skuSelectors: []
+  servicePricingRefs:
+  - name: compute-vcpu-v1
+    namespace: milo-system
+  - name: compute-memory-v1
+    namespace: milo-system
+  - name: networking-alb-egress-v1
+    namespace: milo-system
+---
+apiVersion: billing.miloapis.com/v1alpha1
+kind: BillingEntitlement
+metadata:
+  # The account's existing entitlement.
+  name: be-<account-uid>-default
+  namespace: organization-acme
+spec:
+  billingAccountRef:
+    name: acme
+  offerRef:
+    name: acme-commit-2027
+  # The account stays on its current Offer until this date. Then it moves onto
+  # the contract and is billed on the 1st of each month.
+  contract:
+    startsAt: "2027-01-01T00:00:00Z"
 ```
 
 #### Customer w/ guaranteed capacity
@@ -487,28 +606,107 @@ instances she desires as is offered m2m, annual or 3 year commit pricing
 options. Customer contracts for those services and then also leverages usage/on
 demand services for additional capacity, dev test and other scenarios.
 
+**Partly built.** This is how bare metal contracts are set up. Staff use
+"Set up contract" in the staff portal. It creates the setup fee as a `OneTime`
+pricing and the monthly charge for the reserved capacity as a `Recurring`
+pricing. It then publishes an Offer for the customer with both, plus the
+platform's usage pricings for on-demand use. Finally it sets the contract's
+start date. Before the start, staff preview the first invoice with an
+`InvoiceRequest`. On the start date, the setup fee and first month are invoiced
+automatically. Later months follow on the same day of the month, together with
+any usage.
+
+To change the fees mid-contract, staff use "Change contract fees". This creates
+a new Offer, without the setup fee, and the change applies from the next
+billing date. Self-contracting isn't built: only staff can set up contracts.
+Reserved capacity isn't protected by a lien either, so nothing stops the
+customer deleting the resources.
+
 ```yaml
-name: accounts/1ABE-46DF-79GI/commitments/2BC3-57FG-09DI
-# Customer is locked into 12 month commitment.
-termLengthMonths: 12
-
-# Optionally configure minimum spend / SKU discounts configurations to provide
-# the customer with discounts over the commitment term.
-minimumSpend:
-  ...
-skuDiscounts:
-  ...
-
-resources:
-# Create a lien against a resource reservation to prevent deleting the CPU /
-# Memory resources reserved.
-#
-# NOTE: The ResourceReservation resource is just a representation of the billing
-#       system being able to create a lien against a resource in the compute
-#       service to prevent reserved resources being deleted. This example may
-#       change once a resource reservation system has been designed.
-- type: compute.datumapis.com/ResourceReservation
-  name: projects/my-project/resourceReservations/instance-reservations-dfw-01
+apiVersion: billing.miloapis.com/v1alpha1
+kind: ServicePricing
+metadata:
+  name: acme-setup-fee
+  namespace: milo-system
+spec:
+  chargeType: OneTime
+  trigger: BillingAccountActivation
+  # A Service registered in the catalog.
+  serviceRef: bare-metal.datumapis.com
+  currency: USD
+  displayName: Server installation
+  amount: "1500.00"
+---
+apiVersion: billing.miloapis.com/v1alpha1
+kind: ServicePricing
+metadata:
+  name: acme-dfw-servers
+  namespace: milo-system
+spec:
+  chargeType: Recurring
+  interval: monthly
+  serviceRef: bare-metal.datumapis.com
+  currency: USD
+  displayName: Dedicated servers, DFW
+  amount: "12000.00"
+---
+apiVersion: billing.miloapis.com/v1alpha1
+kind: Offer
+metadata:
+  name: acme-contract-2026-11
+  labels:
+    billing.miloapis.com/contract-billing-account: acme
+spec:
+  chargeTypes: [OneTime, Recurring, Usage]
+  launchStage: GA
+  servicePricingRefs:
+  - name: acme-setup-fee
+    namespace: milo-system
+  - name: acme-dfw-servers
+    namespace: milo-system
+  # On-demand usage at list price.
+  - name: compute-vcpu-v1
+    namespace: milo-system
+  - name: compute-memory-v1
+    namespace: milo-system
+---
+apiVersion: billing.miloapis.com/v1alpha1
+kind: BillingEntitlement
+metadata:
+  name: be-<account-uid>-default
+  namespace: organization-acme
+spec:
+  billingAccountRef:
+    name: acme
+  offerRef:
+    name: acme-contract-2026-11
+  # Billed on the 18th of each month. It can't be in the past, and can't be
+  # moved or removed once set.
+  contract:
+    startsAt: "2026-11-18T00:00:00Z"
+---
+# Staff preview the first invoice before the contract starts.
+apiVersion: billing.miloapis.com/v1alpha1
+kind: InvoiceRequest
+metadata:
+  name: acme-first-invoice
+  namespace: organization-acme
+spec:
+  billingAccountRef:
+    name: acme
+  mode: Preview
+status:
+  phase: Succeeded
+  currencyCode: USD
+  lines:
+  - description: Server installation
+    amount: "1500.00"
+  - description: Dedicated servers, DFW
+    period:
+      start: "2026-11-18T00:00:00Z"
+      end: "2026-12-17T23:59:59Z"
+    amount: "12000.00"
+  total: "13500.00"
 ```
 
 #### Customer w/ guaranteed capacity and no overage
@@ -518,38 +716,31 @@ in multiple markets. The customer never wants to receive overages or other usage
 charges, and instead wants to have specific guaranteed capacity billed at a
 fixed cost from a negotiated contract.
 
-The billing account's commitment would look very similar to the example above. A
-custom pricing plan would need to be created to bill the customer based on the
-negotiated contract and assigned to the customer's billing account through an
-entitlement.
+**Partly built.** This is the same as the story above, but the customer's Offer
+has only the fixed fees and no usage pricings. Staff choose "Don't bill usage"
+in the staff portal. Usage is still metered and shown in the portals, but
+nothing prices it, so it never appears on an invoice. Capacity is limited with
+quota, not billing. As above, liens on the committed resources are not built.
 
 ```yaml
-name: accounts/1ABE-46DF-79GI/commitments/2BC3-57FG-09DI
-# Customer is locked into 12 month commitment.
-termLengthMonths: 12
-
-# Optionally configure minimum spend / SKU discounts configurations to provide
-# the customer with discounts over the commitment term.
-minimumSpend:
-  ...
-skuDiscounts:
-  ...
-
-resources:
-# Create a lien against a resource reservation to prevent deleting the CPU /
-# Memory resources reserved.
-#
-# NOTE: The ResourceReservation resource is just a representation of the billing
-#       system being able to create a lien against a resource in the compute
-#       service to prevent reserved resources being deleted. This example may
-#       change once a resource reservation system has been designed.
-- type: compute.datumapis.com/ResourceReservation
-  name: projects/my-project/resourceReservations/instance-reservations-dfw-01
-# Note: This is just an example of placing a lien against a network resource to
-#       prevent deletion.
-- type: network.datumapis.com/Router
-  name: projects/my-project/routers/my-router
+apiVersion: billing.miloapis.com/v1alpha1
+kind: Offer
+metadata:
+  name: acme-fixed-2026-11
+spec:
+  # No Usage: only the contract's fees are billed.
+  chargeTypes: [OneTime, Recurring]
+  launchStage: GA
+  servicePricingRefs:
+  - name: acme-setup-fee
+    namespace: milo-system
+  - name: acme-dfw-servers
+    namespace: milo-system
+  - name: acme-network-baseline
+    namespace: milo-system
 ```
+
+[contract-billing]: https://github.com/milo-os/billing/blob/main/docs/enhancements/contract-billing.md
 
 <!-- #### Story 2 -->
 
@@ -896,6 +1087,12 @@ skus:
 
 ### Billing Accounts
 
+> [!NOTE]
+>
+> Built as `BillingAccount` in `billing.miloapis.com/v1alpha1`. Payment options
+> are separate resources: `PaymentMethod` for cards, and `BillingArrangement`
+> for invoice terms. See [Billing Accounts](./billing/accounts/).
+
 ```yaml
 name: accounts/1ABE-46DF-79GI
 displayName: ACME, Inc - US
@@ -915,6 +1112,21 @@ paymentProfile:
 ```
 
 #### Commitments
+
+> [!NOTE]
+>
+> **Status (2026-11-04).** The `Commitment` resource below was not built.
+> Discounts are on the customer's `Offer`. Term start dates are on the
+> `BillingEntitlement` as `contract.startsAt`. Fixed fees are `OneTime` and
+> `Recurring` `ServicePricing`s. See
+> [contract billing](https://github.com/milo-os/billing/blob/main/docs/enhancements/contract-billing.md).
+>
+> These remain open:
+>
+> - minimum spend, prepayments, violation policies and true-ups. Prepaid
+>   balances may come through [credits](https://github.com/milo-os/billing/blob/main/docs/enhancements/credits/README.md).
+> - renewal policy. Designed as "End of Term" in contract billing.
+> - liens on committed resources
 
 Customers may want to make contractual commitments for reduced pricing. Milo
 will support managing **Commitment** resources on **Billing Accounts** to ensure
@@ -1367,6 +1579,10 @@ Major milestones might include:
 - the version where the RFC graduated to general availability
 - when the RFC was retired or superseded
 -->
+
+- 2026-11-04: Billing status notes added. User stories rewritten to show how
+  each one is handled by the built billing system (Offers, discounts,
+  contracts, payment terms).
 
 <!-- ## Drawbacks -->
 

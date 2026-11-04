@@ -1,5 +1,5 @@
 ---
-status: provisional
+status: implemented
 stage: alpha
 latest-milestone: "v0.x"
 ---
@@ -76,6 +76,7 @@ template.
 -->
 
 - [Summary](#summary)
+- [Implementation Status](#implementation-status)
 - [Motivation](#motivation)
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
@@ -125,6 +126,47 @@ the party responsible for service costs. This enhancement also adds
 Scope is limited to defining the Billing Account concept and enabling bindings;
 it does not implement pricing, invoicing, or payments. The outcome is clear
 ownership of costs and a consistent billing surface across all services.
+
+## Implementation Status
+
+> [!NOTE]
+>
+> Billing accounts and bindings are built in
+> [milo-os/billing](https://github.com/milo-os/billing) and used in production.
+> The API group is `billing.miloapis.com/v1alpha1`, not `billing.milo.io`. The
+> build differs from this proposal in a few places:
+>
+> - **Payment terms.** `spec.paymentTerms` is fixed at the standard net 30,
+>   billed monthly on the 1st, and can't be edited. Custom terms (pay by
+>   invoice, net days, PO number) come from a staff-granted
+>   [`BillingArrangement`](https://github.com/milo-os/billing/blob/main/docs/enhancements/billing-arrangements.md),
+>   which customers can apply for. Early payment discounts and late payment
+>   penalties aren't built.
+> - **Payment profile.** Cards are separate `PaymentMethod` resources, and the
+>   account names one in `spec.defaultPaymentMethodRef`. See
+>   [payment methods](https://github.com/milo-os/billing/blob/main/docs/enhancements/payment-methods.md).
+>   An account can be bound to projects before it has a card. Whether it can pay
+>   is reported by the `PaymentReady` condition, which Milo's organization
+>   onboarding waits for. There is no `Incomplete` phase.
+> - **Contact and tax details.** The account also holds `contactInfo` (contact
+>   email, name, business name, invoice email and billing address) and `taxIds`.
+>   Stripe receives these and prints them on invoices.
+> - **Currency.** Only USD is supported.
+> - **Suspension and closure.** The `Suspended` and `Archived` phases exist, but
+>   nothing moves an account into them yet. An account can't be deleted while it
+>   has active bindings, and the invoicing provider waits for unpaid invoices
+>   before removing its customer. Suspension for non-payment is proposed in
+>   [milo-os/billing#208](https://github.com/milo-os/billing/pull/208).
+> - **Limits.** An organization gets one billing account by default. The
+>   `multi-billing-accounts` feature raises the limit.
+> - **Bindings** work as designed: they are immutable, and rebinding supersedes
+>   the old binding. Bindings are also deleted when their project is deleted,
+>   and usage from a project with no binding is dropped. The cloud portal binds
+>   new projects to the organization's default account.
+> - **Hierarchical billing** is not built.
+>
+> See the [billing platform overview](../README.md) for how accounts fit with
+> pricing, invoicing and the portals.
 
 ## Motivation
 
@@ -388,39 +430,63 @@ proposal will be implemented, this is the place to discuss them.
 
 ### Example BillingAccount Resource
 
+As built:
+
 ```yaml
-apiVersion: billing.milo.io/v1alpha1
+apiVersion: billing.miloapis.com/v1alpha1
 kind: BillingAccount
 metadata:
   name: acme-corp-us
-  namespace: acme-org
+  namespace: organization-acme
   annotations:
-    kubernetes.io/description: "Primary billing account for ACME Corp US operations"
+    kubernetes.io/display-name: "ACME Corp US"
 spec:
   currencyCode: USD
-  # Configures the payment terms of the account
+  # Standard terms. Can't be changed here; custom terms come from a
+  # BillingArrangement.
   paymentTerms:
     netDays: 30
-    # Monthly, Quarterly, etc
     invoiceFrequency: Monthly
     invoiceDayOfMonth: 1
-  paymentProfile:
-    creditCard:
-      cardReference: cc-12345
+  contactInfo:
+    email: billing@acme.example
+    name: Jane Doe
+    businessName: ACME Corp
+    # Stripe emails invoices to the first address.
+    invoiceEmails:
+    - ap@acme.example
+    address:
+      line1: 1 Main St
+      city: Austin
+      region: TX
+      postalCode: "78701"
+      country: US
+  taxIds:
+  - type: us_ein
+    value: "12-3456789"
+  # A PaymentMethod in the same namespace.
+  defaultPaymentMethodRef:
+    name: visa-4242
 status:
+  phase: Ready
+  linkedProjectsCount: 8
   conditions:
   - type: Ready
     status: "True"
-    lastTransitionTime: "2024-01-15T10:30:00Z"
-    reason: BillingAccountActive
-    message: "Billing account is active and ready for project linking"
-  linkedProjectsCount: 8
+    reason: Ready
+  - type: PaymentReady
+    status: "True"
+    # InvoiceTerms when a BillingArrangement is active.
+    reason: PaymentMethodReady
+  - type: InvoicingReady
+    status: "True"
+    reason: Current
 ```
 
 ### Example BillingAccountBinding Resource
 
 ```yaml
-apiVersion: billing.milo.io/v1alpha1
+apiVersion: billing.miloapis.com/v1alpha1
 kind: BillingAccountBinding
 metadata:
   name: acme-corp-us-webapp-frontend-billing
@@ -431,12 +497,8 @@ spec:
   billingAccountRef:
     name: acme-corp-us
 status:
-  conditions:
-  - type: Bound
-    status: "True"
-    lastTransitionTime: "2024-01-15T14:22:05Z"
-    reason: SuccessfulBinding
-    message: "Project successfully bound to billing account"
+  # Active, or Superseded once a newer binding for the project exists.
+  phase: Active
   billingResponsibility:
     establishedAt: "2024-01-15T14:22:05Z"
     currentAccount: acme-corp-us
@@ -792,6 +854,18 @@ Major milestones might include:
 -->
 
 - **8/21/2025** - Initial enhancement document created
+- **4/28/2026** - `BillingAccount` and `BillingAccountBinding` built in
+  milo-os/billing, with controllers and admission webhooks
+- **5/22/2026** - Payment methods (`PaymentMethod`, `PaymentMethodClass`) and
+  stripe-provider
+- **6/5/2026** - Billing accounts in the cloud portal, behind a feature flag
+- **9/1/2026** - Bindings deleted with their project; usage from unbound
+  projects dropped
+- **10/7/2026** - Custom payment terms through `BillingArrangement`, and the
+  `PaymentReady` condition
+- **11/2/2026** - Billing generally available to organization owners in the
+  cloud portal
+- **11/4/2026** - Implementation Status added to this document
 
 <!-- ## Drawbacks -->
 

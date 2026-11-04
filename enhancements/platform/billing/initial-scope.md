@@ -81,6 +81,7 @@ template.
     - [Non-Goals](#non-goals)
   - [Glossary](#glossary)
   - [Functional Requirements](#functional-requirements)
+    - [Status](#status)
 
 ## Summary
 
@@ -194,6 +195,39 @@ the platform would expect at the completion of this enhancement.
   overdue payments.
 - All billing resources will be auditable with the activity system so **Service
   Providers** and **Consumers** can audit the state of the system over time.
+
+### Status
+
+As of 2026-11-04. See the [billing platform overview](./README.md) for the full
+picture.
+
+| Requirement | Status |
+|---|---|
+| Register a service and configure its pricing and features | Built. Services declare meters in their `ServiceConfiguration` and price them with `ServicePricing` manifests; quota and service entitlements gate features. |
+| One-time, recurring and usage charges | Built. `OneTime`, `Recurring` and `Usage` pricings. |
+| Bill usage reported by a service | Built. Billing's usage pipeline feeds openmeter-provider. |
+| Consumer creates a billing account with a payment profile | Built. Cards through Stripe; pay by invoice through payment terms. |
+| Billing contact details | Built. Contact, invoice email, billing address and tax IDs. |
+| Attach a project to a billing account | Built. `BillingAccountBinding`; new projects are bound to the organization's default account. |
+| Multiple Offers (Free, Pro, Enterprise) | Built. Staff author Offers; every account gets the default Offer. |
+| Consumers browse, buy and cancel Offers | Not built. Customers can't read Offers; staff move accounts between them. |
+| Monthly invoices that consumers can retrieve and download | Built. `Invoice` resources link to Stripe's hosted invoice and PDF. |
+| Charge the payment profile and reconcile payments | Built. OpenMeter's Stripe app charges the card; payment status flows back to `Invoice`. |
+| Payment history, including failed payments | Partial. Invoices show paid, past due and void, and staff see failed payments; there's no customer payment history page. |
+| Suspend accounts for non-payment, with notice | Not built. Proposed in [milo-os/billing#208](https://github.com/milo-os/billing/pull/208). |
+| Refunds | Partial. Done in Stripe; credit notes are reflected on Milo invoices. |
+| Write off bad debt | Partial. Done in Stripe; uncollectible invoices show as `Void`. |
+| Payment retry and escalation | Partial. Stripe's retry settings apply; not configurable in Milo. |
+| Auditable through the activity system | Built. Billing changes appear on the organization's activity timeline. |
+
+Items the initial scope left out have also moved on:
+
+- **Commitments.** Contracts with a start date, fixed fees and invoice terms
+  are built. Minimum spend commitments are not.
+- **Discounting.** Built, as Offer discounts.
+- **Detailed reporting.** Built. `UsageQuery` breaks usage and spend down by
+  project, service and meter.
+- **Budgets, multi-currency and hierarchical billing.** Still not built.
 
 <!-- ## Proposal -->
 
