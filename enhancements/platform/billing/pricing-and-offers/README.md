@@ -99,8 +99,8 @@ Concrete blockers today:
   `pricingUnit`, an optional `unitConversion`, and rates (flat or tiered,
   including graduated volume bands, with per-dimension match so rates can vary
   by meter dimension value). Any number of `ServicePricing`s may select the
-  same meter. OneTime and Recurring `ServicePricing`s name a service and carry
-  a fixed amount.
+  same meter. OneTime and Recurring `ServicePricing`s are fees: they carry a
+  fixed amount, and may name a service and a unit.
 - **Meters carry no price.** `ServiceConfiguration` declares metrics; nothing
   on it is commercial.
 - **Admission validation against `MeterDefinition`**, so a price written as a
@@ -164,7 +164,7 @@ different rates without any change to the service that emits it.
 | Concept                 | Owner             | Authored in                     | What it does                                                        |
 | ----------------------- | ----------------- | ------------------------------- | ------------------------------------------------------------------- |
 | **Meter**               | Service owner     | Service's `ServiceConfiguration` | What is measured. Fanned out to a `MeterDefinition`. No price.      |
-| **Service Pricing**     | Platform owner    | Service repo (private: infra)   | A price for one meter (Usage), or a fixed fee (OneTime, Recurring). |
+| **Service Pricing**     | Platform owner    | Service repo; staff-portal for one customer's | A price for one meter (Usage), or a fixed fee (OneTime, Recurring). |
 | **Offer**               | Platform owner    | staff-portal                    | A named, versioned bundle of service pricings (a "tier").           |
 | **Billing Entitlement** | Platform / policy | Controller, staff-portal        | Binds a billing account to exactly one active Offer.                |
 
@@ -172,7 +172,8 @@ Service owners declare meters on their `ServiceConfiguration`. Meters describe
 what is measured and nothing else. `ServicePricing` resources sit beside the
 meters in the same service repo, as their own manifests; billing owns the
 prices and approves changes to them. A Usage pricing selects a meter by name and says what that
-usage costs; OneTime and Recurring pricings name a service and need no meter.
+usage costs; OneTime and Recurring pricings are fees, need no meter, and may
+name a service.
 Several pricings can select the same meter, which is how one kind of usage gets
 more than one price. The platform composes pricings into Offers. A billing
 account becomes billable by pointing a Billing Entitlement at an Offer.
@@ -247,8 +248,9 @@ account's Customer-Plan assignment within one reconcile. Because exactly one
 `BillingEntitlement` is active per account, there is never ambiguity about which
 Offer is in force. A negotiated rate is a `ServicePricing` for that deal,
 selecting the same meter as the list price, and an Offer that references it.
-Negotiated rates go in the private pricing directory in infra rather than the
-public service repo (see [Authoring pricing in GitOps](#authoring-pricing-in-gitops)).
+Staff create it in staff-portal, with `basedOn` naming the list pricing it
+replaces, so it differs only in its rate amounts and never reaches a public
+repo (see [contract usage pricing][contract-usage-pricing]).
 
 #### Use Case 5: An invoice run produces a non-zero subtotal across all charge types
 
@@ -1020,8 +1022,8 @@ grants and the Amberflo Customer-Plan assignment in a single reconcile.
   billing a required reviewer on each repo's pricing files.
 - **Negotiated prices in public repos.** compute, network-services-operator, and
   cloud-portal are public. List prices are public anyway; a price negotiated
-  for one customer is not. _Mitigation:_ those go in a private pricing
-  directory in infra instead.
+  for one customer is not. _Mitigation:_ staff create those in staff-portal,
+  so they never reach a repo.
 - **Two "Entitlement" kinds.** `BillingEntitlement` (new) and `ServiceEntitlement`
   (existing per-project quota driver) could be conflated. _Mitigation:_ they are
   deliberately distinct kinds with distinct scopes; the new kind avoids invasive
@@ -1146,13 +1148,16 @@ config/components/service-catalog-staging/
 ```
 
 - The Flux identities that apply each service's component get
-  `service-pricing-admin` on `milo-system`. Staff keep `service-pricing-viewer`,
-  so staff-portal shows prices but doesn't change them.
+  `service-pricing-admin` on `milo-system`. Staff have `service-pricing-viewer`,
+  and `service-pricing-creator` to create a contract's fees and a customer's
+  own rates in staff-portal, but can't change or delete any pricing.
 - Each repo's CODEOWNERS makes billing a required reviewer on its pricing
   files, so a service team can't change a price on its own.
-- Prices that can't be public, such as a rate negotiated for one customer, go
-  in `apps/billing-system/<env>/pricing/` in infra, which is private. The
-  webhook and naming rules are the same.
+- Prices that can't be public, such as a rate negotiated for one customer, are
+  created in staff-portal as a `Usage` pricing `basedOn` the list one (see
+  [contract usage pricing][contract-usage-pricing]). The webhook checks
+  them as it checks any other pricing, and that only their rate amounts
+  differ from the list pricing.
 - Names are the platform's: `<service>-<what>[-<variant>]-v<n>`, for example
   `compute-cpu-allocated-pro-v1`. The service-name prefix and the
   `host--path` encoding the fan-out used no longer apply.
@@ -1196,6 +1201,11 @@ controller reads each referenced `ServicePricing`, copies the current rates
 into `spec.servicePricings[]` as an immutable snapshot, and the Offer becomes
 live. Rates are **not** authored twice: the snapshot is generated
 automatically at publish time.
+
+A reference can also set a `discount` and, for a OneTime or Recurring fee, a
+`quantity`: how many of the fee the Offer charges, such as three servers at the
+same monthly price. Both are copied into the snapshot. See
+[contract fees][contract-fees].
 
 An Offer need not reference all the pricings for a service: the subset chosen
 determines which services are accessible and billed for accounts on that Offer.
@@ -1402,6 +1412,10 @@ without changing what a live Offer bills.
   meter it prices; any number of pricings may select the same meter. Validate pricings against
   `MeterDefinition` at admission and make their spec immutable. Retire
   `ServiceConfiguration.spec.charges[]` and `ChargeFanOut`.
+- 2026-11-05: Fees may leave out `serviceRef` and set a `pricingUnit`, and an
+  Offer's reference sets a fee's `quantity`. A customer's negotiated rates are
+  a `Usage` pricing `basedOn` the list one, created in staff-portal rather than
+  in infra. See [contract billing][contract-billing].
 
 ## Drawbacks
 
@@ -1536,3 +1550,6 @@ the CRD approach in this enhancement remains the right call as complexity grows.
 [759]: https://github.com/datum-cloud/enhancements/issues/759
 [flux-operator]: https://glama.ai/mcp/servers/@controlplaneio-fluxcd/flux-operator/blob/06e1897fcf773428155c5f6b9aadb5538169bb5c/internal/controller/entitlement_controller.go
 [gcp-marketplace-k8s]: https://github.com/GoogleCloudPlatform/marketplace-k8s-app-tools/blob/master/docs/billing-integration.md
+[contract-billing]: https://github.com/milo-os/billing/blob/main/docs/enhancements/contract-billing.md
+[contract-fees]: https://github.com/milo-os/billing/blob/main/docs/enhancements/contract-billing.md#contract-fees
+[contract-usage-pricing]: https://github.com/milo-os/billing/blob/main/docs/enhancements/contract-billing.md#contract-usage-pricing
