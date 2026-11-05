@@ -222,8 +222,9 @@ picture.
 
 Items the initial scope left out have also moved on:
 
-- **Commitments.** Contracts with a start date, fixed fees and invoice terms
-  are built. Minimum spend commitments are not.
+- **Commitments.** In progress. Contracts with a start date, fixed fees and
+  invoice terms are built. Minimum spend commitments and end of term are not
+  yet.
 - **Discounting.** Built, as Offer discounts.
 - **Detailed reporting.** Built. `UsageQuery` breaks usage and spend down by
   project, service and meter.

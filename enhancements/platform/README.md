@@ -369,15 +369,17 @@ consumed by the **Project**.
 > [!NOTE]
 >
 > **Status (2026-11-04).** Billing accounts, project links, payment methods,
-> payment terms, Offers and entitlements, discounts and contracts are built in
-> [milo-os/billing](https://github.com/milo-os/billing). In the built system:
+> payment terms, Offers and entitlements and discounts are built in
+> [milo-os/billing](https://github.com/milo-os/billing). Contracts and
+> commitments are in progress. In the built system:
 >
 > - **Payment profiles** are `PaymentMethod` resources (cards, through Stripe),
 >   or a `BillingArrangement` for invoice terms such as Net 30 or Net 60.
 > - **Invoice dates.** Accounts are invoiced on the 1st. Contracts are invoiced
 >   on their start day.
-> - **Commitments** are not built as a resource. Contracts with discounts and
->   fixed fees cover most of the cases above (see [User Stories](#user-stories)).
+> - **Commitments** are in progress, and not built as a resource. Contracts
+>   with discounts and fixed fees cover most of the cases above so far (see
+>   [User Stories](#user-stories)).
 > - **Minimum spend reconciliation** is not built.
 > - **Billing sub-accounts** are not built.
 >
@@ -465,7 +467,8 @@ bogged down.
 >
 > **Status (2026-11-04).** These stories were written before billing was
 > built. Each one now shows how it is handled in
-> [milo-os/billing](https://github.com/milo-os/billing). The `Commitment` and
+> [milo-os/billing](https://github.com/milo-os/billing). Contracts and
+> commitments are still in progress. The `Commitment` and
 > `Lien` resources sketched below were not built. Contracts are made from:
 >
 > - a customer's own `Offer`, which can include a discount
@@ -545,7 +548,7 @@ spec:
 Customer wishes to make a revenue commit ($1,000,000/year) and thus receive a
 15% discount off of list pricing for on-demand services.
 
-**Partly built.** The discount and the contract dates are built. Staff publish
+**In progress.** The discount and the contract dates are built. Staff publish
 an Offer for the customer that selects the platform's usage pricings with a
 15% discount. They then point the account's entitlement at it, with the
 contract's start date. Invoices show list price, the discount and the net
@@ -606,7 +609,7 @@ instances she desires as is offered m2m, annual or 3 year commit pricing
 options. Customer contracts for those services and then also leverages usage/on
 demand services for additional capacity, dev test and other scenarios.
 
-**Partly built.** This is how bare metal contracts are set up. Staff use
+**In progress.** This is how bare metal contracts are set up. Staff use
 "Set up contract" in the staff portal. It creates the setup fee as a `OneTime`
 pricing and the monthly charge for the reserved capacity as a `Recurring`
 pricing. It then publishes an Offer for the customer with both, plus the
@@ -716,7 +719,7 @@ in multiple markets. The customer never wants to receive overages or other usage
 charges, and instead wants to have specific guaranteed capacity billed at a
 fixed cost from a negotiated contract.
 
-**Partly built.** This is the same as the story above, but the customer's Offer
+**In progress.** This is the same as the story above, but the customer's Offer
 has only the fixed fees and no usage pricings. Staff choose "Don't bill usage"
 in the staff portal. Usage is still metered and shown in the portals, but
 nothing prices it, so it never appears on an invoice. Capacity is limited with
@@ -1115,7 +1118,8 @@ paymentProfile:
 
 > [!NOTE]
 >
-> **Status (2026-11-04).** The `Commitment` resource below was not built.
+> **Status (2026-11-04).** Commitments are still in progress. The `Commitment`
+> resource below was not built.
 > Discounts are on the customer's `Offer`. Term start dates are on the
 > `BillingEntitlement` as `contract.startsAt`. Fixed fees are `OneTime` and
 > `Recurring` `ServicePricing`s. See

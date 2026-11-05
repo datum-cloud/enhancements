@@ -12,9 +12,9 @@ financial controls for organizations consuming services through the platform.
 >
 > **Status (November 2026)**: Datum Cloud bills its customers through this
 > platform in production. Billing accounts, card payments, payment terms,
-> usage metering, pricing, discounts, contracts and invoicing are built.
-> Credits are built but switched off. Commitments, budgets, hierarchical
-> billing and multi-currency are not built yet.
+> usage metering, pricing, discounts and invoicing are built. Contracts and
+> commitments are in progress. Credits are built but switched off. Budgets,
+> hierarchical billing and multi-currency are not built yet.
 >
 > The detailed designs live next to the code in
 > [milo-os/billing `docs/enhancements`](https://github.com/milo-os/billing/tree/main/docs/enhancements).
@@ -40,15 +40,15 @@ and default payment method.
 See [Billing Accounts](./accounts/), [payment methods][payment-methods] and
 [billing arrangements][arrangements].
 
-### Commitment Management (Partly built)
+### Commitment Management (In progress)
 
-Contractual arrangements are built from Offers rather than a dedicated
-commitment resource:
+Contracts and commitments are still in progress. The first pieces are built
+from Offers rather than a dedicated commitment resource:
 
 - **SKU-Level Discounts** (built): an Offer can discount everything in it, or
   each service separately. A customer's negotiated discount is their own
   Offer. See [offer discounts][offer-discounts].
-- **Contracts** (built): one-time setup fees, fixed monthly fees and a
+- **Contracts** (first version built): one-time setup fees, fixed monthly fees and a
   contract start date that sets the billing day. Contracts can be amended from
   the next billing date. See [contract billing][contract-billing].
 - **Minimum Spend Commitments** (not built): no minimum spend, true-ups or
@@ -189,7 +189,6 @@ The billing platform aims to support the following scenarios:
   - [Invoicing][invoicing]
   - [Usage query][usage-query]
   - [Offer discounts][offer-discounts]
-  - [Contract billing][contract-billing]
   - [Billing activity][billing-activity]
 
 ### In Progress
@@ -197,11 +196,13 @@ The billing platform aims to support the following scenarios:
 - **[Credits][credits]**: built in billing behind a feature gate, waiting on
   provider support
 - **Suspension**: restricting and suspending accounts for non-payment
-- **End of contract term**: renewal, month-to-month or stopping
+- **Contracts and commitments**: the first version of
+  [contract billing][contract-billing] is built (start dates, fixed fees,
+  amendments). Still to come: end of term (renewal, month-to-month or
+  stopping), minimum spend, true-ups and reserved capacity
 
 ### Planned
 
-- **Commitments**: minimum spend, true-ups and reserved capacity
 - **Budget Management & Alerts**
 - **Hierarchical Billing**: sub-accounts for resellers and channel partners
 - **Multi-Currency**
