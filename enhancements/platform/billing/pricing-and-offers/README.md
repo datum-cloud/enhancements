@@ -1,5 +1,5 @@
 ---
-status: provisional
+status: implemented
 stage: alpha
 latest-milestone: "v0.x"
 ---
@@ -71,6 +71,27 @@ the input the credit ledger and eventual Stripe charge step depend on.
 > prices. Prices stay in GitOps in each service's repo, next to its meters. See
 > [Migration from spec.charges[]](#migration-from-speccharges) and
 > [Alternatives](#alternatives).
+
+> [!NOTE]
+>
+> **Status (2026-11-04).** Implemented. `ServicePricing`, `Offer` and
+> `BillingEntitlement` are in [milo-os/billing](https://github.com/milo-os/billing),
+> and pricing selects meters as this revision describes. The provider is now
+> [openmeter-provider](https://github.com/milo-os/openmeter-provider), not
+> Amberflo: Amberflo was removed from every cluster on 2026-10-23. The
+> "What this produces in Amberflo" sections and
+> [amberflo-provider reconcilers](#amberflo-provider-reconcilers) are kept for
+> history. openmeter-provider turns each published Offer into an OpenMeter plan
+> and each `BillingEntitlement` into a subscription.
+>
+> Built since this document was written:
+>
+> - [Offer discounts](https://github.com/milo-os/billing/blob/main/docs/enhancements/offer-discounts.md):
+>   percentage discounts on an Offer and on each pricing in it.
+> - [Contracts](https://github.com/milo-os/billing/blob/main/docs/enhancements/contract-billing.md):
+>   `BillingEntitlement.spec.contract.startsAt`, and `InvoiceRequest` previews.
+>
+> Only staging has usage prices. Production has no usage pricings yet.
 
 ## Motivation
 
@@ -1253,6 +1274,15 @@ namespace. Re-apply on policy reconcile is idempotent.
 
 ### amberflo-provider reconcilers
 
+> [!NOTE]
+>
+> Superseded. amberflo-provider was retired on 2026-10-23. openmeter-provider
+> maps a published Offer to an OpenMeter plan: usage rates become features
+> with rate cards, `Recurring` pricings become monthly in-advance flat fees,
+> and `OneTime` pricings become one-off flat fees. It maps a
+> `BillingEntitlement` to a subscription anchored on the 1st, or on
+> `contract.startsAt` for contracts.
+
 - `Offer` → Amberflo Product Plan (plus Product Plan Items per pricing entry,
   with dimension filters).
 - `BillingEntitlement` → Amberflo Customer-Plan assignment.
@@ -1402,6 +1432,20 @@ without changing what a live Offer bills.
   meter it prices; any number of pricings may select the same meter. Validate pricings against
   `MeterDefinition` at admission and make their spec immutable. Retire
   `ServiceConfiguration.spec.charges[]` and `ChargeFanOut`.
+- 2026-10-24: openmeter-provider went live in production, replacing
+  Amberflo, which was removed on 2026-10-23.
+- 2026-10-26: Decoupling shipped. The billing webhook validates pricings
+  against meters (milo-os/billing#174). Compute, networking and the AI
+  assistant moved their pricings to standalone manifests. service-catalog
+  rejects `spec.charges` (milo-os/service-catalog#201). Offer and per-pricing
+  discounts were added (milo-os/billing#155).
+- 2026-10-27: The staff portal lists each service's pricings (staff-portal#752).
+- 2026-11-02: Contract start date on `BillingEntitlement` and `InvoiceRequest`
+  previews (milo-os/billing#191).
+- 2026-11-03: An existing account can be moved onto a contract, and contracts
+  can be amended. The `service-pricing-creator` role was added, so staff can
+  add a contract's fee pricings (milo-os/billing#205).
+- 2026-11-04: Status note added: implemented, with OpenMeter as the provider.
 
 ## Drawbacks
 
