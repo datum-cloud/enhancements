@@ -13,8 +13,9 @@ financial controls for organizations consuming services through the platform.
 > **Status (November 2026)**: Datum Cloud bills its customers through this
 > platform in production. Billing accounts, card payments, payment terms,
 > usage metering, pricing, discounts and invoicing are built. Contracts and
-> commitments are in progress. Credits are built but switched off. Budgets,
-> hierarchical billing and multi-currency are not built yet.
+> commitments are in progress, and so is restricting and suspending accounts
+> that don't pay. Credits are built but switched off. Budgets, hierarchical
+> billing and multi-currency are not built yet.
 >
 > The detailed designs live next to the code in
 > [milo-os/billing `docs/enhancements`](https://github.com/milo-os/billing/tree/main/docs/enhancements).
@@ -195,7 +196,14 @@ The billing platform aims to support the following scenarios:
 
 - **[Credits][credits]**: built in billing behind a feature gate, waiting on
   provider support
-- **Suspension**: restricting and suspending accounts for non-payment
+- **[Non-payment][nonpayment]**: restricting and suspending accounts that
+  don't pay, tracked in the epic [milo-os/billing#219][nonpayment-epic].
+  Customers get reminders as soon as an invoice is overdue. Card accounts have
+  growth paused at day 7 (no new projects or resources) and service paused at
+  day 21, through Milo's [project suspension](../project-suspension/).
+  Invoice accounts are only paused when staff decide to. Paying restores
+  everything, nothing is ever deleted, and it ships switched off, rolling out
+  in phases: observe, reminders, pause growth, pause service
 - **Contracts and commitments**: the first version of
   [contract billing][contract-billing] is built (start dates, fixed fees,
   amendments). Still to come: end of term (renewal, month-to-month or
@@ -243,3 +251,5 @@ The billing platform roadmap includes:
 [credits]: https://github.com/milo-os/billing/blob/main/docs/enhancements/credits/README.md
 [contract-billing]: https://github.com/milo-os/billing/blob/main/docs/enhancements/contract-billing.md
 [billing-activity]: https://github.com/milo-os/billing/blob/main/docs/enhancements/billing-activity.md
+[nonpayment]: https://github.com/milo-os/billing/blob/main/docs/enhancements/nonpayment-suspension.md
+[nonpayment-epic]: https://github.com/milo-os/billing/issues/219

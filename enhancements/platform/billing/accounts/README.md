@@ -155,8 +155,10 @@ ownership of costs and a consistent billing surface across all services.
 > - **Suspension and closure.** The `Suspended` and `Archived` phases exist, but
 >   nothing moves an account into them yet. An account can't be deleted while it
 >   has active bindings, and the invoicing provider waits for unpaid invoices
->   before removing its customer. Suspension for non-payment is proposed in
->   [milo-os/billing#208](https://github.com/milo-os/billing/pull/208).
+>   before removing its customer. Suspension for non-payment is in progress,
+>   tracked in [milo-os/billing#219](https://github.com/milo-os/billing/issues/219).
+>   It works differently from the design below; see
+>   [Account Suspension and Reactivation](#account-suspension-and-reactivation).
 > - **Limits.** An organization gets one billing account by default. The
 >   `multi-billing-accounts` feature raises the limit.
 > - **Bindings** work as designed: they are immutable, and rebinding supersedes
@@ -270,6 +272,26 @@ valid payment profiles remain in "**Incomplete**" status and cannot be bound to
 projects.
 
 #### Account Suspension and Reactivation
+
+> [!NOTE]
+>
+> **In progress.** Suspension for non-payment is designed in
+> [What Happens When a Customer Doesn't Pay](https://github.com/milo-os/billing/blob/main/docs/enhancements/nonpayment-suspension.md)
+> and tracked in [milo-os/billing#219](https://github.com/milo-os/billing/issues/219).
+> It differs from the sketch below:
+>
+> - The account's payment standing (`Good`, `Overdue`, `Restricted` or
+>   `Suspended`) is worked out from overdue invoices and written to
+>   `status.paymentStanding`. The `Suspended` phase follows from it.
+> - `Restricted` comes first and pauses growth: no new projects or resources,
+>   and no moving projects off the account. Running workloads keep working.
+> - `Suspended` pauses service by creating a Milo
+>   [`ProjectSuspension`](../../project-suspension/) with reason `Billing` for
+>   each bound project. Nothing is deleted.
+> - Reactivation is automatic. Paying the overdue invoices restores the account
+>   within seconds, with no staff approval.
+> - Staff hold, lift, restrict or suspend an account with a
+>   `PaymentStandingOverride`, a staff-only resource.
 
 Accounts may be suspended for various reasons including payment failures,
 compliance violations, or administrative actions. Suspension triggers:

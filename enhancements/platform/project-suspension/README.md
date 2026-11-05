@@ -134,7 +134,9 @@ control fixes all three.
   bindings fund. Billing is a *trigger* here: it creates `ProjectSuspension`s with
   `reason: Billing` like any other trigger. But the cascade mechanics and the
   account-to-project traversal are billing-side logic, left to a separate
-  billing-integration enhancement.
+  billing-integration enhancement: [What Happens When a Customer Doesn't
+  Pay](https://github.com/milo-os/billing/blob/main/docs/enhancements/nonpayment-suspension.md),
+  tracked in [milo-os/billing#219](https://github.com/milo-os/billing/issues/219).
 - **Throttling** or **soft-limiting** a project (a degraded-but-running state).
   Suspension is a hard, binary pause. Graduated responses are a possible future
   extension, noted in [Alternatives](#alternatives).

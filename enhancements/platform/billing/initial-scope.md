@@ -198,7 +198,7 @@ the platform would expect at the completion of this enhancement.
 
 ### Status
 
-As of 2026-11-04. See the [billing platform overview](./README.md) for the full
+As of 2026-11-05. See the [billing platform overview](./README.md) for the full
 picture.
 
 | Requirement | Status |
@@ -214,10 +214,10 @@ picture.
 | Monthly invoices that consumers can retrieve and download | Built. `Invoice` resources link to Stripe's hosted invoice and PDF. |
 | Charge the payment profile and reconcile payments | Built. OpenMeter's Stripe app charges the card; payment status flows back to `Invoice`. |
 | Payment history, including failed payments | Partial. Invoices show paid, past due and void, and staff see failed payments; there's no customer payment history page. |
-| Suspend accounts for non-payment, with notice | Not built. Proposed in [milo-os/billing#208](https://github.com/milo-os/billing/pull/208). |
+| Suspend accounts for non-payment, with notice | In progress. Reminders, then growth paused at day 7 and service paused at day 21 for card accounts; staff decide for invoice accounts. Tracked in [milo-os/billing#219](https://github.com/milo-os/billing/issues/219). |
 | Refunds | Partial. Done in Stripe; credit notes are reflected on Milo invoices. |
 | Write off bad debt | Partial. Done in Stripe; uncollectible invoices show as `Void`. |
-| Payment retry and escalation | Partial. Stripe's retry settings apply; not configurable in Milo. |
+| Payment retry and escalation | Partial. Stripe's retry settings apply; not configurable in Milo. Escalation after an invoice is overdue is part of [milo-os/billing#219](https://github.com/milo-os/billing/issues/219). |
 | Auditable through the activity system | Built. Billing changes appear on the organization's activity timeline. |
 
 Items the initial scope left out have also moved on:
