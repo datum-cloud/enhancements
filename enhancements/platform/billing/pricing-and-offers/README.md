@@ -249,8 +249,8 @@ account's Customer-Plan assignment within one reconcile. Because exactly one
 Offer is in force. A negotiated rate is a `ServicePricing` for that deal,
 selecting the same meter as the list price, and an Offer that references it.
 Staff create it in staff-portal, with `basedOn` naming the list pricing it
-replaces, so it differs only in its rate amounts and never reaches a public
-repo (see [contract usage pricing][contract-usage-pricing]).
+replaces, so it differs only in its rate amounts, or a fee's amount, and never
+reaches a public repo (see [contract usage pricing][contract-usage-pricing]).
 
 #### Use Case 5: An invoice run produces a non-zero subtotal across all charge types
 
@@ -1153,11 +1153,11 @@ config/components/service-catalog-staging/
   own rates in staff-portal, but can't change or delete any pricing.
 - Each repo's CODEOWNERS makes billing a required reviewer on its pricing
   files, so a service team can't change a price on its own.
-- Prices that can't be public, such as a rate negotiated for one customer, are
-  created in staff-portal as a `Usage` pricing `basedOn` the list one (see
-  [contract usage pricing][contract-usage-pricing]). The webhook checks
-  them as it checks any other pricing, and that only their rate amounts
-  differ from the list pricing.
+- Prices that can't be public, such as a rate or fee amount negotiated for one
+  customer, are created in staff-portal as a pricing `basedOn` the list one
+  (see [contract usage pricing][contract-usage-pricing]). The webhook checks
+  them as it checks any other pricing, and that only their rate amounts, or a
+  fee's amount, differ from the list pricing.
 - Names are the platform's: `<service>-<what>[-<variant>]-v<n>`, for example
   `compute-cpu-allocated-pro-v1`. The service-name prefix and the
   `host--path` encoding the fan-out used no longer apply.
@@ -1416,6 +1416,8 @@ without changing what a live Offer bills.
   Offer's reference sets a fee's `quantity`. A customer's negotiated rates are
   a `Usage` pricing `basedOn` the list one, created in staff-portal rather than
   in infra. See [contract billing][contract-billing].
+- 2026-11-06: A customer's negotiated fee amount is likewise a fee `basedOn`
+  the list fee, so staff-portal can show the list price beside it.
 
 ## Drawbacks
 
