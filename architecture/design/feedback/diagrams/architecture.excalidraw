@@ -602,8 +602,8 @@
       "updated": 1793218868668,
       "link": null,
       "locked": false,
-      "text": "Milo API server\n\nZitadel authn\nauthz\nuser identity\nin request extras",
-      "originalText": "Milo API server\n\nZitadel authn\nauthz\nuser identity\nin request extras",
+      "text": "Milo API server\n\nZitadel authn\nauthz\nuser identity\nin request extras\n\nfeedback CRDs\nin etcd\n\nowner and\nhidden filters",
+      "originalText": "Milo API server\n\nZitadel authn\nauthz\nuser identity\nin request extras\n\nfeedback CRDs\nin etcd\n\nowner and\nhidden filters",
       "fontSize": 18,
       "fontFamily": 5,
       "textAlign": "center",
@@ -812,10 +812,6 @@
         },
         {
           "type": "arrow",
-          "id": "api->ctrl"
-        },
-        {
-          "type": "arrow",
           "id": "api->pg"
         },
         {
@@ -829,6 +825,10 @@
         {
           "type": "arrow",
           "id": "api->search"
+        },
+        {
+          "id": "arrow-op-notif",
+          "type": "arrow"
         }
       ],
       "updated": 1793218868668,
@@ -862,8 +862,8 @@
       "updated": 1793218868668,
       "link": null,
       "locked": false,
-      "text": "feedback-apiserver\nfeedback.miloapis.com\n\nPost · PostQuery · Vote\nSubmission · SecurityReport\nRelease · ChangelogEntry\nFeedbackSource (etcd)\n\nown audit backend",
-      "originalText": "feedback-apiserver\nfeedback.miloapis.com\n\nPost · PostQuery · Vote\nSubmission · SecurityReport\nRelease · ChangelogEntry\nFeedbackSource (etcd)\n\nown audit backend",
+      "text": "feedback-operator\nreconcilers + admission webhooks\n\nvote totals · follows\nreview outcomes · merges\nmove to security track\ntriage · delivery · digests\n\nsecurity acknowledgements",
+      "originalText": "feedback-operator\nreconcilers + admission webhooks\n\nvote totals · follows\nreview outcomes · merges\nmove to security track\ntriage · delivery · digests\n\nsecurity acknowledgements",
       "fontSize": 17,
       "fontFamily": 5,
       "textAlign": "center",
@@ -904,15 +904,7 @@
         },
         {
           "type": "arrow",
-          "id": "api->ctrl"
-        },
-        {
-          "type": "arrow",
           "id": "ctrl->milo"
-        },
-        {
-          "type": "arrow",
-          "id": "ctrl->email"
         }
       ],
       "updated": 1793218868668,
@@ -946,8 +938,8 @@
       "updated": 1793218868668,
       "link": null,
       "locked": false,
-      "text": "feedback-controller\ntriage · delivery · digests",
-      "originalText": "feedback-controller\ntriage · delivery · digests",
+      "text": "feedback-uploads\nprivate attachments",
+      "originalText": "feedback-uploads\nprivate attachments",
       "fontSize": 18,
       "fontFamily": 5,
       "textAlign": "center",
@@ -1018,8 +1010,8 @@
       "updated": 1793218868668,
       "link": null,
       "locked": false,
-      "text": "Only feedback-apiserver\nconnects to Postgres. Every\nwrite is an audited API call.",
-      "originalText": "Only feedback-apiserver\nconnects to Postgres. Every\nwrite is an audited API call.",
+      "text": "Feedback resources are\nCRDs in Milo. Every write\nis an audited API call.",
+      "originalText": "Feedback resources are\nCRDs in Milo. Every write\nis an audited API call.",
       "fontSize": 15,
       "fontFamily": 5,
       "textAlign": "center",
@@ -1094,8 +1086,8 @@
       "updated": 1793218868668,
       "link": null,
       "locked": false,
-      "text": "Postgres + pgvector\nposts · votes · reports",
-      "originalText": "Postgres + pgvector\nposts · votes · reports",
+      "text": "Fraud service\nsubmission scores",
+      "originalText": "Fraud service\nsubmission scores",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
@@ -1246,8 +1238,8 @@
       "updated": 1793218868668,
       "link": null,
       "locked": false,
-      "text": "Internal AI gateway\nembeddings · triage",
-      "originalText": "Internal AI gateway\nembeddings · triage",
+      "text": "Internal AI gateway\ntriage drafts",
+      "originalText": "Internal AI gateway\ntriage drafts",
       "fontSize": 16,
       "fontFamily": 5,
       "textAlign": "center",
@@ -1363,8 +1355,8 @@
           "id": "email-t"
         },
         {
-          "type": "arrow",
-          "id": "ctrl->email"
+          "id": "arrow-op-notif",
+          "type": "arrow"
         }
       ],
       "updated": 1793218868668,
@@ -2232,8 +2224,8 @@
       "updated": 1793218868668,
       "link": null,
       "locked": false,
-      "text": "writes via\nFeedback API",
-      "originalText": "writes via\nFeedback API",
+      "text": "writes to\nMilo",
+      "originalText": "writes to\nMilo",
       "fontSize": 14,
       "fontFamily": 5,
       "textAlign": "center",
@@ -2328,8 +2320,8 @@
       "updated": 1793218868668,
       "link": null,
       "locked": false,
-      "text": "aggregated\nAPI",
-      "originalText": "aggregated\nAPI",
+      "text": "watch,\nwebhooks",
+      "originalText": "watch,\nwebhooks",
       "fontSize": 15,
       "fontFamily": 5,
       "textAlign": "center",
@@ -2362,7 +2354,7 @@
       "seed": 1763169842,
       "version": 2,
       "versionNonce": 1475778724,
-      "isDeleted": false,
+      "isDeleted": true,
       "boundElements": [
         {
           "type": "text",
@@ -2419,7 +2411,7 @@
       "seed": 1804087742,
       "version": 2,
       "versionNonce": 987214748,
-      "isDeleted": false,
+      "isDeleted": true,
       "boundElements": [],
       "updated": 1793218868668,
       "link": null,
@@ -2520,8 +2512,8 @@
       "updated": 1793218868668,
       "link": null,
       "locked": false,
-      "text": "writes via\nFeedback API",
-      "originalText": "writes via\nFeedback API",
+      "text": "token and\naccess checks",
+      "originalText": "token and\naccess checks",
       "fontSize": 14,
       "fontFamily": 5,
       "textAlign": "center",
@@ -2770,7 +2762,7 @@
       "seed": 151611371,
       "version": 2,
       "versionNonce": 1080239780,
-      "isDeleted": false,
+      "isDeleted": true,
       "boundElements": [],
       "updated": 1793218868668,
       "link": null,
@@ -2788,6 +2780,60 @@
       "lastCommittedPoint": null,
       "startBinding": {
         "elementId": "ctrl",
+        "focus": 0,
+        "gap": 6
+      },
+      "endBinding": {
+        "elementId": "email",
+        "focus": 0,
+        "gap": 6
+      },
+      "startArrowhead": null,
+      "endArrowhead": "arrow",
+      "elbowed": false
+    },
+    {
+      "id": "arrow-op-notif",
+      "type": "arrow",
+      "x": 1420,
+      "y": 690,
+      "width": 110,
+      "height": 125.0,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "index": "az",
+      "roundness": {
+        "type": 2
+      },
+      "seed": 1336565706,
+      "version": 2,
+      "versionNonce": 1328926732,
+      "isDeleted": false,
+      "boundElements": [],
+      "updated": 1793218868668,
+      "link": null,
+      "locked": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          110,
+          125.0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "api",
         "focus": 0,
         "gap": 6
       },

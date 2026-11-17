@@ -13,10 +13,12 @@ latest-milestone: "v0.1"
 - [API Resources](#api-resources)
   - [FeedbackSource](#feedbacksource)
   - [Post](#post)
-  - [PostQuery](#postquery)
+  - [Listing and searching posts](#listing-and-searching-posts)
   - [Vote](#vote)
   - [Submission](#submission)
+  - [SubmissionReview](#submissionreview)
   - [SecurityReport](#securityreport)
+  - [SecurityReportTriage](#securityreporttriage)
   - [Subscription](#subscription)
   - [Release](#release)
   - [ChangelogEntry](#changelogentry)
@@ -39,11 +41,12 @@ latest-milestone: "v0.1"
 ## Summary
 
 This is the technical design for [Platform Feedback][product], which covers
-the product behaviour. It describes how the service is built: an
-aggregated API server under Milo (`feedback.miloapis.com`) that syncs
-public roadmap issues, milestones and changelog discussions from GitHub,
-stores votes and submissions tied to Milo users, and serves the website,
-cloud portal, datumctl, Patch and staff portal through one API.
+the product behaviour. It describes how the service is built: CRDs in
+Milo (`feedback.miloapis.com`) and an operator, like billing and
+service-catalog. It syncs public roadmap issues, milestones and changelog
+discussions from GitHub, stores votes and submissions tied to Milo users,
+and serves the website, cloud portal, datumctl, Patch and staff portal
+through Milo's API.
 
 Tracking issue: [datum-cloud/enhancements#889][issue].
 
@@ -72,87 +75,111 @@ These shape most of the design:
 
 ## Architecture
 
-![Feedback service architecture: clients, Milo, feedback-sync and feedback-controller writing through the Feedback API, Postgres, search service, GitHub orgs, AI gateway, email](./diagrams/architecture.svg)
+![Feedback service architecture: clients and feedback-sync writing to feedback CRDs in Milo, feedback-operator watching Milo and serving its webhooks, feedback-uploads, search service, GitHub orgs, AI gateway, fraud service, email](./diagrams/architecture.svg)
 
 *System context. The editable sources for every diagram in this document
 are the `.excalidraw` files in [`diagrams/`](./diagrams).*
 
-The service follows the `activity` and `search` pattern: an aggregated API
-server registered with Milo through an `APIService`, with custom storage.
+The service follows the billing and service-catalog pattern: CRDs
+installed in Milo, an operator that reconciles them, and admission
+webhooks for the rules CRD validation can't express. Every resource is
+stored in Milo's etcd.
 
 | Component | Responsibility |
 | --- | --- |
-| **feedback-apiserver** | Serves `feedback.miloapis.com/v1alpha1`. `FeedbackSource` uses the standard etcd registry; everything else uses custom `rest.Storage` backed by Postgres. The only component that connects to Postgres. |
+| **feedback-operator** | Reconciles feedback resources in Milo: vote totals and trending scores, follows created by votes, review outcomes, merges, submissions moved to the security track, security acknowledgements, delivery tracking events and digest emails. Serves the admission webhooks Milo calls for feedback resources. |
 | **feedback-webhook** | Public HTTPS endpoint for GitHub App webhooks. Verifies `X-Hub-Signature-256`, drops events for private repos, publishes to NATS JetStream. No other processing. |
-| **feedback-sync** | Consumes webhook events and runs periodic GraphQL reconciliation. Creates and updates posts, releases and changelog entries through the Feedback API. The only component with GitHub write access: creates approved issues and mirrors vote totals. |
-| **feedback-controller** | Runs submission triage, applies review outcomes, queues delivery tracking events, and builds digest emails. Writes its results through the Feedback API. |
+| **feedback-sync** | Consumes webhook events and runs periodic GraphQL reconciliation. Creates and updates posts, releases and changelog entries in Milo. The only component with GitHub write access: creates approved issues and mirrors vote totals. |
+| **feedback-uploads** | Public HTTPS endpoint for submission and security report attachments. Authenticates callers against Milo, stores files in private object storage, and serves them back only to their owner and staff. |
 | **feedback-mcp** | MCP server exposing feedback tools to Patch. |
 
 Backing services:
 
-- **Postgres + pgvector** for posts, votes, submissions, subscriptions,
-  releases and changelog entries. Similarity search uses pgvector
-  embeddings.
+- **Milo** for every feedback resource, audit, authorization and watch.
 - **Search service** ([`milo-os/search`][search]) for keyword search over
   posts, releases and changelog entries, indexed from the audit log like
-  any other platform resource.
+  any other platform resource. It also finds similar posts while people
+  write feedback.
 - **NATS JetStream** to buffer webhook events.
-- **Internal AI gateway** for embeddings and triage drafts.
+- **Internal AI gateway** for triage drafts.
 - **Object storage** for private attachments.
 - **Milo `Email` resources** for digest emails.
 
-**Identity.** User identity reaches the apiserver the same way it reaches
-`activity`: Milo authenticates the request and passes the scope in user
-extras (`iam.miloapis.com/parent-type`, `parent-name`). User-owned resources
-are keyed by the Milo user UID.
+**Identity.** Milo authenticates every request and passes the caller's
+context in user extras (`iam.miloapis.com/parent-type`, `parent-name`).
+User-owned resources carry the owner in `spec.userRef.name`, set by the
+admission webhook from the request and immutable after that.
 
-**Writes go through the API.** Every write, including those from
-`feedback-sync` and `feedback-controller`, is a request to the Feedback API.
-No component other than the apiserver writes to Postgres. That puts every
-change in the audit log, lets the search service index feedback resources,
-and keeps authorization in one place.
+**Writes go through Milo.** Every write, including those from
+`feedback-sync`, `feedback-operator` and `feedback-uploads`, is a request
+to Milo. That puts every change in the audit log, lets the search service
+index feedback resources, and keeps authorization in one place.
 
-**Audit.** `feedback-apiserver` runs its own audit backend and logs writes
-at `RequestResponse`. Milo can't do this for it: request and response
-bodies are recorded by the handlers in the server that owns the resource,
-and Milo's aggregator only proxies the request, so its events for
-`feedback.miloapis.com` carry metadata only. The search indexer skips
-events with no `responseObject`. The apiserver uses the generic apiserver
-`--audit-policy-file` and `--audit-webhook-config-file` options and sends
-to the same Vector webhook in `activity-system` as Milo, so its events
-reach the audit log, activity and search the same way. `Submission` and
-`SecurityReport` are logged at `Metadata` only, so private context and
+**Audit.** Milo audits feedback resources like any other CRD. A Milo audit
+policy rule logs `Submission`, `SubmissionReview`, `SecurityReport` and
+`SecurityReportTriage` at `Metadata` only, so private context and
 vulnerability details never reach the audit log, activity or search.
+Everything else is logged at `RequestResponse`, which the search indexer
+needs.
+
+**User-owned resources.** Milo stores resources a user owns in one
+collection for the whole platform; only projects get their own storage.
+Authorization can say whether a user may list votes in their own context,
+but not which votes come back. Milo already handles this for contacts and
+invitations with one hard-coded request filter per resource. Feedback adds
+a generic version to Milo, driven by annotations on the CRD:
+
+- `iam.miloapis.com/owner-field: spec.userRef.name`. In the user context,
+  Milo adds `spec.userRef.name=<user>` to every list and watch, replacing
+  any value the client sent, and answers `get`, `update`, `patch` and
+  `delete` on another user's object with `NotFound`.
+- `iam.miloapis.com/hidden-field: spec.hidden` and
+  `iam.miloapis.com/hidden-subresource: hidden`. Milo adds
+  `spec.hidden=false` to every list and watch, and answers `get` on a
+  hidden object with `NotFound`, unless the caller is allowed `get` on the
+  `hidden` subresource.
+
+Both fields are CRD `selectableFields`, so etcd filters on them like
+`metadata.name`. The filter keeps the operator of every other term the
+client sent. Later services can use the same annotations instead of adding
+filters to Milo.
 
 **API contexts.**
 
-| Resource | Platform context (staff) | Platform context (`feedback-sync`) | User context | Storage |
-| --- | --- | --- | --- | --- |
-| `FeedbackSource` | read/write | read | none | etcd |
-| `Post` | read, hide/unhide | create, update, delete, update `status` | read | Postgres |
-| `PostQuery` | create | none | create | not stored |
-| `Release`, `ChangelogEntry` | read | create, update, delete, update `status` | read | Postgres |
-| `Vote` | list all | none | CRUD own | Postgres |
-| `Submission` | list all, review | read, update `status.postRef` | create, read own | Postgres |
-| `SecurityReport` | Security Team only: list all, triage | none | create, read own | Postgres |
-| `SecurityAcknowledgement` | read | none | read | Postgres (view) |
-| `Subscription` | list all | none | CRUD own | Postgres |
+| Resource | Platform context (staff) | Platform context (service accounts) | User context |
+| --- | --- | --- | --- |
+| `FeedbackSource` | read/write | `feedback-sync`: read | none |
+| `Post` | read, hide/unhide | `feedback-sync`: create, update, delete, apply `status`; `feedback-operator`: apply `status` | read, hidden posts filtered |
+| `Release`, `ChangelogEntry` | read | `feedback-sync`: create, update, delete, apply `status` | read |
+| `Vote`, `Subscription` | list all | `feedback-operator`: create, delete | create, read, delete own |
+| `Submission` | list all | `feedback-operator`: update `status`; `feedback-uploads`: read | create, read own |
+| `SubmissionReview` | read/write | `feedback-operator`: read, update `status` | none |
+| `SecurityReport` | Security Team only: list all, update `status` | `feedback-operator`: create, update `status`; `feedback-uploads`: read | create, read own |
+| `SecurityReportTriage` | Security Team only | none | none |
+| `SecurityAcknowledgement` | read | `feedback-operator`: create, update, delete | read |
+| `FeedbackProfile` | read | `feedback-operator`: read | create, read, update own |
+| `FeedbackDigest` | read | `feedback-operator`: read/write | none |
 
 `Post`, `Release` and `ChangelogEntry` are readable by any authenticated
 principal, including the datum.net service account. Their GitHub-derived
-fields live in `status` and can only be written by the `feedback-sync`
-service account; staff can only patch `spec.hidden`.
+fields live in `status` and can only be written by `feedback-sync`; staff
+can only patch `spec.hidden`. `feedback-sync` and `feedback-operator` both
+write `Post` status with server-side apply under their own field managers:
+sync owns the GitHub fields, the operator owns `votes` and `delivery`.
 
-`feedback-controller` runs as its own service account with `update` on the
-`status` subresources it owns: `Submission` triage and `Post` delivery
-tracking.
+**Side effects are reconciled.** A request writes one object, and the
+operator makes everything that follows from it true shortly after:
 
-Side effects of a request are written by the apiserver in the same
-transaction, so they are covered by that request's audit entry: the
-`Subscription` created with a `Vote`, the submitter's `Vote` and
-`Subscription` when a review approves or merges, and recomputed
-`votes.total` and `trendingScore`. Embeddings and the hourly trending
-refresh are internal to the apiserver and only touch derived data.
+- A new `Vote` gets the voter a `Subscription`, and the post's
+  `votes.total` and `trendingScore` are recomputed.
+- An approve or merge decision on a `SubmissionReview` gets the submitter
+  a `Vote` and a `Subscription`.
+- A post merged into another has its votes moved to the target.
+
+Every step is idempotent and keyed on deterministic names, so a crash or
+retry never duplicates a vote or a follow. Vote totals lag the vote by
+the operator's reconcile time, normally under a second. The operator's own
+writes are audited under its service account.
 
 [search]: https://github.com/milo-os/search
 
@@ -236,8 +263,13 @@ apiVersion: feedback.miloapis.com/v1alpha1
 kind: Post
 metadata:
   name: datum-cloud.enhancements.912
+  labels:                    # for label selectors; set by sync and the operator
+    feedback.miloapis.com/org: datum-cloud
+    feedback.miloapis.com/status: in-progress
+    feedback.miloapis.com/stage: picked-up
+    category.feedback.miloapis.com/build: ""
 spec:
-  hidden: false              # staff-only toggle
+  hidden: false              # staff-only toggle, a selectable field
 status:
   title: Bare Metal Infrastructure service
   summary: Expands Datum's platform to support full lifecycle management ...
@@ -288,66 +320,38 @@ status:
   lastSyncedAt: "2026-10-08T12:00:00Z"
 ```
 
-### PostQuery
+### Listing and searching posts
 
-A create-to-query resource like `ActivityQuery` and `ResourceSearchQuery`.
-It is not persisted; `status` carries results and facets.
+There is no query resource. Clients list `Post`s from Milo and search
+through the search service.
 
-```yaml
-apiVersion: feedback.miloapis.com/v1alpha1
-kind: PostQuery
-spec:
-  text: wildcard hostnames         # keyword search, optional
-  similarTo: |                     # draft feedback text, optional
-    I want to route *.example.com to one ALB
-  filter:
-    status: [planning, on-deck, in-progress]
-    categories: [deliver]
-    orgs: [datum-cloud, milo-os]
-    votedByMe: false               # user context only
-    followedByMe: false            # user context only, for My feedback
-    deliveryStage: []              # requested | planned | picked-up | released | closed
-  sort: top                        # top | newest | trending | relevance | recentlyChanged
-  limit: 20
-  continue: ""
-  facets: [status, categories]
-status:
-  results:
-    - name: datum-cloud.enhancements.913
-      title: Wildcard hostnames on ALBs
-      status: on-deck
-      categories: [deliver]
-      votes: {total: 12}
-      votedByMe: true
-      score: 0.91                  # relevance or similarity, when used
-  facets:
-    status: {none: 40, backlog: 85, planning: 12, on-deck: 6, in-progress: 9}
-    categories: {build: 30, deliver: 41, connect: 22, platform: 18}
-  continue: "eyJvZmZzZXQiOjIwfQ"
-```
-
-Sorts:
-
-- `top`: `votes.total` descending.
-- `newest`: GitHub `createdAt` descending.
-- `trending`: vote weights with a 7-day half-life, `Σ 0.5^(age_days / 7)`,
-  over Datum votes and GitHub reactions. Updated on vote write and
-  refreshed hourly.
-- `relevance`: default when `text` or `similarTo` is set.
-- `recentlyChanged`: latest `delivery.history` entry first. Used by My
-  feedback.
-
-`text` is answered by the search service. The apiserver runs a
-`ResourceSearchQuery` against the posts index with its own service
-account, then applies the filters and `votedByMe`/`followedByMe` in
-Postgres and keeps search's ranking for `relevance`. Vote, follow and
-delivery state stay in Postgres because search can't filter or sort on
-them.
-
-`similarTo` embeds the text through the AI gateway and runs a pgvector
-nearest-neighbour search. The search service has no vector search, so this
-stays in Postgres. It drives the "similar feedback" list and the duplicate
-checks in datumctl and Patch.
+- **Filters** are label selectors: `feedback.miloapis.com/status`,
+  `feedback.miloapis.com/org`, `feedback.miloapis.com/stage` and one
+  `category.feedback.miloapis.com/<category>` label per category. Milo
+  removes hidden posts from every list (see
+  [Architecture](#architecture)).
+- **Sorts and counts** are done by the client. There are about 1,700 open
+  issues across both orgs, not all of which become posts, so the
+  datum.net and cloud portal servers keep the full list in a 60-second
+  cache and sort and count it in memory. datumctl lists with label
+  selectors and sorts locally.
+  - `top`: `votes.total` descending.
+  - `newest`: GitHub `createdAt` descending.
+  - `trending`: `votes.trendingScore` descending. The score weights votes
+    with a 7-day half-life, `Σ 0.5^(age_days / 7)`, over Datum votes and
+    GitHub reactions. The operator updates it when votes change and
+    refreshes it hourly.
+  - `recentlyChanged`: latest `delivery.history` entry first. Used by My
+    feedback.
+- **Voted and followed** state comes from listing the caller's own `Vote`s
+  and `Subscription`s in the user context, which Milo limits to the
+  caller.
+- **Keyword search** is a `ResourceSearchQuery` against the posts index,
+  made with the caller's own credentials, ranked by the search service.
+- **Similar posts** while someone writes feedback are the same query with
+  the draft title and the start of the body as the text. It is keyword
+  matching, not semantic similarity. It drives the "similar feedback" list
+  and the duplicate checks in datumctl and Patch.
 
 **Search index.** A `ResourceIndexPolicy` per kind indexes `Post`,
 `Release` and `ChangelogEntry`: title, summary or body text, categories,
@@ -356,30 +360,45 @@ are not indexed, since they change as side effects and would go stale in
 the index. Hidden posts are excluded by the policy's CEL condition. This
 also makes feedback findable through platform search.
 
+<<[UNRESOLVED post list size]>>
+A full post list with `bodyHTML` is several megabytes. That is fine for
+the datum.net and portal servers' caches, but too much for a browser or a
+default `datumctl` call, and Kubernetes lists can't leave fields out.
+Either move `bodyHTML` to a separate `PostBody` kind fetched one post at a
+time, or accept the size because only servers list every post.
+<<[/UNRESOLVED]>>
+
 ### Vote
 
-User context. The name is the post name, so a user can only vote once per
-post. Deleting it removes the vote.
+Created in the user context. Every user's votes share one collection, so
+the name is the post name and the voter's user ID, which makes it one vote
+per user per post. The admission webhook checks the name and sets
+`spec.userRef` from the request. Deleting the vote removes it.
 
 ```yaml
 apiVersion: feedback.miloapis.com/v1alpha1
 kind: Vote
 metadata:
-  name: datum-cloud.enhancements.912
+  name: datum-cloud.enhancements.912.312983457298312345
 spec:
   postRef:
     name: datum-cloud.enhancements.912
+  userRef:
+    name: "312983457298312345"   # set by the webhook, selectable field
   source: website            # website | portal | datumctl | patch
 status:
-  createdAt: "2026-10-08T12:05:00Z"
   organizations: [acme-corp] # recorded for staff analytics, never public
+  githubLogin: ada           # linked GitHub username, for dedupe
 ```
 
-Creating a `Vote` also creates a `Subscription` to the post.
+The operator follows the post for the voter and recomputes the post's
+totals.
 
 ### Submission
 
-User context for the submitter, Platform context for staff.
+Created and read in the user context by the submitter. Staff read all
+submissions in the platform context. It holds only what the submitter may
+see; triage and the staff decision live on its `SubmissionReview`.
 
 ```yaml
 apiVersion: feedback.miloapis.com/v1alpha1
@@ -387,6 +406,8 @@ kind: Submission
 metadata:
   name: sub-7f3k2
 spec:
+  userRef:
+    name: "312983457298312345"
   kind: idea                  # idea | bug | other
   title: Let me pick the region for Galactic VPC attachments
   body: |
@@ -394,7 +415,7 @@ spec:
   attachments:
     - name: screenshot.png
       contentType: image/png
-      uploadRef: att-91ac      # uploaded through the attachments subresource
+      uploadRef: att-91ac      # returned by feedback-uploads
   context:                     # private, never sent to GitHub
     client: portal             # website | portal | datumctl | patch
     pageURL: https://cloud.datum.net/org/acme/projects/web/vpc
@@ -402,38 +423,54 @@ spec:
     project: web
     requestIDs: [req-01HZX...]
     clientVersion: cloud-portal@2026.10.1
-status:
+status:                        # written by the operator
   phase: PendingReview        # PendingReview | Approved | Merged | Rejected
-  triage:                     # advisory, written by the controller
-    suggestedCategories: [connect]
-    suggestedKind: idea
-    similarPosts:
-      - name: datum-cloud.enhancements.840
-        score: 0.88
-    draftIssue:
-      title: Region selection for Galactic VPC attachments
-      body: "### Summary\n..."
-    fraudScore: 0.02
-  review:                     # written through the review subresource
-    reviewer: staff:jdoe@datum.net
-    decision: Approved        # Approved | Merged | Rejected
-    reviewedAt: "2026-10-09T10:00:00Z"
-    publicTitle: Region selection for Galactic VPC attachments
-    publicBody: "..."         # staff-edited, what goes to GitHub
-    mergedInto: ""            # post name when decision is Merged
-    reason: ""                # shown to submitter when Rejected
+  reason: ""                  # shown to the submitter when Rejected
   postRef:
     name: datum-cloud.enhancements.931
 ```
 
-Submitters can read their own `phase`, `postRef` and rejection `reason`.
-They cannot read `triage`, `fraudScore` or the reviewer.
+### SubmissionReview
+
+Staff only. One per submission, with the same name, created by the
+operator when the submission arrives. Staff write the decision in `spec`;
+the operator writes triage to `status` and applies the decision to the
+`Submission`.
+
+```yaml
+apiVersion: feedback.miloapis.com/v1alpha1
+kind: SubmissionReview
+metadata:
+  name: sub-7f3k2
+spec:
+  decision: Approved          # "" | Approved | Merged | Rejected | MoveToSecurity
+  publicTitle: Region selection for Galactic VPC attachments
+  publicBody: "..."           # staff-edited, what goes to GitHub
+  mergedInto: ""              # post name when decision is Merged
+  reason: ""                  # shown to the submitter when Rejected
+  affected: ""                # for MoveToSecurity
+status:
+  reviewer: staff:jdoe@datum.net   # set by the webhook from the request
+  reviewedAt: "2026-10-09T10:00:00Z"
+  triage:                     # advisory, written by the operator
+    suggestedCategories: [connect]
+    suggestedKind: idea
+    similarPosts:
+      - name: datum-cloud.enhancements.840
+    draftIssue:
+      title: Region selection for Galactic VPC attachments
+      body: "### Summary\n..."
+    fraudScore: 0.02
+```
+
+A decision can't change once it's set.
 
 ### SecurityReport
 
 A private vulnerability report. It is a separate resource from
 `Submission` so it can have its own role: only the Security Team can list
 or triage reports, and general feedback reviewers can't see them.
+Reporters create and read their own in the user context.
 
 ```yaml
 apiVersion: feedback.miloapis.com/v1alpha1
@@ -441,6 +478,8 @@ kind: SecurityReport
 metadata:
   name: sec-4m8q1
 spec:
+  userRef:                      # empty for reports logged for external reporters
+    name: "312983457298312345"
   title: Project viewer can read connector credentials
   description: |
     A user with the viewer role on a project can ...
@@ -464,12 +503,12 @@ spec:
     filedByAgent: true
     organization: acme-corp
     clientVersion: patch@2026.10.2
-status:
+status:                         # Security Team; the reporter can read it
   phase: Triaged                # Received | Triaged | Fixing | Fixed | Disclosed | NotApplicable | Duplicate
   severity: high                # critical | high | medium | low | informational
   cvssVector: "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
   reason: ""                    # shown to the reporter for NotApplicable and Duplicate
-  timeline:                     # reporter-visible
+  timeline:
     - {phase: Received, at: "2026-10-27T09:12:00Z"}
     - {phase: Triaged, at: "2026-10-27T15:40:00Z", note: Confirmed, fix in progress soon}
   advisory:
@@ -480,28 +519,41 @@ status:
     amount: "250.00"
     creditGrantRef: {name: security-sec-4m8q1}   # billing CreditGrant
     grantedAt: "2026-11-04T10:00:00Z"
-  internal:                     # Security Team only
-    assignee: staff:jdoe@datum.net
-    duplicateOf: ""
-    tracking: ""                # private issue or draft advisory
-    notes: "..."
 ```
 
-Reporters can read their own report except `status.internal`.
+### SecurityReportTriage
+
+Security Team only, with the same name as its report. It holds what the
+reporter must not see, which a field on the report can't hide.
+
+```yaml
+apiVersion: feedback.miloapis.com/v1alpha1
+kind: SecurityReportTriage
+metadata:
+  name: sec-4m8q1
+spec:
+  assignee: staff:jdoe@datum.net
+  duplicateOf: ""
+  tracking: ""                  # private issue or draft advisory
+  notes: "..."
+```
 
 ### Subscription
 
-Links a user to a post they follow. Created when a user votes or when their
-submission is approved or merged; users can delete it.
+Links a user to a post they follow. The operator creates one when a user
+votes or when their submission is approved or merged; users can create and
+delete their own. Named like a `Vote`.
 
 ```yaml
 apiVersion: feedback.miloapis.com/v1alpha1
 kind: Subscription
 metadata:
-  name: datum-cloud.enhancements.912
+  name: datum-cloud.enhancements.912.312983457298312345
 spec:
   postRef:
     name: datum-cloud.enhancements.912
+  userRef:
+    name: "312983457298312345"
   reason: voted               # voted | submitted | merged | manual
 ```
 
@@ -566,10 +618,9 @@ status:
 
 ## GitHub Sync
 
-![GitHub sync: webhooks and periodic reconciliation writing through the Feedback API](./diagrams/github-sync.svg)
+![GitHub sync: webhooks and periodic reconciliation writing to Milo](./diagrams/github-sync.svg)
 
-*Webhook and reconcile paths share the same write path through the
-Feedback API.*
+*Webhook and reconcile paths share the same write path to Milo.*
 
 **GitHub App.** One app, "Datum Feedback", installed on `datum-cloud` and
 `milo-os`. Permissions:
@@ -595,11 +646,12 @@ trusting the webhook payload. That keeps one code path for webhooks and
 reconciliation and picks up fields payloads lack (project Status, issue
 type, `bodyHTML`). It then applies the source's include/exclude rules, maps
 status and categories, sanitises HTML, and writes the result through the
-Feedback API: `create` for a new item, otherwise an `update` of the `status`
-subresource, skipped when nothing changed. The apiserver re-embeds the post
-in the background when the title or body changed. If an item no longer matches (label removed, repo
-private, issue deleted) the sync worker deletes the `Post` and its votes
-are kept for 30 days in case it returns.
+Milo: `create` for a new item, otherwise a server-side apply of its
+labels and `status` under the `feedback-sync` field manager, skipped when
+nothing changed. If an item no longer matches (label removed, repo
+private, issue deleted) the sync worker deletes the `Post`. Its votes are
+kept for 30 days in case it returns; the operator deletes them after
+that.
 
 **Reconciliation.**
 
@@ -661,11 +713,17 @@ Matching is by login, so it misses people without a linked account and
 people who renamed their GitHub account. Both are counted twice; the
 product decision accepts this.
 
-- Votes require a signed-in user with a verified email.
-- Votes on a post merged into another move to the target post.
+- Votes require a signed-in user with a verified email. The admission
+  webhook reads `emailVerified` from the request's user extras.
+- The operator counts a post's votes from its watch cache, indexed by
+  `spec.postRef.name`, and applies `votes` to the post's status. The
+  number on screen catches up within about a second of a vote.
+- Votes on a post merged into another move to the target post: the
+  operator creates the voter's vote on the target, unless they already
+  have one, then deletes the old vote.
 - **Public voter avatars** are opt-in per user (`showPublicVotes`), stored on
   Milo's `UserPreference` if it can carry service settings, otherwise on a
-  `FeedbackProfile` in the User context. Changing it applies to past votes.
+  user-owned `FeedbackProfile`. Changing it applies to past votes.
 
 ## Submissions and Staff Review
 
@@ -673,30 +731,46 @@ product decision accepts this.
 
 *Every submission waits for a staff decision.*
 
-1. **Draft.** The client calls `PostQuery` with `similarTo` as the user types
-   (debounced) and shows similar items.
-2. **Submit.** The client uploads attachments to the
-   `submissions/attachments` subresource (size and type limits enforced,
-   stored in private object storage), then creates the `Submission`
-   referencing them. Clients fill `context` where they can. Rate limit:
-   start with the website route's 5 per 10 minutes per user.
-3. **Triage.** The controller fills `status.triage`: similar posts, suggested
-   kind and categories, a draft public title and body with private details
+1. **Draft.** As the user types (debounced), the client runs a keyword
+   search for similar posts (see
+   [Listing and searching posts](#listing-and-searching-posts)) and shows
+   them.
+2. **Submit.** The client uploads attachments to `feedback-uploads`, then
+   creates the `Submission` referencing them. Clients fill `context` where
+   they can. The admission webhook checks the email is verified, that every
+   `uploadRef` is one of the caller's recent uploads, and the rate limit:
+   start with the website route's 5 per 10 minutes per user, counted from
+   the operator's watch cache.
+3. **Triage.** The operator creates the `SubmissionReview` and fills its
+   `status.triage`: similar posts from the search service, suggested kind
+   and categories, a draft public title and body with private details
    stripped (via the AI gateway), and a fraud score from the fraud service.
    Advisory only.
-4. **Review.** Staff work the queue in the staff portal and write a decision
-   through the `submissions/review` subresource, which is only authorised in
-   the Platform context. Patch, the controller and users can't approve.
+4. **Review.** Staff work the queue in the staff portal and set
+   `spec.decision` on the `SubmissionReview`, which only staff can write.
+   Patch, the operator and users can't approve.
    - **Approve**: staff edit `publicTitle`/`publicBody` (defaulting to the
      triage draft). The sync worker creates an issue in
      `datum-cloud/enhancements` with issue type `Feedback`, adds it to the
-     Enhancements project with no Status, and sets `status.postRef` once the
-     `Post` syncs. The submitter gets a `Vote` and `Subscription`.
+     Enhancements project with no Status, and the operator sets the
+     submission's `status.postRef` once the `Post` syncs. The submitter
+     gets a `Vote` and `Subscription`.
    - **Merge**: staff pick an existing post. The submitter gets a `Vote` (if
      they don't have one) and a `Subscription`. The submission keeps its
      private context so staff can see everyone who asked.
    - **Reject**: staff give a reason, which the submitter sees.
+   - **Move to security**: see [Security Reports](#security-reports).
 5. **Notify.** The outcome is queued for the submitter's next digest.
+
+**Attachments.** CRDs can't take file uploads, so `feedback-uploads`
+handles them. It authenticates the caller with a Milo `TokenReview`,
+enforces size and type limits, and stores the file in private object
+storage under the caller's user ID, returning an `uploadRef`. Uploads
+not referenced within a day are deleted by a bucket lifecycle rule.
+Downloads go through the same service, which serves a file only when a
+Milo `SubjectAccessReview` shows the caller can `get` the submission or
+report that references it. Milo's owner filter makes that true only for
+the owner and staff.
 
 The GitHub issue body never contains the submitter's identity, org, project,
 logs or attachments. A footer links to the submission in the staff portal,
@@ -711,18 +785,18 @@ which only staff can open.
 Security reports use the same API and clients as feedback, with a separate
 resource, role and queue.
 
-1. **Report.** The client uploads attachments to the
-   `securityreports/attachments` subresource, then creates the
-   `SecurityReport`. There is no `similarTo` step: reports are never matched
-   against posts or shown to anyone but the reporter and the Security Team.
-2. **Acknowledge.** On create the controller emails `security@datum.net`
+1. **Report.** The client uploads attachments to `feedback-uploads`, then
+   creates the `SecurityReport`. There is no similar-posts step: reports
+   are never matched against posts or shown to anyone but the reporter and
+   the Security Team.
+2. **Acknowledge.** On create the operator emails `security@datum.net`
    with a link to the report in the staff portal (never its contents), and
    emails the reporter that it was received.
 3. **Triage and fix.** The Security Team works the queue in the staff
    portal and moves the report through its phases by updating `status`,
    which only their role can write. The fix itself is tracked wherever the
    Security Team chooses, usually a private repo or a GitHub draft
-   security advisory; the report keeps a link in `status.internal`.
+   security advisory; its `SecurityReportTriage` keeps a link.
 4. **Update.** Every phase change emails the reporter straight away, not
    through the daily digest, with the phase and the timeline note.
 5. **Disclose.** When an advisory is published the team sets
@@ -735,10 +809,12 @@ Security Team logs those reports as a `SecurityReport` with
 external reporters go to `spec.reporter.email`.
 
 **Misfiled reports.** If a `Submission` turns out to be a security issue,
-staff move it with the `submissions/to-security-report` subresource. The
-apiserver creates a `SecurityReport` from it, moves its attachments, and
-deletes the submission in one transaction, so it leaves the feedback queue.
-The submission triage prompt flags likely security issues for this.
+staff set the decision `MoveToSecurity` on its `SubmissionReview`. The
+operator creates a `SecurityReport` owned by the submitter, named after
+the submission so a retry finds it, copies the attachments to the security
+prefix, then deletes the submission and its review, so it leaves the
+feedback queue. The submission triage prompt flags likely security issues
+for this.
 
 **Rewards.** The Security Team records the reward on `status.reward`.
 Credits are a billing `CreditGrant` (reason `Goodwill`) on the billing
@@ -747,15 +823,17 @@ member granting it and referenced from the report. Swag and thanks are
 recorded only.
 
 **Acknowledgements.** Reports in `Fixed` or `Disclosed` whose reporter
-chose `credit.public` appear as `SecurityAcknowledgement`: a read-only view
-holding only the credited name, link, month and severity. The datum.net
+chose `credit.public` get a `SecurityAcknowledgement`, which the operator
+creates and keeps in step with the report. It holds only the credited
+name, link, month and severity. The datum.net
 service account reads it for the acknowledgements page; nothing else from
 the report is readable outside the Security Team and the reporter.
 
-**What reports skip.** Reports are never synced to GitHub, embedded, sent
-to the AI gateway, indexed by search, or written to the audit log beyond
-metadata. Their attachments are stored under a separate prefix readable
-only by the apiserver on behalf of the reporter and the Security Team.
+**What reports skip.** Reports are never synced to GitHub, sent to the AI
+gateway, indexed by search, or written to the audit log beyond metadata.
+Their attachments are stored under a separate prefix that only
+`feedback-uploads` can read, and it serves them only to the reporter and
+the Security Team.
 
 ## Delivery Tracking
 
@@ -802,7 +880,7 @@ both orgs would cost far more GitHub API calls than the extra freshness is
 worth, since followers hear about changes in a daily digest anyway.
 
 **Notify once.** `delivery.highestNotified` records the highest stage
-announced for the post. When the derived stage is past it, the controller
+announced for the post. When the derived stage is past it, the operator
 queues a digest event for every follower and advances `highestNotified`.
 If the stage goes backwards (work paused, issue reopened), the tracker and
 `history` show it, but nothing is queued until the stage passes
@@ -810,27 +888,30 @@ If the stage goes backwards (work paused, issue reopened), the tracker and
 `released`.
 
 **Part shipped.** When a `ChangelogEntry` links a work item rather than the
-post, and the post isn't `released`, the controller queues a `part-shipped`
+post, and the post isn't `released`, the operator queues a `part-shipped`
 event once per changelog entry and records it in `work.partShipped`.
 
 **My feedback.** Clients build the list from two calls:
 
-- a `PostQuery` with `followedByMe: true` and `sort: recentlyChanged`;
+- the user's `Subscription`s, joined to the cached post list and sorted
+  by `recentlyChanged`;
 - the user's `Submission`s still in `PendingReview`, which aren't posts yet.
 
 ## Notifications
 
 Followers get a **daily digest**, not one email per change.
 
-- The controller appends events to each follower's pending queue in
-  Postgres: `picked-up`, `part-shipped`, `released` and `closed` from
-  delivery tracking, plus submission outcomes (`approved`, `merged`,
-  `rejected`) for the submitter.
-- Once a day the controller collapses each user's queue (one line per post,
+- The operator appends events to each follower's `FeedbackDigest`, one
+  per user and readable only by staff and the operator: `picked-up`,
+  `part-shipped`, `released` and `closed` from delivery tracking, plus
+  submission outcomes (`approved`, `merged`, `rejected`) for the
+  submitter. A digest holds at most one line per post, so it stays small.
+- Once a day the operator collapses each user's queue (one line per post,
   latest event wins) and creates a single Milo `Email` from a feedback
   `EmailTemplate` (see [email
   integration](../../../enhancements/platform/email-integration/simple-email-sending/README.md)).
-  Users with an empty queue get nothing.
+  Users with an empty queue get nothing. The operator clears each digest
+  once its `Email` is created.
 - Moving into `planned`, edits, label changes and comments are never queued.
 - Followers only get events raised after they started following; someone
   who votes on an item that's already picked up just sees the tracker.
@@ -838,13 +919,14 @@ Followers get a **daily digest**, not one email per change.
   globally.
 
 The send time is fixed at first (one UTC hour, configured on the
-controller). Per-user send times can come later.
+operator). Per-user send times can come later.
 
 ## Clients
 
-**datum.net.** The website server reads `Post`, `PostQuery`, `Release` and
-`ChangelogEntry` with a Milo service account and a 60-second in-process
-cache. User actions go through the cloud portal's existing website routes,
+**datum.net.** The website server lists `Post`, `Release` and
+`ChangelogEntry` with a Milo service account and keeps them in a
+60-second in-process cache, which it sorts, filters and counts for each
+page. Keyword search goes to the search service. User actions go through the cloud portal's existing website routes,
 which already handle session, CORS and rate limiting:
 
 - `POST /api/website/feedback` creates a `Submission` (replacing today's log
@@ -867,7 +949,8 @@ Once migrated, `src/libs/githubRoadmap.ts`, the GitHub parts of
 cache and the GitHub App credentials are removed from datum.net.
 
 **Cloud portal.** A feedback panel on every page, plus browse and vote
-views. It calls Milo with the user's token in the User context
+views. Its server caches the post list like datum.net does. It calls
+Milo with the user's token in the User context
 (`/apis/iam.miloapis.com/v1alpha1/users/{id}/control-plane`) through a
 generated SDK under `app/modules/control-plane/feedback`, and fills
 `Submission.spec.context` with org, project, route, recent request IDs and
@@ -888,14 +971,14 @@ datumctl security reports
 ```
 
 `mine` lists submissions under review and every followed post with its
-delivery stage and last change. `submit` runs a `similarTo` query first and
-asks whether a match covers it.
+delivery stage and last change. `submit` searches for similar posts first
+and asks whether a match covers it.
 Context includes the datumctl version and active org and project.
 `security report` skips the similar-items check and marks the report as
 agent-filed when datumctl runs non-interactively.
 
-**Patch.** `feedback-mcp` exposes `feedback__search` (including
-`similarTo`), `feedback__get`, `feedback__vote`, `feedback__unvote`,
+**Patch.** `feedback-mcp` exposes `feedback__search` (keyword search,
+also used to find similar posts before submitting), `feedback__get`, `feedback__vote`, `feedback__unvote`,
 `feedback__submit` (always confirmed by the user in chat) and
 `feedback__mine`, which answers "what's happening with my requests?" from
 the delivery tracker. It also exposes `security__report` and
@@ -916,11 +999,12 @@ separate and are not turned into submissions.
 
 ## Staff Analytics
 
-The staff portal reads `Vote`, `Submission` and `Post` in the Platform
-context for:
+The staff portal reads `Vote`, `Submission`, `SubmissionReview` and
+`Post` in the Platform context for:
 
 - the review queue;
-- per-post voters, their organizations and submission context;
+- per-post voters (votes listed with `spec.postRef.name` as a field
+  selector), their organizations and submission context;
 - top posts by number of distinct organizations;
 - per-organization view of everything voted on or submitted.
 
@@ -931,11 +1015,13 @@ context for:
 | Spam, abuse or PII reaching public GitHub | No auto-publish. Staff edit the public title and body before approval. Private context is never copied. Per-user rate limits; fraud score in the queue. |
 | Vote stuffing | One vote per Milo user per post; verified email required; analytics show voter distribution by org. |
 | Stored XSS from issue or discussion bodies | Server-side allow-list sanitisation; clients render only the sanitised HTML. |
-| Exposing something sensitive from a public repo | `feedback:hide` label, per-source repo allow and deny lists, staff `spec.hidden`. |
-| Leaking private attachments | Private bucket, served only through the apiserver to the submitter and staff. |
-| Approval bypass | Review subresource authorised only for staff in the Platform context. |
-| Vulnerability details leaking before a fix | Separate `SecurityReport` resource and role. Never synced, embedded, sent to the AI gateway or indexed; audited at metadata only; notification emails carry links, not contents; attachments readable only by the reporter and the Security Team. |
-| Security issue filed as public feedback | Every client offers the security track; triage flags likely security submissions; staff move them with `submissions/to-security-report` before any review. |
+| Exposing something sensitive from a public repo | `feedback:hide` label, per-source repo allow and deny lists, staff `spec.hidden`, which Milo's filter enforces on list, watch and get. |
+| One user reading another's votes, submissions or reports | Milo's owner filter limits lists and watches to the caller and answers named requests for other users' objects with `NotFound`; the webhook sets `spec.userRef` from the request and keeps it immutable. |
+| Leaking private attachments | Private bucket, served only by `feedback-uploads` to callers Milo says can read the referencing object. |
+| Approval bypass | `SubmissionReview` is writable only by staff in the Platform context. |
+| Staff-only detail reaching submitters or reporters | Triage, reviewer and internal notes live on `SubmissionReview` and `SecurityReportTriage`, which submitters and reporters can't read at all. |
+| Vulnerability details leaking before a fix | Separate `SecurityReport` resource and role. Never synced, sent to the AI gateway or indexed; audited at metadata only; notification emails carry links, not contents; attachments readable only by the reporter and the Security Team. |
+| Security issue filed as public feedback | Every client offers the security track; triage flags likely security submissions; staff move them with the `MoveToSecurity` decision before any review. |
 | Synced content changed outside GitHub | Create, update and delete on `Post`, `Release` and `ChangelogEntry` granted only to the `feedback-sync` service account. Staff can only patch `spec.hidden`. Every write is audited. |
 | GitHub rate limits | Installation tokens per org, GraphQL batching, incremental reconcile, 👍 sweep limited to open tracked posts. |
 
@@ -944,15 +1030,17 @@ context for:
 Matches the [product rollout][product]:
 
 1. **Read.** `FeedbackSource` for both orgs, GitHub App, webhook endpoint,
-   sync worker, `Post`, `PostQuery`, `Release`, `ChangelogEntry`, search
-   index policies. datum.net pages move to the service behind a flag, side
+   sync worker, `Post`, `Release`, `ChangelogEntry`, Milo's hidden-field
+   filter, search index policies. datum.net pages move to the service behind a flag, side
    by side with the old code, then its GitHub integration is removed.
-2. **Vote and track.** `Vote`, `Subscription`, 👍 sweep and dedupe, Votes
+2. **Vote and track.** Milo's owner filter, `Vote`, `Subscription`, 👍
+   sweep and dedupe, Votes
    field mirroring, website login gate, delivery tracking and work items,
    My feedback, daily digest, avatar opt-in.
-3. **Submit.** `Submission`, attachments, `similarTo`, triage, staff review
-   queue, issue creation on approval, website submit form.
-   `SecurityReport`, its queue and emails, `SecurityAcknowledgement`,
+3. **Submit.** `Submission`, `SubmissionReview`, `feedback-uploads`,
+   similar posts, triage, staff review queue, issue creation on approval, website submit form.
+   `SecurityReport`, `SecurityReportTriage`, its queue and emails,
+   `SecurityAcknowledgement`,
    `security.txt` and the disclosure policy pages.
 4. **Everywhere.** Portal panel, `datumctl feedback` and `datumctl security`,
    Patch MCP tools, staff analytics.
@@ -963,9 +1051,9 @@ Matches the [product rollout][product]:
 GitHub write-back (issue creation and Votes field) has its own flag on the
 sync worker. Votes and submissions are retained while clients are
 disabled. datum.net keeps its old GitHub credentials until phase 1 has been
-stable for two weeks, so rollback is a redeploy. Database migrations are
-forward-only and applied before the apiserver rolls out, as `activity`
-does.
+stable for two weeks, so rollback is a redeploy. CRDs are installed in
+Milo before the operator rolls out, and v1alpha1 changes stay
+backward-compatible within a release.
 
 **Monitoring.**
 
@@ -978,7 +1066,10 @@ does.
 - Digest events queued by type, and digest emails created and failed.
 - Delivery stage transitions per day, and posts whose work items failed to
   refresh.
-- API latency and errors per resource, especially `PostQuery`.
+- Operator reconcile latency and errors per kind, and the lag from a
+  `Vote` to the post's `votes.total`.
+- Admission webhook latency and rejections.
+- Uploads accepted, rejected (size or type) and failed.
 - Lag from a `Post` write to it appearing in the search index.
 
 Alerts: reconcile failing three runs in a row, rate limit under 10%, oldest
@@ -990,19 +1081,21 @@ pending submission older than five business days, a security report in
 | Dependency | If unavailable |
 | --- | --- |
 | GitHub API / webhooks | Data goes stale; reads keep working. |
-| Postgres + pgvector | Service unavailable. |
+| Milo | Service unavailable. |
+| feedback-operator | Its admission webhooks fail closed, so votes, submissions and reports are refused until it returns. Reads keep working. Totals, follows and outcomes catch up when it returns. |
 | NATS JetStream | Webhooks are lost; reconcile catches up. |
-| Search service | `PostQuery` with `text` fails; browsing, filters and `similarTo` keep working. |
-| AI gateway | `similarTo` falls back to keyword search; triage is empty. |
+| Search service | Keyword search and similar posts fail; browsing and filters keep working. |
+| AI gateway | Triage has no draft or suggestions. |
 | Milo email | Digests retry next run. |
-| Object storage | Submissions without attachments still work. |
+| Object storage or feedback-uploads | Submissions without attachments still work. |
 | Fraud service | Triage has no fraud score. |
 
 **Scalability.** About 1,700 open issues across both orgs today, not all of
-which become posts; votes and submissions are bounded by user count. One
-Postgres instance is enough for the foreseeable future. `similarTo` is the
-most expensive call (an embedding plus a vector search), so clients debounce
-it and the apiserver rate limits it per user. The GitHub GraphQL budget
+which become posts; votes and submissions are bounded by user count. That
+is well within what one etcd collection serves, and every list comes from
+Milo's watch cache. The operator holds votes and subscriptions in its
+cache to count them, which is a few megabytes at today's numbers. Similar
+posts is the most frequent search call, so clients debounce it. The GitHub GraphQL budget
 (at least 5,000 points per hour per installation) comfortably covers the
 reconcile and sweep schedule, including work items: only posts in `planned`
 or `picked-up` (tens, not hundreds) are swept for sub-issues and pull
@@ -1016,26 +1109,32 @@ requests.
 - GitHub's App settings show webhook delivery history and allow redelivery.
 - A missing post: check the source's include/exclude rules, the
   `feedback:hide` label, repo visibility and `spec.hidden`.
-
-<<[UNRESOLVED embedding model]>>
-Which embedding model and dimension the AI gateway will serve for this.
-Changing it later means re-embedding all posts, which is cheap at this size.
-<<[/UNRESOLVED]>>
+- A vote total that looks wrong: compare it with
+  `kubectl get votes --field-selector spec.postRef.name=<post>` in the
+  platform context and check the operator's reconcile errors.
 
 ## Alternatives
 
-**CRDs in etcd instead of an aggregated apiserver.** Fine for
-`FeedbackSource`, but keyword and similarity search, vote aggregation and
-trending sorts don't fit etcd and label selectors. Same reason `activity`
-and `search` use custom storage.
+**An aggregated apiserver backed by Postgres and pgvector**, like
+`activity` and `search`. The first version of this design, and partly
+built. It gives server-side sorting, facets, semantic similarity, writes
+that span several objects in one transaction, and per-caller views of one
+object. It costs a database to run, a storage layer to maintain, and no
+watch for the controllers, and it isn't how Datum's other CRUD services
+are built. At about 1,700 posts, sorting and counting in the clients is
+cheap, and keyword search covers similar posts well enough.
 
-**Sync workers write Postgres directly.** Simpler, but those writes would
-skip the audit log and the search indexer, and authorization would be split
-between the API and database credentials.
+**One Milo filter per resource**, like contacts and invitations. Works
+today without a generic mechanism, but needs five new hard-coded filters
+in Milo now and more for every later service.
 
-**Full-text search in Postgres (`tsvector`).** Keeps keyword and
-similarity search in one query, but builds a second search stack next to
-`milo-os/search` and keeps feedback out of platform-wide search.
+**Semantic similar posts with embeddings.** Finds duplicates worded
+differently, but needs vector storage the search service doesn't have.
+Can be added to `milo-os/search` later for every resource.
+
+**Full-text search in Postgres (`tsvector`).** Builds a second search
+stack next to `milo-os/search` and keeps feedback out of platform-wide
+search.
 
 **Each client calls GitHub directly.** What datum.net does today. Separate
 credentials, caches and status logic per client, no shared votes, no
@@ -1048,18 +1147,22 @@ can't tie demand to Datum users or organizations.
 
 - GitHub App installed on `datum-cloud` and `milo-os`, credentials in the
   secrets store.
-- Postgres with the pgvector extension.
-- Public HTTPS route for the webhook endpoint.
+- Feedback CRDs installed in Milo, and `ValidatingWebhookConfiguration`
+  and `MutatingWebhookConfiguration` in Milo pointing at
+  `feedback-operator`.
+- Milo's generic owner and hidden-field filter, released before phase 1.
+- Public HTTPS routes for the webhook endpoint and `feedback-uploads`.
 - NATS JetStream stream for webhook events.
-- Private object storage bucket for attachments.
+- Private object storage bucket for attachments, with a lifecycle rule
+  deleting unreferenced uploads after one day.
 - `Votes` number field on the Enhancements project, and an `Infrastructure`
   label in both orgs.
 - Feedback digest `EmailTemplate`.
 - `ResourceIndexPolicy` for `Post`, `Release` and `ChangelogEntry`.
-- Audit policy and webhook config for `feedback-apiserver`, pointing at the
-  `activity-system` Vector webhook.
-- Service accounts for `feedback-sync` and `feedback-controller`, with
-  roles scoped to the writes above.
+- A Milo audit policy rule logging `Submission`, `SubmissionReview`,
+  `SecurityReport` and `SecurityReportTriage` at `Metadata`.
+- Service accounts for `feedback-sync`, `feedback-operator` and
+  `feedback-uploads`, with roles scoped to the writes above.
 - A Security Team group and role for `SecurityReport` triage.
 - `EmailTemplate`s for security report updates.
 - `security.txt`, disclosure policy and acknowledgements pages on datum.net.
@@ -1072,3 +1175,7 @@ can't tie demand to Datum users or organizations.
 - 2026-10-09: Architecture proposal.
 - 2026-10-25: All writes go through the Feedback API; keyword search moves
   to `milo-os/search`.
+- 2026-11-17: CRDs in Milo and an operator replace the aggregated
+  apiserver and Postgres; generic Milo filter for user-owned and hidden
+  resources; `feedback-uploads` for attachments; similar posts use keyword
+  search.
