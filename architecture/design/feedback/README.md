@@ -129,15 +129,18 @@ but not which votes come back. Milo already handles this for contacts and
 invitations with one hard-coded request filter per resource. Feedback adds
 a generic version to Milo, driven by annotations on the CRD:
 
-- `iam.miloapis.com/owner-field: spec.userRef.name`. In the user context,
-  Milo adds `spec.userRef.name=<user>` to every list and watch, replacing
-  any value the client sent, and answers `get`, `update`, `patch` and
-  `delete` on another user's object with `NotFound`.
+- `iam.miloapis.com/owner-field: spec.userRef.name`. In the user context
+  (and in an organization context, where the owner is the caller), Milo adds
+  `spec.userRef.name=<user>` to every list, watch and collection delete,
+  replacing any value the client sent, and answers `get`, `update`, `patch`
+  and `delete` on another user's object with `NotFound`. An admission plugin
+  in Milo refuses a create whose owner isn't that user, and any change of
+  owner, after the feedback webhook has filled the owner in.
 - `iam.miloapis.com/hidden-field: spec.hidden` and
   `iam.miloapis.com/hidden-subresource: hidden`. Milo adds
-  `spec.hidden=false` to every list and watch, and answers `get` on a
-  hidden object with `NotFound`, unless the caller is allowed `get` on the
-  `hidden` subresource.
+  `spec.hidden!=true` to every list, watch and collection delete, and
+  answers named requests for a hidden object with `NotFound`, unless the
+  caller is allowed `get` on the `hidden` subresource.
 
 Both fields are CRD `selectableFields`, so etcd filters on them like
 `metadata.name`. The filter keeps the operator of every other term the
