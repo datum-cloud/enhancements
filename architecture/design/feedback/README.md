@@ -1157,7 +1157,9 @@ can't tie demand to Datum users or organizations.
 - Public HTTPS routes for the webhook endpoint and `feedback-uploads`.
 - NATS JetStream stream for webhook events.
 - Private object storage bucket for attachments, with a lifecycle rule
-  deleting unreferenced uploads after one day.
+  deleting unreferenced uploads after one day. Google Cloud Storage, Amazon
+  S3, or any S3-compatible store (for example Cloudflare R2 or MinIO), set by
+  bucket URL; S3 credentials come from a Secret.
 - `Votes` number field on the Enhancements project, and an `Infrastructure`
   label in both orgs.
 - Feedback digest `EmailTemplate`.
