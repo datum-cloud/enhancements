@@ -17,6 +17,7 @@ latest-milestone: "v0.x"
   - [What Every Invoice Line Carries](#what-every-invoice-line-carries)
   - [Service Periods](#service-periods)
   - [Charges Staff Add](#charges-staff-add)
+  - [Previewing a Contract's Invoices](#previewing-a-contracts-invoices)
   - [Tax](#tax)
   - [Notes and Constraints](#notes-and-constraints)
   - [Risks and Mitigations](#risks-and-mitigations)
@@ -51,11 +52,13 @@ Every line on a Datum invoice then carries:
 - a real quantity and unit price;
 - a **service period**: the dates the charge is for;
 - its own tax code;
-- an optional note;
+- an optional note for staff, which the customer never sees;
 - our metadata, linking it back to the price and contract it came from.
 
 The same path lets staff add one-off charges to an account's next invoice,
 each with its own service period, without editing invoices by hand in Stripe.
+And while staff write a contract, they can see the invoices it will produce
+as Stripe itself works them out, tax included.
 
 ## Motivation
 
@@ -93,7 +96,9 @@ how OpenMeter bills.
   by service period, with no spreadsheet work.
 - Staff can add one-off charges to an account's next invoice from the staff
   portal. They pick a catalog item or enter a custom charge, with a quantity,
-  a service period and a note.
+  a service period and a note for staff.
+- Staff writing a contract can see its first invoices as Stripe will
+  produce them, with real tax, before the contract is saved.
 - Customers see the same invoice they see today, but clearer: units, unit
   prices and dates on each line.
 - The change is invisible to everything that reads invoices today. The
@@ -154,7 +159,10 @@ finalized.
   or a period of service that isn't part of their contract, with the dates it
   covers, so that it appears on their next invoice with everything else.
 - **Staff.** As a staff member, I want to add a note to a line, so that I can
-  explain an unusual charge to finance or the customer.
+  explain an unusual charge to finance and the rest of staff.
+- **Staff.** As a staff member writing a contract, I want to see the actual
+  invoices it will produce, tax included, so that I can check them with the
+  customer before I save it.
 - **Customer.** As a customer, I want to see how many units I'm paying for,
   at what price and for which dates, so that I can check my invoice against
   my contract.
@@ -169,11 +177,12 @@ finalized.
 | Unit price | The price, after any customer pricing | Price the customer can check |
 | Service period | See [Service Periods](#service-periods) | Revenue Recognition; the dates the customer is paying for |
 | Tax code | The product's tax code, or the one staff picked | Per-product tax |
-| Note | Staff, for charges they add; the contract, for its fees | See [Open Questions](#open-questions) |
+| Note | Staff, for charges they add; the contract, for its fees | Context for staff and finance. Kept in the line's metadata, so it's never printed on the invoice. |
 | Metadata | Our IDs: the price, the contract, the account, OpenMeter's line and invoice | Tracing a line back to where it came from |
 
-Discounts stay as they are today in amount, and show as their own lines or as
-Stripe discounts against the line they reduce.
+Discounts stay as they are today in amount. They're written as Stripe
+discounts on the line they reduce, not as negative lines, because Stripe Tax
+won't calculate an invoice with negative items.
 
 ### Service Periods
 
@@ -215,7 +224,7 @@ account's next invoice, with the usage and fees for that period.
 - **Custom.** Staff enter a description, an amount, a quantity, a service
   period and a tax code. It gets a general "custom charge" product unless
   staff pick one.
-- **A note**, either way.
+- **A note**, either way, for staff only. The customer never sees it.
 - **Invoice now**, as an option, for a charge that shouldn't wait for the
   period to close.
 
@@ -226,6 +235,41 @@ lands on the same invoice as everything else and keeps its period.
 
 Creating invoices by hand in Stripe keeps working, and they keep showing in
 the portals. It becomes the exception, not the routine.
+
+### Previewing a Contract's Invoices
+
+While staff write a contract in the staff portal, they can preview its
+invoices as Stripe will produce them. Today's preview is our own arithmetic.
+This one is Stripe's.
+
+- **What it shows.** The contract's first invoice, and the first full one
+  after it, line by line: products and SKUs, quantities, unit prices, service
+  periods, discounts, tax per line and totals. For a contract billed on the
+  account's invoice day, the first invoice shows the prorated first period.
+- **How it works.** The preview builds the contract's invoice lines with the
+  same code that writes real invoices. It sends them to Stripe's invoice
+  preview with the customer and Stripe Tax on. Stripe returns the invoice it
+  would create, but creates nothing and sends nothing.
+- **Tax is real.** Stripe Tax calculates it from the customer's address, tax
+  IDs and exemptions, and from each line's tax code. A customer with no
+  address yet can be previewed with one staff enter for the preview.
+- **Usage is an estimate.** Before a contract starts there's no usage. The
+  preview shows the contract's fees, and usage only if staff enter an
+  estimate.
+
+Stripe's preview has no PDF or hosted page, so the staff portal shows it in
+the layout of a Datum invoice. If staff want Stripe's own rendering, they can
+**open it as a Stripe draft**:
+
+- The integration creates a real draft invoice on the customer in Stripe and
+  links to it in the Stripe dashboard.
+- The draft is never finalized or sent. It's marked as a preview, so it never
+  shows in the portals or the `Invoice` resource.
+- It's deleted when staff close the preview, save the contract, or after a
+  day. A deleted draft can't be recovered, and nothing was charged.
+
+The preview also works for an amendment: it shows the next invoice with the
+amended contract.
 
 ### Tax
 
@@ -260,6 +304,7 @@ tax code, through its Stripe Product.
 | An invoice is stuck because our integration is down | OpenMeter holds the draft until we sync it, so nothing is lost. We alert on drafts held longer than expected. |
 | Tax changes once lines have their own codes | Finance signs off each tax code. Compare tax on staging invoices before and after. |
 | A staff-added charge is wrong | Charges show in the preview before they're billed, and can be removed until the invoice is issued. |
+| A preview draft is finalized and sent by mistake | Preview drafts never auto-advance, are tagged in metadata, and are deleted by the integration. Only the integration creates them. |
 
 ## Design Overview
 
@@ -313,7 +358,8 @@ as a staff-created invoice.
 2. **The writer, on staging.** Move staging accounts to it. Compare each
    invoice with what OpenMeter's Stripe app would have written: same totals,
    same tax, better lines.
-3. **Charges staff add.** Ship the staff portal flow on top of the writer.
+3. **Charges staff add, and contract previews.** Ship both staff portal
+   flows on top of the writer. They share its line building.
 4. **Production, account by account.** Internal accounts first, then contract
    customers, then everyone else. Each account moves at its own billing
    boundary.
@@ -323,14 +369,11 @@ as a staff-created invoice.
 Rolling back an account is the same switch the other way, at its next
 billing boundary.
 
-Rough size: 5–7 engineer-weeks for Products, tax codes and the writer, and
-2–3 more for charges staff add.
+Rough size: 5–7 engineer-weeks for Products, tax codes and the writer, 2–3
+more for charges staff add, and 1–2 more for contract previews.
 
 ## Open Questions
 
-- **Notes: staff-only or on the invoice?** A note could be internal, for
-  finance only, or printed on the customer's invoice. It could also be both,
-  as two fields.
 - **Tax codes.** Finance needs to choose a Stripe tax code for each catalog
   item.
 - **Tax by facility.** Some catalog items are taxed where the facility is,
@@ -338,6 +381,9 @@ Rough size: 5–7 engineer-weeks for Products, tax codes and the writer, and
   location for the whole invoice. We need to ask Stripe whether that means a
   separate invoice per facility.
 - **Who can add charges, and up to what amount** without a second approval.
+- **Stripe drafts for previews.** Whether staff need Stripe's own rendering
+  of a contract's invoice, or whether the preview in the staff portal is
+  enough.
 - **One-time fee periods.** Should a setup fee's period be the day it's
   charged, or the contract's first period?
 - **Custom Invoicing on staging.** We need to confirm how OpenMeter behaves
@@ -346,6 +392,8 @@ Rough size: 5–7 engineer-weeks for Products, tax codes and the writer, and
 ## Implementation History
 
 - 2026-11-18: First draft.
+- 2026-11-18: Notes are for staff only. Added previews of a contract's
+  invoices from Stripe.
 
 ## Drawbacks
 
