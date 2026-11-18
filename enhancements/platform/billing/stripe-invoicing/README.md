@@ -263,10 +263,34 @@ the layout of a Datum invoice. If staff want Stripe's own rendering, they can
 
 - The integration creates a real draft invoice on the customer in Stripe and
   links to it in the Stripe dashboard.
-- The draft is never finalized or sent. It's marked as a preview, so it never
-  shows in the portals or the `Invoice` resource.
+- Drafts aren't emailed and don't show in the customer's Stripe portal.
 - It's deleted when staff close the preview, save the contract, or after a
   day. A deleted draft can't be recovered, and nothing was charged.
+
+A preview draft is a real invoice on a real customer, so it has safeguards:
+
+- **Lines are created on the draft.** Every line is created with the draft's
+  invoice ID. A line created loose on the customer would be a pending item,
+  and Stripe could put it on the customer's next real invoice.
+- **It's tagged as a preview.** Its metadata marks it, and the `Invoice`
+  projection and our Stripe webhook handling skip it. It never shows in the
+  portals.
+- **It can't send itself.** `auto_advance` is off, so Stripe never finalizes
+  it. Its memo says it's a preview and not to send it, since anyone in the
+  Stripe dashboard could still send it by hand.
+- **It's cleaned up.** The integration deletes it when the preview closes or
+  the contract is saved, and a sweep deletes any preview draft older than a
+  day.
+- **Discounts use standing coupons.** Discounts are Stripe coupons, so we
+  keep one coupon per discount level, not a new one per preview.
+
+It has two limits:
+
+- **Only people with Stripe dashboard access can open it.** Everyone else
+  uses the preview in the staff portal.
+- **It's dated today.** Lines have the right service periods, but the
+  invoice's own date and due date are the day the draft was made, unless we
+  can set them to the first invoice's.
 
 The preview also works for an amendment: it shows the next invoice with the
 amended contract.
@@ -381,9 +405,9 @@ more for charges staff add, and 1–2 more for contract previews.
   location for the whole invoice. We need to ask Stripe whether that means a
   separate invoice per facility.
 - **Who can add charges, and up to what amount** without a second approval.
-- **Stripe drafts for previews.** Whether staff need Stripe's own rendering
-  of a contract's invoice, or whether the preview in the staff portal is
-  enough.
+- **Who opens Stripe drafts.** Whether the staff who write contracts have
+  Stripe dashboard access. If they don't, the preview in the staff portal is
+  what they'll use, and Stripe drafts matter less.
 - **One-time fee periods.** Should a setup fee's period be the day it's
   charged, or the contract's first period?
 - **Custom Invoicing on staging.** We need to confirm how OpenMeter behaves
@@ -393,7 +417,7 @@ more for charges staff add, and 1–2 more for contract previews.
 
 - 2026-11-18: First draft.
 - 2026-11-18: Notes are for staff only. Added previews of a contract's
-  invoices from Stripe.
+  invoices from Stripe, with safeguards for preview drafts.
 
 ## Drawbacks
 
