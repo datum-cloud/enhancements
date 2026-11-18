@@ -11,6 +11,7 @@ latest-milestone: "v0.x"
 - [Motivation](#motivation)
   - [Goals](#goals)
   - [Non-Goals](#non-goals)
+- [Work This Builds On](#work-this-builds-on)
 - [Proposal](#proposal)
   - [How It Works](#how-it-works)
   - [User Stories](#user-stories)
@@ -18,7 +19,7 @@ latest-milestone: "v0.x"
   - [Service Periods](#service-periods)
   - [Charges Staff Add](#charges-staff-add)
   - [Previewing a Contract's Invoices](#previewing-a-contracts-invoices)
-  - [Tax](#tax)
+  - [Tax on Line Items](#tax-on-line-items)
   - [Notes and Constraints](#notes-and-constraints)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Overview](#design-overview)
@@ -123,6 +124,23 @@ how OpenMeter bills.
   rather than where the customer is, is an open question for finance and
   Stripe. See [Open Questions](#open-questions).
 
+## Work This Builds On
+
+Several billing changes made this week are the first steps of this
+enhancement. This work keeps them and builds on them.
+
+| Change | Status | What it becomes here |
+|---|---|---|
+| A SKU on `ServicePricing` and on a contract's fees ([milo-os/billing#256](https://github.com/milo-os/billing/pull/256)) | Released in billing v0.10.0 | The SKU of each Stripe Product. A customer's price has its list price's SKU, so it shares the list price's Product. |
+| "[SKU] name" on invoice lines ([milo-os/openmeter-provider#118](https://github.com/milo-os/openmeter-provider/pull/118)) | Merged, not released | The stopgap until the writer. Retired in the last [Rollout](#rollout) step. |
+| SKUs on contract fees in the staff portal ([datum-cloud/staff-portal#853](https://github.com/datum-cloud/staff-portal/pull/853)) | Draft | The catalog picker for [charges staff add](#charges-staff-add) reuses it. |
+| Contracts that bill on the account's invoice day, with a prorated first period ([milo-os/billing#257](https://github.com/milo-os/billing/pull/257), [milo-os/openmeter-provider#119](https://github.com/milo-os/openmeter-provider/pull/119), [datum-cloud/staff-portal#854](https://github.com/datum-cloud/staff-portal/pull/854)) | Billing merged, not released; provider and portal drafts | The prorated first period is a line with its own part-period [service period](#service-periods). The contract summary's first-invoice estimate is replaced by [Stripe's preview](#previewing-a-contracts-invoices). |
+| Colocation and bare metal fees on staging's price list ([datum-cloud/infra#9445](https://github.com/datum-cloud/infra/pull/9445), [datum-cloud/fleet#73](https://github.com/datum-cloud/fleet/pull/73)) | Open | The first catalog items to get Stripe Products and tax codes. |
+| A searchable country picker for billing addresses ([datum-cloud/cloud-portal#1827](https://github.com/datum-cloud/cloud-portal/pull/1827)) | Merged | Complete customer addresses, which [tax on line items](#tax-on-line-items) depends on. |
+
+None of these change when the writer lands. Each one's data moves from a
+line's name or our own arithmetic onto the Stripe line itself.
+
 ## Proposal
 
 ### How It Works
@@ -155,6 +173,8 @@ finalized.
   Stripe's reports.
 - **Finance.** As finance, I want each product taxed by its own tax code, so
   that space, power, services and cloud usage are taxed correctly.
+- **Staff.** As a staff member adding a charge, I want to set its tax code, or
+  mark it not taxable, so that it's taxed like the product it is.
 - **Staff.** As a staff member, I want to bill a customer for an installation
   or a period of service that isn't part of their contract, with the dates it
   covers, so that it appears on their next invoice with everything else.
@@ -176,7 +196,8 @@ finalized.
 | Quantity | The contract's quantity for a fee, the rated quantity for usage, or what staff entered | Units the customer can check |
 | Unit price | The price, after any customer pricing | Price the customer can check |
 | Service period | See [Service Periods](#service-periods) | Revenue Recognition; the dates the customer is paying for |
-| Tax code | The product's tax code, or the one staff picked | Per-product tax |
+| Tax code | The product's tax code, or the one staff picked. See [Tax on Line Items](#tax-on-line-items). | Per-product tax |
+| Tax per line | Stripe Tax | The customer and staff see what each line is taxed |
 | Note | Staff, for charges they add; the contract, for its fees | Context for staff and finance. Kept in the line's metadata, so it's never printed on the invoice. |
 | Metadata | Our IDs: the price, the contract, the account, OpenMeter's line and invoice | Tracing a line back to where it came from |
 
@@ -295,16 +316,41 @@ It has two limits:
 The preview also works for an amendment: it shows the next invoice with the
 amended contract.
 
-### Tax
+### Tax on Line Items
 
-Stripe Tax keeps calculating tax on the whole invoice from the customer's
-address and tax IDs, as today. The change is that each line names its own
-tax code, through its Stripe Product.
+Stripe Tax keeps calculating tax from the customer's address, tax IDs and
+exemptions, as today. What changes is that each line says how it's taxed.
 
-- Each catalog item gets a tax code. Finance chooses them, from Stripe's list.
-- A line without one uses the account's default, as every line does today.
-- Tax-exempt and reverse-charge customers work as today. Stripe applies
-  exemptions per customer.
+Every line carries:
+
+| Tax setting | Where it comes from | Notes |
+|---|---|---|
+| Tax code | The catalog item's `ServicePricing`, or what staff pick for a charge they add | One of Stripe's tax codes, chosen by finance. A customer's price has its list price's tax code, as it has its SKU. |
+| Taxable or not | The tax code | A line that isn't taxable uses Stripe's nontaxable tax code. Staff can mark a charge they add as not taxable, with a note saying why. |
+| Tax behavior | Always exclusive | Tax is added on top of the price, as today. Every line states it, because Stripe Tax won't calculate a line that leaves it unspecified. |
+| Tax location | The catalog item: the customer's address, or the facility's | Customer is how Stripe taxes today. Facility is an [open question](#open-questions). |
+
+- **Catalog items.** `ServicePricing` gets an optional tax code, next to its
+  SKU, and an optional tax location. Both are part of the immutable spec, so a
+  new tax code for a product means a new price.
+- **Charges staff add.** Staff get the catalog item's tax settings, and can
+  change the tax code or mark the charge not taxable.
+- **Contract fees.** They use their pricing's tax code. Staff can't change
+  tax per contract, so the same product is always taxed the same way.
+- **Usage.** It uses its usage pricing's tax code.
+- **Lines without a tax code** use the account's default, as every line does
+  today.
+- **Customers.** Exemptions, reverse charge and tax IDs stay per customer, as
+  today. stripe-provider keeps them in step with the billing account.
+- **Seeing it.** The contract preview and the Stripe invoice show tax per
+  line, so staff can check how each product is taxed before a contract is
+  saved.
+
+Tax codes don't have to wait for the writer. OpenMeter's rate cards take a
+Stripe tax code, and its Stripe app already puts it on the Stripe line. So
+tax codes on catalog prices can ship first, through OpenMeter. The writer
+then puts the same code on each line itself, and adds tax codes for charges
+staff add.
 
 ### Notes and Constraints
 
@@ -377,29 +423,33 @@ as a staff-created invoice.
 
 ## Rollout
 
-1. **Products and tax codes.** Add tax codes to the catalog and create
-   Stripe Products. Nothing on invoices changes yet.
-2. **The writer, on staging.** Move staging accounts to it. Compare each
+1. **Tax codes, through OpenMeter.** Add a tax code and tax location to
+   `ServicePricing`, and set the tax code on OpenMeter's rate cards. Lines
+   are taxed per product from then on, before anything else changes.
+2. **Stripe Products.** Create a Product for each catalog item, with its SKU
+   and tax code. Nothing on invoices changes yet.
+3. **The writer, on staging.** Move staging accounts to it. Compare each
    invoice with what OpenMeter's Stripe app would have written: same totals,
    same tax, better lines.
-3. **Charges staff add, and contract previews.** Ship both staff portal
+4. **Charges staff add, and contract previews.** Ship both staff portal
    flows on top of the writer. They share its line building.
-4. **Production, account by account.** Internal accounts first, then contract
+5. **Production, account by account.** Internal accounts first, then contract
    customers, then everyone else. Each account moves at its own billing
    boundary.
-5. **Retire the stopgap.** Once every account is on the writer, stop putting
+6. **Retire the stopgap.** Once every account is on the writer, stop putting
    the SKU in line names.
 
 Rolling back an account is the same switch the other way, at its next
 billing boundary.
 
-Rough size: 5–7 engineer-weeks for Products, tax codes and the writer, 2–3
-more for charges staff add, and 1–2 more for contract previews.
+Rough size: a few days for tax codes through OpenMeter, 5–7 engineer-weeks
+for Products and the writer, 2–3 more for charges staff add, and 1–2 more for
+contract previews.
 
 ## Open Questions
 
 - **Tax codes.** Finance needs to choose a Stripe tax code for each catalog
-  item.
+  item, and say which items aren't taxable.
 - **Tax by facility.** Some catalog items are taxed where the facility is,
   not where the customer is. Stripe Tax works out tax from the customer's
   location for the whole invoice. We need to ask Stripe whether that means a
@@ -418,6 +468,7 @@ more for charges staff add, and 1–2 more for contract previews.
 - 2026-11-18: First draft.
 - 2026-11-18: Notes are for staff only. Added previews of a contract's
   invoices from Stripe, with safeguards for preview drafts.
+- 2026-11-18: Added the work this builds on, and tax settings on every line.
 
 ## Drawbacks
 
