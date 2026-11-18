@@ -16,6 +16,7 @@ latest-milestone: "v0.x"
   - [How It Works](#how-it-works)
   - [User Stories](#user-stories)
   - [What Every Invoice Line Carries](#what-every-invoice-line-carries)
+  - [Price Overrides](#price-overrides)
   - [Service Periods](#service-periods)
   - [Charges Staff Add](#charges-staff-add)
   - [Previewing a Contract's Invoices](#previewing-a-contracts-invoices)
@@ -204,6 +205,23 @@ finalized.
 Discounts stay as they are today in amount. They're written as Stripe
 discounts on the line they reduce, not as negative lines, because Stripe Tax
 won't calculate an invoice with negative items.
+
+### Price Overrides
+
+The Product says what was sold, and the line says what it cost. So a
+customer's own price never needs a Product of its own.
+
+| Override | How it's written |
+|---|---|
+| A customer's price (`basedOn`) | It has its list price's SKU, so it uses the list price's Product. The line's unit price is the customer's. The list price goes in the line's metadata, so finance can report each customer's price against list. |
+| A customer's usage rates | The same: the list rate's Product, the customer's rate as the unit price. Tiered usage is one line per tier, each with its tier's unit price. |
+| An Offer's percentage discount | A Stripe coupon on the line, not a lower unit price. Reports show the full price and the discount apart, and Stripe Tax handles it. |
+| A contract's quantity | The line's quantity. An amendment that changes the quantity changes the line, not the Product. |
+| A custom fee with no list price | Staff pick a SKU from the catalog, so it joins that Product. A new SKU is a deliberate choice, which creates a new Product. A custom fee without a SKU follows the [no-SKU rule](#stripe-products). |
+| A prorated period | The line can't show quantity × unit price and still match the prorated amount. See [Open Questions](#open-questions). |
+
+None of these changes how a product is taxed. A customer's price has its
+list price's tax code, as it has its SKU.
 
 ### Service Periods
 
@@ -395,15 +413,39 @@ This section is a sketch. Each provider documents its own design.
 
 ### Stripe Products
 
-stripe-provider keeps a Stripe Product for each catalog item, with:
+stripe-provider keeps a Stripe Product for each SKU in the catalog, with:
 
 - its SKU and name;
 - its tax code;
-- our metadata linking it to the `ServicePricing`.
+- our metadata linking it to its `ServicePricing`s.
 
-Prices are immutable in our catalog, and a SKU names a product, not a price.
-So one Product stands for every price of the same SKU, and each line sets its
-own unit price. Customer pricing doesn't create new Products.
+The rules:
+
+- **One Product per SKU, not per price.** Prices are immutable in our
+  catalog, so a new price for the same product is a new `ServicePricing` with
+  the same SKU. Every price with that SKU shares one Product, and each line
+  sets its own unit price. Stripe's reports group a product's old and new
+  prices together.
+- **Created when the price is applied,** not when it's first billed, so
+  previews and preview drafts can use it at once.
+- **No Stripe Prices.** Each line passes its unit price against the Product,
+  so our immutable prices don't pile up as Stripe Prices.
+- **Customer prices don't create Products.** See
+  [Price Overrides](#price-overrides).
+- **Prices without a SKU** get a Product of their own, named after the
+  `ServicePricing`, so nothing is blocked from billing. Finance can add a SKU
+  with the next price.
+- **Names come from the list price.** When prices with one SKU have
+  different display names, the Product takes the name of the newest list
+  price. Each line keeps its own price's display name as its description.
+- **Tax codes come from the list price**, the same way. Prices with one SKU
+  must agree on their tax code.
+- **Retired, not deleted.** Stripe won't delete a Product that has been
+  invoiced. A Product is archived once no live price uses its SKU, and comes
+  back if one does again.
+- **One set per environment.** Staging's prices make Products in staging's
+  Stripe account, and production's in production's, as the prices
+  themselves are kept apart.
 
 ### The Invoice Writer
 
@@ -455,6 +497,12 @@ contract previews.
   location for the whole invoice. We need to ask Stripe whether that means a
   separate invoice per facility.
 - **Who can add charges, and up to what amount** without a second approval.
+- **Prorated lines.** Quantity × unit price can't equal a prorated amount.
+  Stripe accepts decimal quantities, so a line could read "0.43 × $1,000.00",
+  though rounding must still match OpenMeter's amount to the cent. Or it
+  could read "1 × $430.00", with the period showing it's part of a month.
+- **SKUs on everything billable.** Whether billing should require a SKU on
+  every price, rather than fall back to a Product per price.
 - **Who opens Stripe drafts.** Whether the staff who write contracts have
   Stripe dashboard access. If they don't, the preview in the staff portal is
   what they'll use, and Stripe drafts matter less.
@@ -469,6 +517,7 @@ contract previews.
 - 2026-11-18: Notes are for staff only. Added previews of a contract's
   invoices from Stripe, with safeguards for preview drafts.
 - 2026-11-18: Added the work this builds on, and tax settings on every line.
+- 2026-11-18: Added price overrides, and the rules for Stripe Products.
 
 ## Drawbacks
 
