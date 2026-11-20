@@ -65,7 +65,7 @@ reach features.
   accepted for, the revision, a server-set timestamp, and the acceptance
   context.
 - Guarantee that a caller can record acceptances only for themselves, and only
-  for the current revision.
+  for the current revision or a scheduled later one.
 - Show whether a user or organization has accepted the current terms, so that
   features and platform access can depend on it.
 - Expose agreement and acceptance history to users (their own records) and to
@@ -416,7 +416,9 @@ Milo, following the existing IAM pattern.
 | Platform services (for example cloud-portal's backend) | Platform | Read | Create for any user; read all |
 
 Users get acceptance permissions through the existing `iam-user-self-manage`
-role, which Milo binds to each user's own `User` object. The
+role, which Milo binds to each user's own `User` object. That role has no
+`agreements.miloapis.com` permissions today, so the Milo change must add
+`documentacceptances.create`, `.get`, and `.list` to it. The
 `DocumentAcceptance` protected resource declares `iam.miloapis.com/User` as a
 parent resource, the same way notification `Contact` does, so permissions
 granted on the `User` reach it.
@@ -473,8 +475,9 @@ the sections each item names.
 
 ## Delivery Plan
 
-The Milo work lands as one API group in five reviewable steps; the portal work
-follows in parallel once the API is deployed. The 2025 branches are a reference
+The plan has six steps. The Milo work lands as one API group in four
+reviewable steps (2–5); the consumer work in step 6 follows in parallel once the
+API is deployed. The 2025 branches are a reference
 to port from, not a base to rebase.
 
 1. **Settle the design.** Resolve the open decisions above and move this
