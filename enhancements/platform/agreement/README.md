@@ -12,352 +12,500 @@ latest-milestone: "v0.1"
     - [Goals](#goals)
     - [Non-Goals](#non-goals)
   - [Proposal](#proposal)
+    - [Background](#background)
     - [Notes/Constraints/Caveats](#notesconstraintscaveats)
     - [Risks and Mitigations](#risks-and-mitigations)
   - [Design Details](#design-details)
     - [Architecture Overview](#architecture-overview)
-      - [Core Components](#core-components)
-      - [Agreement Flow](#agreement-flow)
-    - [CRD Specifications](#crd-specifications)
-      - [Document Resource](#document-resource)
-      - [DocumentRevision Resource](#documentrevision-resource)
-      - [DocumentAcceptance Resource](#documentacceptance-resource)
-    - [Controller Implementation](#controller-implementation)
-      - [Permission Management](#permission-management)
-    - [Basic Monitoring](#basic-monitoring)
-      - [Key Metrics](#key-metrics)
+    - [Resource Model](#resource-model)
+      - [Document](#document)
+      - [DocumentRevision](#documentrevision)
+      - [DocumentAcceptance](#documentacceptance)
+    - [Lifecycle Flows](#lifecycle-flows)
+    - [Admission and Integrity](#admission-and-integrity)
+    - [Controllers and Status](#controllers-and-status)
+    - [Access Control](#access-control)
+    - [Integrations](#integrations)
+    - [Monitoring](#monitoring)
+  - [Open Decisions](#open-decisions)
+  - [Delivery Plan](#delivery-plan)
   - [Implementation History](#implementation-history)
 
 ## Summary
 
-The Milo platform needs a robust, versioned, and auditable system for managing agreements (such as Terms of Service, Privacy Policy, etc.). This enhancement implements an Agreements controller and CRDs to manage agreement documents, their revisions, and user acceptance events. The system tracks who accepted which version, when, and under what context, and makes this information available to both users and staff.
+Milo will gain an `agreements.miloapis.com` API that stores legal documents,
+such as the Terms of Service and Privacy Policy, as versioned revisions that
+can't be changed. It records every acceptance as a tamper-evident record: who
+accepted, on whose behalf, which version, when, and how. Other Milo components
+and the portals can then ask one question, "has this user accepted the current
+terms?", and act on the answer.
 
-**This enhancement focuses on backend agreement management.** It proposes implementing a set of CRDs and a controller to manage agreement lifecycles, versioning, and acceptance tracking, with clear, generic naming for reusability.
+**Audience:** Milo platform engineers who build and review the API, and the
+portal and staff-tooling teams who consume it. Readers should already know
+Kubernetes custom resources, admission webhooks, and Milo's IAM model.
 
-> [!NOTE]
-> This enhancement currently focuses on backend agreement management and does not include a frontend UI for agreement management or acceptance. However, it is intended that this enhancement will be expanded in the future to include frontend UI components for agreement management and acceptance workflows.
+**Scope:** the API, its admission rules, its controllers, access control, and
+the integration points. Portal screens appear only as consumers. Tracked by
+[milo-os/milo#707](https://github.com/milo-os/milo/issues/707).
 
 ## Motivation
 
-Modern SaaS platforms must track user and organization acceptance of legal agreements in a versioned, auditable way. This is critical for compliance, user experience, and operational transparency. The current platform lacks a generic, reusable system for managing agreements and tracking acceptance events.
+Today Datum records no acceptance at all. The cloud-portal onboarding page
+shows "By continuing, you agree to Datum's Terms of Service and Privacy Policy"
+with links to datum.net. Clicking **Agree and continue** stores nothing about
+who agreed, to which version, or when. The platform needs a versioned,
+auditable record for compliance, and a way to require acceptance before users
+reach features.
 
 ### Goals
 
-- **Define agreement types and revisions** - Support versioned, trackable agreement documents
-- **Track acceptance events** - Store who accepted which version, when, and with what context (IP, method, etc.)
-- **Expose agreement and acceptance history** - Make records visible to users and staff
-- **Use generic, reusable naming** - Enable adoption outside this project
-- **Document API and operational flows** - Provide clear docs for staff and developers
+- Define agreement types (`Document`) and their versioned revisions
+  (`DocumentRevision`), which can't be changed.
+- Record each acceptance (`DocumentAcceptance`) with the user, the subject they
+  accepted for, the revision, a server-set timestamp, and the acceptance
+  context.
+- Guarantee that a caller can record acceptances only for themselves, and only
+  for the current revision.
+- Show whether a user or organization has accepted the current terms, so that
+  features and platform access can depend on it.
+- Expose agreement and acceptance history to users (their own records) and to
+  staff (all records).
+- Use generic names so that any Milo deployment can adopt the system, not only
+  Datum Cloud.
 
 ### Non-Goals
 
-**Explicitly out of scope for this enhancement:**
-
-- Full e-signature workflows (e.g., DocuSign)
-- PDF or complex document generation (Markdown/HTML only)
-- Automated notifications or translations
-- Standalone documentation site or SDKs
-- Marketing or product copy
-
-**Future enhancements will address:**
-
-- Phase 2: Frontend UI for agreement management and user acceptance
-- Automated notifications for new versions
-- Localization and translations
-- Advanced analytics and reporting
+- E-signature workflows such as DocuSign.
+- PDF or file uploads; content is Markdown or HTML only.
+- Notifications, reminders, and translations. A later phase may add them on top
+  of the controllers.
+- The portal user interface itself. This enhancement defines only the API that
+  the portals call.
 
 ## Proposal
 
-This enhancement proposes implementing an Agreements system for the Milo platform using Kubernetes Custom Resource Definitions (CRDs). The system focuses on backend management of agreement documents, their revisions, and acceptance tracking.
+### Background
+
+A first version of this design was written here in October 2025 and
+implemented in [milo-os/milo#337](https://github.com/milo-os/milo/pull/337).
+That PR was closed without merging on 2026-11-02, and the branch is now about
+1,470 commits behind Milo's main branch.
+
+This revision keeps the 2025 resource model and field names, and fixes the gaps
+found when reviewing that code:
+
+| Topic | 2025 design and code | This design |
+| --- | --- | --- |
+| API group | `agreements.miloapis.com` in the design; the code split it into `agreement` and `documentation` | One group, `agreements.miloapis.com` |
+| Scope | A `legal-documents` namespace; acceptances in organization namespaces | All three kinds cluster-scoped |
+| Subjects | Organization only (in code) | `User` and `Organization` |
+| Accepting for someone else | Stated as forbidden; never enforced | Enforced by Milo's owner-field access rules |
+| Only the latest revision can be accepted | Required by [milo#699](https://github.com/milo-os/milo/issues/699); never built | Enforced by webhook |
+| Acceptance timestamp | Supplied by the client | Set by the server |
+| `category` and `jurisdiction` | Top-level `documentMetadata` field outside `spec` | Moved into `spec` |
+| Requiring acceptance | A goal with no design | `requiresAcceptance` flag and a `TermsAccepted` condition |
+| Enum values | Lowercase (`web-ui`, `checkbox`, `markdown`) | PascalCase (`Web`, `Checkbox`, `Markdown`) per Kubernetes API conventions |
 
 ### Notes/Constraints/Caveats
 
-**Implementation Constraints:**
-
-- Backend-only implementation (no frontend UI)
-- Documents and revisions are immutable after creation
-- Generic naming for portability
-- No PDF or e-signature support (Markdown/HTML only)
-
-**Processing:**
-
-- Agreements controller watches for Document, DocumentRevision, and DocumentAcceptance resources
-- Acceptance events are validated and stored with full context
-- Staff and users can query acceptance history
-- All documentation is stored in the Git repo alongside code
-
-> [!NOTE]
->
-> At this stage, controllers are not strictly required for implementation. Controllers are introdocued in case, if in the future, there is a need to send transactional emails, notify users when a new agreement revision is available for acceptance, or support additional signature methods.
-
-**What this enhancement does NOT provide:**
-
-- Frontend UI for agreement management or acceptance
-- Automated notifications or reminders
-- Localization or translations
-- Advanced analytics or reporting
+- Revisions and acceptances can't be changed or deleted after creation.
+- Integrity rests on admission. Controllers only derive status and never decide
+  whether a record is valid.
+- Real document text is deployment data, not Milo code. Milo ships samples only.
 
 ### Risks and Mitigations
 
-#### Risk: Incomplete Acceptance Tracking
+The record proves identity, version, and time. It doesn't prove where a request
+came from.
 
-- *Impact:* Users may access features without proper agreement acceptance
-- *Mitigation:* Enforce acceptance checks in API gateways and controllers
+| Threat | Mitigation | Remaining limit |
+| --- | --- | --- |
+| A user records an acceptance for someone else | The owner rule ties `accepterRef` to the caller in user and organization contexts | Platform-context callers can write any accepter; only trusted services get that role |
+| A client backdates an acceptance | A mutating webhook overwrites `acceptedAt` with server time | None |
+| Staff silently edit published terms | A CRD rule freezes revision `spec`; `contentHash` lets anyone verify the text | Direct storage access can still alter records; backups and audit logs are the control |
+| Records are deleted to hide history | Admission refuses every delete of revisions and acceptances | Same storage-level limit |
+| A forged IP address or user agent | None at admission: webhooks never see the client's network address | Treat `context` as caller-reported; values from cloud-portal's backend are as trustworthy as the portal |
+| A webhook outage lets records through unchecked | `failurePolicy: Fail` on every agreements webhook | An outage blocks sign-up; the webhook server runs two replicas, like Milo's other webhooks |
 
-#### Risk: Data Integrity Issues
-
-- *Impact:* Acceptance records may be lost or tampered with
-- *Mitigation:* Records cannot be deleted/updated, auditable storage and regular backups
-
-#### Risk: Versioning Confusion
-
-- *Impact:* Users may not know which version they accepted
-- *Mitigation:* Always display current and historical versions in user/staff interfaces
-
-**Security Review:** Security team will review audit logging, access controls, and data integrity mechanisms.
+Every create also lands in Milo's audit log with the authenticated identity,
+which gives a second, independent record of each acceptance.
+`DocumentAcceptance` stores an IP address, which is personal data; retention
+and export must follow the platform's privacy policy.
 
 ## Design Details
 
 ### Architecture Overview
 
-The agreements system is implemented as a Kubernetes controller that watches Document, DocumentRevision, and DocumentAcceptance CRDs, managing the full lifecycle of agreements and acceptance tracking.
-
-#### Core Components
-
-1. **Agreements Controller** - Kubernetes controller that processes agreement resources
-2. **Document CRD** - Defines agreement types and metadata
-3. **DocumentRevision CRD** - Defines versioned content for each agreement
-4. **DocumentAcceptance CRD** - Records acceptance events with full context
-
-#### Agreement Flow
-
-##### Staff Operator Flow
-
-###### Document Creation
+The system adds no new server. It is one API group served by the existing Milo
+API server, guarded by Milo's access rules and new agreements webhooks, with
+reconcilers in the existing controller manager.
 
 ```mermaid
-sequenceDiagram
-    actor user as Staff User
-    participant portal as Milo Portal
-    participant apiserver as Milo APIServer
-    participant webhook as Milo Webhook Server
-    participant controller as Agreements Controller
+flowchart TB
+    staff["Staff tooling<br/>publishes documents and revisions"]
+    portal["cloud-portal<br/>records acceptances in user context"]
+    staffportal["staff-portal<br/>reads acceptance history"]
 
-    user ->> portal: Create Dcument
-    portal ->> apiserver: Create Document
-    apiserver ->> webhook: Send create <br/> Document Event
-    webhook ->> webhook: Validate namespace
-    webhook -->> apiserver: Sends Document <br/> created event
-    apiserver ->> controller: Document resource event
-    controller ->> controller: Reconciles Document
+    subgraph apiserver["Milo API server"]
+        rules["Access rules<br/>owner field ties accepter to caller"]
+        hooks["Agreements webhooks<br/>set accepter and server time;<br/>check revision, subject, duplicates;<br/>refuse edits and deletes"]
+        store["Stored records<br/>Document, DocumentRevision,<br/>DocumentAcceptance"]
+        rules --> hooks --> store
+    end
+
+    controllers["Agreements controllers<br/>contentHash, latestRevisionRef,<br/>TermsAccepted"]
+    status["User and Organization status<br/>TermsAccepted condition"]
+    gate["Platform access gate<br/>(later phase, optional)"]
+
+    staff --> apiserver
+    portal --> apiserver
+    staffportal --> apiserver
+    store -- "watches, writes status" --> controllers
+    controllers --> status
+    status -.-> gate
 ```
 
-> [!WARNING]
->
-> Documents cannot be deleted if any associated DocumentRevision resources exist.
->
-> Documents are immutable and cannot be updated after creation.
+Every request passes the owner rule and the agreements webhooks before anything
+is stored. A controller outage delays `TermsAccepted` but can't let a bad
+record in.
 
-###### DocumentRevision Creation
+### Resource Model
 
-```mermaid
-sequenceDiagram
-    actor user as Staff User
-    participant portal as Milo Portal
-    participant apiserver as Milo APIServer
-    participant webhook as Milo Webhook Server
-    participant controller as Agreements Controller
+Three cluster-scoped resources in `agreements.miloapis.com/v1alpha1` make up
+the system. A `Document` names an agreement, each `DocumentRevision` freezes
+one version of its text, and each `DocumentAcceptance` records one user
+accepting one revision.
 
-    user ->> portal: Create DcumentRevision
-    portal ->> apiserver: Create DocumentRevision
-    apiserver ->> webhook: Send create <br/> DocumentRevision Event
-    webhook ->> webhook: Validate namespace, documentRef <br/>, version, expectedAccepterKinds and expectedSubjectKinds
-    webhook -->> apiserver: Sends DocumentVersion <br/> created event
-    apiserver ->> controller: DocumentVeersion resource event
-    controller ->> controller: Reconciles DocumentVersion
-```
+| Kind | Scope | Written by | Changeable after create | Deletable |
+| --- | --- | --- | --- | --- |
+| `Document` | Cluster | Staff | Metadata only (title, description) | Only when it has no revisions |
+| `DocumentRevision` | Cluster | Staff | No | No |
+| `DocumentAcceptance` | Cluster | The accepting user, or a platform service acting for them | No | No |
 
-> [!WARNING]
->
-> DocumentRevision resources are immutable and cannot be updated or deleted after creation.
+All three are cluster-scoped because legal documents apply to the whole
+platform, and Milo's `User` is cluster-scoped too. The 2025 design used a
+`legal-documents` namespace, which has no owner in Milo's tenancy model.
 
-##### End User Flow
-
-###### DocumentRevision Acceptance
-
-```mermaid
-sequenceDiagram
-    actor user as End User
-    participant portal as Milo Portal
-    participant apiserver as Milo APIServer
-    participant webhook as Milo Webhook Server
-    participant controller as Agreements Controller
-
-    user -->> portal: Views agreement
-    portal ->> apiserver: Create DocumentAcceptance
-    apiserver ->> webhook: Send create <br/> DocumentAcceptance Event
-    webhook ->> webhook: Validate DocumentRevision<br/>, Accepter and Subject. 
-    webhook -->> apiserver: Sends DocumentAcceptante <br/> created event
-    apiserver ->> controller: DocumentAcceptance resource event
-    controller ->> controller: Reconciles DocumentAcceptance
-```
-
-> [!WARNING]
->
-> DocumentAcceptance resources are immutable and cannot be updated or deleted after creation.
-
-### CRD Specifications
-
-#### Document Resource
+#### Document
 
 ```yaml
 apiVersion: agreements.miloapis.com/v1alpha1
 kind: Document
 metadata:
   name: terms-of-service
-  namespace: legal-documents
 spec:
-  title: "Terms of Service"
-  description: "The rules and conditions for using our platform."
-  documentType: "terms-of-service"
-  metadata:
-    category: "legal"
-    jurisdiction: "US"
+  title: Terms of Service
+  description: The rules and conditions for using the platform.
+  documentType: TermsOfService   # free-form PascalCase type, used for grouping
+  category: Legal
+  jurisdiction: US
+  requiresAcceptance: true       # counts toward the TermsAccepted condition
 status:
-  latestRevisionRef:
-    name: terms-of-service-v2-0
-    namespace: legal-documents
-    version: "2.0.0"
-    publishedAt: "2025-06-01T00:00:00Z"
+  latestRevisionRef:             # set by the controller
+    name: terms-of-service-v2-0-0
+    version: v2.0.0
+    effectiveDate: "2026-12-01T00:00:00Z"
+  conditions:
+    - type: Ready
+      status: "True"
 ```
 
-##### About `status.latestRevisionRef`
-
-- **Purpose:** The `status.latestRevisionRef` field provides a reference to the most recent (latest) published DocumentRevision for this Document. This allows clients, staff, and automation to quickly determine which revision is current without listing and sorting all revisions.
-- **How it works:**
-  - Whenever a new DocumentRevision is created and validated, the controller updates the `status.latestRevisionRef` field on the corresponding Document resource.
-  - The field includes the name, namespace, version, and publishedAt timestamp of the latest revision for convenience and traceability.
-
-#### DocumentRevision Resource
+#### DocumentRevision
 
 ```yaml
 apiVersion: agreements.miloapis.com/v1alpha1
 kind: DocumentRevision
 metadata:
-  name: terms-of-service-v2-0
-  namespace: legal-documents
+  name: terms-of-service-v2-0-0
 spec:
   documentRef:
     name: terms-of-service
-    namespace: legal-documents
-  version: "2.0.0"
+  version: v2.0.0                # semantic version; must be higher than every earlier revision
+  effectiveDate: "2026-12-01T00:00:00Z"
+  changesSummary: Updated the dispute resolution section.
   content:
-    format: "markdown"
+    format: Markdown             # Markdown | HTML
     data: |
       # Terms of Service
       ...
-  effectiveDate: "2025-06-01T00:00:00Z"
-  changesSummary: "Updated dispute resolution section."
-  expectedSubjectKinds:
-    - group: resourcemanager.miloapis.com
+  expectedSubjectKinds:          # what an acceptance may be on behalf of
+    - apiGroup: iam.miloapis.com
+      kind: User
+    - apiGroup: resourcemanager.miloapis.com
       kind: Organization
-  expectedAccepterKinds:
-    - group: iam.miloapis.com
+  expectedAccepterKinds:         # who may accept
+    - apiGroup: iam.miloapis.com
       kind: User
 status:
-  contentHash: "sha256:abc123..."
+  contentHash: sha256:9f2c...    # computed by the controller from content.data
 ```
 
-##### About `contentHash`
+The expected kinds live on the revision, not the document, so each acceptance
+is checked against the rules frozen with the text the user saw.
 
-- **Purpose:** The `contentHash` field is a cryptographic hash (typically SHA-256) of the canonical document content in the `data` field. It ensures the integrity and auditability of each document revision.
-- **How it works:**
-  - When a new DocumentRevision is created, the webhook or controller computes the SHA-256 hash of the exact content in the `data` field (after normalizing line endings and whitespace if required).
-  - The resulting hash is stored in the `status.contentHash` field, prefixed with the hash algorithm (e.g., `sha256:`).
-  - This allows anyone to verify that the content has not been tampered with by recomputing the hash and comparing it to the stored value.
-- **Why required:**
-  - Guarantees that the content of a published agreement revision is immutable and verifiable.
-  - Enables external auditors, staff, or users to confirm the authenticity of the agreement text they accepted.
-  - Required for all DocumentRevision resources.
-
-##### About `expectedSubjectKinds` and `expectedAccepterKinds`
-
-- **Purpose:** These fields define which Kubernetes resource kinds are permitted for `subjectRef` and `accepterRef` in DocumentAcceptance resources that reference this DocumentRevision.
-- **How it works:**
-  - When a DocumentAcceptance is created, the validating webhook confirms that the referenced Subject and Accepter resources match the kinds specified here.
-  - Each list is an array of objects containing `group` and `kind` keys, allowing future extension to additional resource types.
-
-#### DocumentAcceptance Resource
-
-> [!NOTE]
-> Organizations/Projects DocumentAcceptance resources are always stored in the organization namespace. This ensures that all acceptance records are scoped and managed according to the organization context, supporting clear auditability and access control.
+#### DocumentAcceptance
 
 ```yaml
 apiVersion: agreements.miloapis.com/v1alpha1
 kind: DocumentAcceptance
 metadata:
-  name: tos-acceptance-user-12345-20250602
-  namespace: organization-acme
+  name: tos-v2-0-0-7c41d0        # deterministic: hash of revision, subject, and accepter
 spec:
   documentRevisionRef:
-    name: terms-of-service-v2-0
-    namespace: legal-documents
-    resourceVersion: "12345"
-  subjectRef:
-    group: resourcemanager.miloapis.com
-    kind: Organization
-    name: personal-org-1234
-    namespace: organization-personal-org-1234
-  accepterRef:
-    group: iam.miloapis.com
+    name: terms-of-service-v2-0-0
+    version: v2.0.0
+  subjectRef:                    # on whose behalf
+    apiGroup: iam.miloapis.com
     kind: User
-    name: user-12345
-  acceptanceContext:
-    method: web-ui
-    ipAddress: "192.168.1.100"
-    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
-    acceptanceLanguage: "en-US"
+    name: 3a1f9c2e-user-id
+  accepterRef:                   # who clicked; filled from the request when omitted
+    apiGroup: iam.miloapis.com
+    kind: User
+    name: 3a1f9c2e-user-id
+  acceptedAt: "2026-12-02T09:30:00Z"  # always set by the server
+  context:
+    method: Web                  # Web | CLI | API
+    ipAddress: 192.0.2.10
+    userAgent: Mozilla/5.0 ...
+    language: en-US
   signature:
-    type: "checkbox"
-    timestamp: "2025-06-02T09:30:00Z"
+    type: Checkbox
 ```
 
-### Controller Implementation
+The CRD declares `spec.accepterRef.name` as its owner field
+(`iam.miloapis.com/owner-field`) and as a `selectableField`. Milo's existing
+[access rules](https://github.com/milo-os/milo/blob/main/docs/architecture/access-rules.md)
+then limit users to their own acceptances in the user and organization
+contexts, with no agreements-specific filter. `acceptedAt` sits in `spec`
+rather than `status` so it is part of the frozen record; a mutating webhook
+overwrites any value the client sends.
 
-The Agreements Controller is a standard Kubernetes controller that:
+### Lifecycle Flows
 
-1. **Watches Document, DocumentRevision, and DocumentAcceptance resources**
-2. **Validates and stores acceptance events** with full context
-3. **Exposes agreement and acceptance history** for querying by staff and users
-4. **Ensures immutability** of documents and revisions after creation
-5. **Maintains audit logs** for all acceptance events
+A revision becomes current on its `effectiveDate`. Users may accept it from the
+moment it is published, so they can accept new terms before the switch.
 
-#### Permission Management
+#### Publish a new revision (staff)
 
-- **On Document/Revision creation:** Only staff/operators can create or update
-- **On Acceptance:** Users can create acceptance events for themselves
-- **On Query:** Staff can view all records; users can view their own
+1. Staff create a `DocumentRevision` with a higher version and a future
+   `effectiveDate`.
+2. The validating webhook checks that the `Document` exists, the version is
+   higher than every earlier one, and the expected kinds are supported.
+3. The controller computes `status.contentHash` and marks the revision `Ready`.
+4. On the `effectiveDate`, the controller moves
+   `Document.status.latestRevisionRef` to the new revision.
+5. Users whose last acceptance was for an older revision now report
+   `TermsAccepted=False` until they accept again.
 
-### Basic Monitoring
+#### Accept at sign-up (user)
 
-#### Key Metrics
+```mermaid
+sequenceDiagram
+    actor user as User
+    participant portal as cloud-portal
+    participant api as Milo API server
+    participant hooks as Agreements webhooks
+    participant ctrl as Agreements controllers
 
-- **Document Creation Rate** - Number of new agreement documents created
-- **Revision Publication Rate** - Number of new revisions published
+    portal ->> api: Read Documents with requiresAcceptance
+    api -->> portal: latestRevisionRef and revision text
+    portal ->> user: Show terms
+    user ->> portal: Agree and continue
+    portal ->> api: Create DocumentAcceptance<br/>(user context)
+    api ->> hooks: Mutate: fill accepterRef, set acceptedAt
+    api ->> hooks: Validate: revision, subject, duplicates
+    api ->> api: Owner rule: accepterRef is the caller
+    api -->> portal: Created
+    api ->> ctrl: DocumentAcceptance event
+    ctrl ->> api: Set TermsAccepted on the subject
+```
+
+1. cloud-portal reads each `Document` with `requiresAcceptance: true` and shows
+   the text of its `latestRevisionRef`.
+2. The user clicks **Agree and continue**.
+3. The portal creates one `DocumentAcceptance` per document in the user context
+   (`/apis/iam.miloapis.com/v1alpha1/users/{user}/control-plane`), passing the
+   IP address and user agent it saw.
+4. The mutating webhook fills `accepterRef` from the request when it is empty
+   and sets `acceptedAt`.
+5. The validating webhook checks the revision, the subject, and duplicates.
+   Milo's owner rule then checks that `accepterRef` names the caller.
+6. The controller recomputes the user's `TermsAccepted` condition.
+
+#### Re-accept after a change (user)
+
+1. The portal sees `TermsAccepted=False`, or a `latestRevisionRef` newer than
+   the user's last acceptance.
+2. It shows `changesSummary` and the new text, and asks the user to accept.
+3. Acceptance follows steps 3–6 of the sign-up flow. Earlier acceptances stay
+   in place as history.
+
+### Admission and Integrity
+
+An invalid or forged record never reaches storage. Each rule below runs in the
+Milo webhook server with `failurePolicy: Fail`, unless the Enforced by column
+says otherwise.
+
+| Resource | Rule | Enforced by |
+| --- | --- | --- |
+| `Document` | Delete is refused while any `DocumentRevision` references it | Validating webhook |
+| `DocumentRevision` | `spec` is unchangeable | CRD rule `self == oldSelf` |
+| `DocumentRevision` | Delete is always refused | Validating webhook |
+| `DocumentRevision` | `documentRef` names an existing `Document` | Validating webhook |
+| `DocumentRevision` | `version` is higher than every earlier revision of the same document | Validating webhook |
+| `DocumentAcceptance` | `accepterRef` defaults to the caller; `acceptedAt` is always the server time | Mutating webhook |
+| `DocumentAcceptance` | `accepterRef.name` equals the caller's user ID (user and organization contexts) | Milo owner rule (`AccessRuleOwnerEnforcement`) |
+| `DocumentAcceptance` | The revision exists, its `version` matches, and it is the current revision or a later scheduled one | Validating webhook |
+| `DocumentAcceptance` | `subjectRef` and `accepterRef` kinds appear in the revision's expected kinds, and both objects exist | Validating webhook |
+| `DocumentAcceptance` | For an `Organization` subject, the accepter is a member of that organization | Validating webhook |
+| `DocumentAcceptance` | No earlier acceptance exists for the same revision, subject, and accepter | Validating webhook, using a field index |
+| `DocumentAcceptance` | `spec` is unchangeable; delete is always refused | CRD rule and validating webhook |
+
+**Content hash.** The controller computes SHA-256 over `spec.content.data`
+exactly as stored, with no normalization, and writes it as `sha256:<hex>`.
+Because the `spec` can't change, the hash never needs recomputing. Anyone
+holding the text a user saw can recompute the hash and compare.
+
+**Duplicate check.** The duplicate check reads a cache and can race when two
+requests arrive together. A deterministic name closes that race: the portal
+names each acceptance from a hash of revision, subject, and accepter, so a
+second create fails with `AlreadyExists`.
+
+### Controllers and Status
+
+Three reconcilers in the Milo controller manager keep derived state current.
+None of them changes a `spec`, and none of them is needed for a record to be
+valid.
+
+| Reconciler | Watches | Writes | Notes |
+| --- | --- | --- | --- |
+| Revision | `DocumentRevision` | `status.contentHash`, `Ready` condition | Runs once per revision, since the `spec` is frozen |
+| Document | `Document`, `DocumentRevision` | `status.latestRevisionRef`, `Ready` condition | Picks the highest version whose `effectiveDate` has passed; requeues at the next scheduled `effectiveDate` |
+| Acceptance status | `DocumentAcceptance`, `Document` | `TermsAccepted` condition on each subject | Recomputes one subject per acceptance; recomputes all subjects when a `latestRevisionRef` moves |
+
+`TermsAccepted` is the single signal that the rest of the platform checks. It
+is `True` when the subject has an acceptance for the current revision of every
+`Document` with `requiresAcceptance: true`.
+
+```yaml
+# on User.status.conditions (or Organization.status.conditions)
+- type: TermsAccepted
+  status: "False"
+  reason: NewRevisionPending
+  message: "terms-of-service v2.0.0 is effective and has not been accepted"
+  observedGeneration: 4
+```
+
+The agreements controller owns only this condition type and writes it with a
+server-side apply patch to the subject's status, so it never conflicts with the
+IAM or resource-manager controllers.
+
+### Access Control
+
+Staff publish; users read and accept for themselves; services act in the
+platform context. Each resource gets a `ProtectedResource` under
+`config/protected-resources/agreements/` and roles under `config/roles/` in
+Milo, following the existing IAM pattern.
+
+| Who | Context | Documents and revisions | Acceptances |
+| --- | --- | --- | --- |
+| Staff (`agreements-admin`) | Platform | Create, read; update `Document` metadata | Read all |
+| Staff support (`agreements-viewer`) | Platform | Read | Read all |
+| Any signed-in user | Any | Read | None |
+| A user, for themselves | User or organization | Read | Create and read their own |
+| Platform services (for example cloud-portal's backend) | Platform | Read | Create for any user; read all |
+
+Users get acceptance permissions through the existing `iam-user-self-manage`
+role, which Milo binds to each user's own `User` object. The
+`DocumentAcceptance` protected resource declares `iam.miloapis.com/User` as a
+parent resource, the same way notification `Contact` does, so permissions
+granted on the `User` reach it.
+
+No role grants `update`, `patch`, or `delete` on revisions or acceptances. Even
+with such a grant, admission refuses those requests, so a misconfigured role
+can't erase history.
+
+### Integrations
+
+Three consumers turn the API into user-visible behavior. Each ships in its own
+repository after the Milo API lands.
+
+| Consumer | Repository | What it does | Depends on |
+| --- | --- | --- | --- |
+| Sign-up and re-accept | `datum-cloud/cloud-portal` | Replaces the "By continuing, you agree" line with real acceptances; prompts again when `TermsAccepted` is `False` | Regenerated SDK; current revisions loaded in the deployment |
+| Agreement history | `datum-cloud/staff-portal` | Shows each user's and organization's acceptances, and lists users still pending on the current revision | `agreements-viewer` role |
+| Platform access | `milo-os/milo` (`PlatformAccess` flow) | Optionally holds a user's access until `TermsAccepted` is `True` | `TermsAccepted` condition; see [Open Decisions](#open-decisions) |
+
+cloud-portal already holds a generated SDK for the never-merged 2025 API
+(`app/modules/control-plane/{agreement,documentation}`); it will be regenerated
+against this one. Datum's deployment configuration loads the real Terms of
+Service and Privacy Policy objects; Milo ships only samples under
+`config/samples/agreements/`.
+
+### Monitoring
+
+- `milo_agreements_revisions_total{document}`: revisions published.
+- `milo_agreements_acceptances_total{document,version,method}`: acceptances
+  recorded.
+- `milo_agreements_subjects_pending{document}`: subjects whose `TermsAccepted`
+  is `False`.
+
+## Open Decisions
+
+The design above assumes the recommendation in each item. A rejection changes
+the sections each item names.
+
+<<[UNRESOLVED open decisions ]>>
+
+| Question | Recommendation | Why | Affects |
+| --- | --- | --- | --- |
+| Cluster-scoped or namespaced documents? | Cluster-scoped `Document` and `DocumentRevision` | Platform-wide documents; no tenant owns a `legal-documents` namespace | Resource model |
+| Which subjects in v1? | `User` and `Organization` | Sign-up terms are per user; contracts such as a DPA are per organization | Resource model, admission |
+| Where does `TermsAccepted` live? | A condition on the subject's own status | One place for every consumer to look; no extra resource per user | Controllers, integrations |
+| Does v1 block platform access? | No; publish the condition only, and gate access in a follow-up | Ships the record first, without risking locked-out users | Integrations |
+| Grace period after a new revision takes effect? | None in the API; publish with a future `effectiveDate` so users can accept early | Keeps the rule simple; the window before the date is the grace period | Lifecycle, controllers |
+| Can a minor revision skip re-acceptance? | Not in v1 | Every revision is a legal change until legal says otherwise | Resource model |
+| How do all signed-in users get read access to documents? | Needs a mechanism; no existing Milo role covers every authenticated user | Documents aren't children of `User`, so `iam-user-self-manage` can't carry it | Access control |
+| Can organization admins see members' acceptances for the organization? | Staff only in v1 | The owner rule shows each user only their own records | Access control |
+| Who owns milo#699? | Fold it into milo#707 and close it | Same work; one tracking issue | Delivery plan |
+
+<<[/UNRESOLVED]>>
+
+## Delivery Plan
+
+The Milo work lands as one API group in five reviewable steps; the portal work
+follows in parallel once the API is deployed. The 2025 branches are a reference
+to port from, not a base to rebase.
+
+1. **Settle the design.** Resolve the open decisions above and move this
+   enhancement to `implementable`.
+2. **API types** (`milo-os/milo`). Add `pkg/apis/agreements/v1alpha1` and
+   register the group everywhere a new group needs it, using the Notes
+   graduation commit `3376b3c3` as the checklist: scheme, controller manager,
+   CRD kustomization, protected resources, roles, and webhook manifests.
+3. **Admission** (`milo-os/milo`). Mutating and validating webhooks for all
+   three kinds, plus the owner-field and selectable-field annotations.
+4. **Controllers and access** (`milo-os/milo`). The three reconcilers, the
+   `TermsAccepted` condition, metrics, and the roles in
+   [Access Control](#access-control).
+5. **Tests** (`milo-os/milo`). Unit tests for every admission rule, and a
+   Chainsaw end-to-end test: publish, accept, refuse a duplicate, refuse an
+   outdated revision, refuse acceptance for another user, and flip
+   `TermsAccepted` when a new revision takes effect.
+6. **Consumers** (other repositories, separate issues).
+   - Load the real Terms of Service and Privacy Policy revisions in Datum's
+     deployment configuration.
+   - cloud-portal: regenerate the SDK, record acceptances at sign-up, and add
+     the re-accept prompt.
+   - staff-portal: agreement and acceptance history views.
+   - Milo: gate `PlatformAccess` on `TermsAccepted`, if the team agrees to
+     enforce.
 
 ## Implementation History
 
-**Phase 1 (Alpha - v0.1) - Core Agreements System:**
-
-- Document, DocumentRevision, and DocumentAcceptance CRDs
-- Agreements controller with basic lifecycle management
-- Append-only, auditable acceptance records
-- No frontend UI - backend only
-
-**Future Phases (Planned but not in this enhancement):**
-
-- Phase 2: Frontend UI for agreement management and user acceptance
-- Phase 3: Automated notifications and reminders
-- Phase 4: Localization and translations
-- Phase 5: Advanced analytics and reporting
-- Phase 6: E-signature and PDF support
+- 2025-10-08: First version of this enhancement (enhancements#371).
+- 2025-10-14 to 2025-10-21: Implemented in
+  [milo-os/milo#337](https://github.com/milo-os/milo/pull/337); never merged.
+- 2026-11-02: milo-os/milo#337 closed as stale.
+- 2026-11-20: Design revised to fix the gaps found in the 2025 code and to use
+  Milo's access rules.
