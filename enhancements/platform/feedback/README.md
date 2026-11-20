@@ -15,6 +15,7 @@ latest-milestone: "v0.1"
   - [Where it shows up](#where-it-shows-up)
   - [Browse and upvote](#browse-and-upvote)
   - [Share feedback](#share-feedback)
+  - [Report a security issue](#report-a-security-issue)
   - [Delivery tracker](#delivery-tracker)
   - [Staff review and insights](#staff-review-and-insights)
   - [Product rules](#product-rules)
@@ -35,8 +36,8 @@ organizations, a staff review step before anything goes public, and updates
 for the people who asked.
 
 Tracking issue: [datum-cloud/enhancements#889][issue]. Web designs:
-[Figma: Roadmap + Backlog][figma]. Technical design will follow in a separate
-document.
+[Figma: Roadmap + Backlog][figma]. Technical design:
+[Platform Feedback: Architecture](../../../architecture/design/feedback/README.md).
 
 [issue]: https://github.com/datum-cloud/enhancements/issues/889
 [figma]: https://www.figma.com/design/bBEQ8YeTP4SngNl5EkkQdH/Datum---Master-Design-File?node-id=17642-52938
@@ -64,6 +65,9 @@ service means one experience and one set of data.
 - Users can track everything they've voted for or submitted, and hear back
   when work on it is picked up, when it's released, or if it's declined.
 - Staff can see who is asking for what, by user and organization.
+- People and agents can report security issues privately from the same
+  places, follow the report through to a fix, and be credited and rewarded
+  for responsible disclosure.
 - The website's Releases, Roadmap, Changelog and Feedback pages are built on
   this service, replacing the website's own GitHub integration.
 
@@ -139,6 +143,72 @@ Content comes from three places on GitHub:
    - **Declined**: the submitter is told why.
 
 Nothing a user submits is ever published automatically.
+
+### Report a security issue
+
+Security reports get their own track. They start in the same places as
+feedback, but nothing about them is ever public until the Security Team
+says so.
+
+**Where.** Every surface that takes feedback offers "Report a security
+issue", which opens a separate private form:
+
+- datum.net and the cloud portal, signed in;
+- `datumctl security report`;
+- Patch, when a user describes something that looks like a vulnerability.
+  Patch drafts the report and the user confirms it, the same as feedback.
+
+`security@datum.net` and GitHub private vulnerability reporting stay open
+for people who'd rather not sign in. The Security Team logs those reports in
+the same queue, so every report is tracked in one place. datum.net
+publishes a [`security.txt`][security-txt] and a disclosure policy page
+pointing to all three, so researchers and agents that look for one find it.
+
+**Agents.** Agents acting for a user report through Patch, datumctl or the
+MCP tools like anyone else, and the report records that an agent filed it.
+The disclosure policy says what agents may and may not do while testing.
+
+**How it differs from feedback.**
+
+- No similar-items step and no voting. Reports are never matched against
+  public items or shown to anyone but the reporter and the Security Team.
+- Reports go to the Security Team, not the feedback review queue. General
+  feedback reviewers can't see them.
+- Reports are never published as GitHub issues. A fix that needs a public
+  notice gets a GitHub security advisory when the Security Team is ready.
+- The reporter hears about every change straight away, not in the daily
+  digest.
+
+**Tracking.** The reporter sees a private tracker:
+
+| Stage | What it means |
+| --- | --- |
+| Received | Logged and acknowledged |
+| Triaged | Confirmed, with a severity, or closed as not applicable or a duplicate, with a reason |
+| Fixing | A fix is in progress |
+| Fixed | The fix is deployed |
+| Disclosed | Advisory published, if one was needed |
+
+**Credit and rewards.** Valid reports are credited and rewarded:
+
+- **Credit**: the reporter is named in the advisory and on a datum.net
+  security acknowledgements page, if they opt in, with the name and link of
+  their choice.
+- **Rewards**: swag, platform credits on the reporter's organization, or
+  just a public thank-you, scaled by severity. The reporter sees the reward
+  on their tracker once it's granted.
+
+The disclosure policy sets out scope (what may be tested), rules (no
+testing against other customers' resources, no denial of service, no social
+engineering), safe harbour for good-faith research, and reward tiers.
+
+<<[UNRESOLVED disclosure policy]>>
+Reward tiers and amounts, whether cash rewards or a bounty platform
+(HackerOne, Bugcrowd) come later, and the safe harbour wording, which needs
+legal review.
+<<[/UNRESOLVED]>>
+
+[security-txt]: https://www.rfc-editor.org/rfc/rfc9116
 
 ### Delivery tracker
 
@@ -216,6 +286,8 @@ by demand where they already plan.
   doesn't exist yet and needs adding.
 - **Hiding.** Staff can hide an item from Datum Feedback with a GitHub label
   without closing the issue.
+- **Security reports** are visible only to the reporter and the Security
+  Team, never become public items, and never count as votes.
 
 ## Rollout
 
@@ -224,7 +296,8 @@ by demand where they already plan.
 2. **Vote and track.** Upvoting, login gate, following, the delivery tracker
    with related work, My feedback, and digest emails.
 3. **Submit.** Similar-feedback suggestions, submissions and the staff review
-   queue.
+   queue. Security reports, their tracker, `security.txt` and the
+   disclosure policy page.
 4. **Everywhere.** Portal widget, datumctl commands, Patch, staff insights.
 
 ## Alternatives
