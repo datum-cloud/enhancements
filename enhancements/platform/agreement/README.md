@@ -411,7 +411,7 @@ Milo, following the existing IAM pattern.
 | --- | --- | --- | --- |
 | Staff (`agreements-admin`) | Platform | Create, read; update `Document` metadata | Read all |
 | Staff support (`agreements-viewer`) | Platform | Read | Read all |
-| Any signed-in user | Any | Read | None |
+| Any signed-in user (`agreements.miloapis.com-document-viewer`) | Any | Read | None |
 | A user, for themselves | User or organization | Read | Create and read their own |
 | Platform services (for example cloud-portal's backend) | Platform | Read | Create for any user; read all |
 
@@ -422,6 +422,65 @@ role, which Milo binds to each user's own `User` object. That role has no
 `DocumentAcceptance` protected resource declares `iam.miloapis.com/User` as a
 parent resource, the same way notification `Contact` does, so permissions
 granted on the `User` reach it.
+
+Every signed-in user can read documents and revisions through the pattern Milo
+already uses for public catalogs, such as quota `ResourceRegistration`, billing
+`MeterDefinition`, and service-catalog `Service`. A read-only role is bound to
+the `system:authenticated` group for each kind. The OpenFGA provider adds every
+`User` to that group, so no per-user setup is needed. A `PolicyBinding`
+`resourceSelector` takes one kind, so the role needs two bindings. They ship in
+Milo under `config/services/agreements/iam/`, laid out like the quota service.
+
+```yaml
+apiVersion: iam.miloapis.com/v1alpha1
+kind: Role
+metadata:
+  name: agreements.miloapis.com-document-viewer
+spec:
+  includedPermissions:
+  - agreements.miloapis.com/documents.get
+  - agreements.miloapis.com/documents.list
+  - agreements.miloapis.com/documents.watch
+  - agreements.miloapis.com/documentrevisions.get
+  - agreements.miloapis.com/documentrevisions.list
+  - agreements.miloapis.com/documentrevisions.watch
+---
+apiVersion: iam.miloapis.com/v1alpha1
+kind: PolicyBinding
+metadata:
+  name: authenticated-user-document-read
+spec:
+  roleRef:
+    name: agreements.miloapis.com-document-viewer
+  subjects:
+    - kind: Group
+      name: "system:authenticated"
+  resourceSelector:
+    resourceKind:
+      apiGroup: agreements.miloapis.com
+      kind: Document
+---
+apiVersion: iam.miloapis.com/v1alpha1
+kind: PolicyBinding
+metadata:
+  name: authenticated-user-document-revision-read
+spec:
+  roleRef:
+    name: agreements.miloapis.com-document-viewer
+  subjects:
+    - kind: Group
+      name: "system:authenticated"
+  resourceSelector:
+    resourceKind:
+      apiGroup: agreements.miloapis.com
+      kind: DocumentRevision
+```
+
+These bindings make every revision readable from the moment it is created,
+including scheduled ones; that matches the rule that users may accept early.
+Revisions have no draft state and can't be deleted, so staff must not create a
+revision until its text is final. Signed-out visitors can't read documents
+through Milo; datum.net remains the public copy.
 
 No role grants `update`, `patch`, or `delete` on revisions or acceptances. Even
 with such a grant, admission refuses those requests, so a misconfigured role
@@ -467,11 +526,16 @@ the sections each item names.
 | Does v1 block platform access? | No; publish the condition only, and gate access in a follow-up | Ships the record first, without risking locked-out users | Integrations |
 | Grace period after a new revision takes effect? | None in the API; publish with a future `effectiveDate` so users can accept early | Keeps the rule simple; the window before the date is the grace period | Lifecycle, controllers |
 | Can a minor revision skip re-acceptance? | Not in v1 | Every revision is a legal change until legal says otherwise | Resource model |
-| How do all signed-in users get read access to documents? | Needs a mechanism; no existing Milo role covers every authenticated user | Documents aren't children of `User`, so `iam-user-self-manage` can't carry it | Access control |
 | Can organization admins see members' acceptances for the organization? | Staff only in v1 | The owner rule shows each user only their own records | Access control |
 | Who owns milo#699? | Fold it into milo#707 and close it | Same work; one tracking issue | Delivery plan |
 
 <<[/UNRESOLVED]>>
+
+Resolved:
+
+| Question | Decision | Why | Affects |
+| --- | --- | --- | --- |
+| How do all signed-in users get read access to documents? | Bind `agreements.miloapis.com-document-viewer` to `system:authenticated` for `Document` and `DocumentRevision` | Same pattern as the quota, billing, and service-catalog public catalogs; the portal can't show terms without it | Access control |
 
 ## Delivery Plan
 
@@ -492,9 +556,11 @@ to port from, not a base to rebase.
    `TermsAccepted` condition, metrics, and the roles in
    [Access Control](#access-control).
 5. **Tests** (`milo-os/milo`). Unit tests for every admission rule, and a
-   Chainsaw end-to-end test: publish, accept, refuse a duplicate, refuse an
-   outdated revision, refuse acceptance for another user, and flip
-   `TermsAccepted` when a new revision takes effect.
+   Chainsaw end-to-end test: publish, read the revision as a non-staff user in
+   the user context, accept, refuse a duplicate, refuse an outdated revision,
+   refuse acceptance for another user, and flip `TermsAccepted` when a new
+   revision takes effect. The user-context read confirms that the
+   `system:authenticated` bindings apply where the portal calls from.
 6. **Consumers** (other repositories, separate issues).
    - Load the real Terms of Service and Privacy Policy revisions in Datum's
      deployment configuration.
