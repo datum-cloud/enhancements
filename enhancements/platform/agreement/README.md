@@ -21,6 +21,7 @@ latest-milestone: "v0.1"
       - [Document](#document)
       - [DocumentRevision](#documentrevision)
       - [DocumentAcceptance](#documentacceptance)
+      - [Customer-Specific Agreements](#customer-specific-agreements)
     - [Lifecycle Flows](#lifecycle-flows)
     - [Admission and Integrity](#admission-and-integrity)
     - [Controllers and Status](#controllers-and-status)
@@ -72,6 +73,9 @@ reach features.
   staff (all records).
 - Use generic names so that any Milo deployment can adopt the system, not only
   Datum Cloud.
+- Leave room for agreements negotiated with specific organizations, such as
+  enterprise MSAs and custom DPAs, so that adding them later isn't a breaking
+  change.
 
 ### Non-Goals
 
@@ -81,6 +85,8 @@ reach features.
   of the controllers.
 - The portal user interface itself. This enhancement defines only the API that
   the portals call.
+- Building customer-specific agreements in v1. v1 reserves their fields and
+  visibility rule; see [Customer-Specific Agreements](#customer-specific-agreements).
 
 ## Proposal
 
@@ -105,6 +111,8 @@ found when reviewing that code:
 | `category` and `jurisdiction` | Top-level `documentMetadata` field outside `spec` | Moved into `spec` |
 | Requiring acceptance | A goal with no design | `requiresAcceptance` flag and a `TermsAccepted` condition |
 | Enum values | Lowercase (`web-ui`, `checkbox`, `markdown`) | PascalCase (`Web`, `Checkbox`, `Markdown`) per Kubernetes API conventions |
+| Customer-specific agreements | Not considered | Fields and a visibility rule reserved in v1 |
+| Acceptance integrity | Hash only on the revision; acceptance name chosen by the client | Revision hash copied into each acceptance; the server enforces the acceptance name |
 
 ### Notes/Constraints/Caveats
 
@@ -125,6 +133,7 @@ came from.
 | Staff silently edit published terms | A CRD rule freezes revision `spec`; `contentHash` lets anyone verify the text | Direct storage access can still alter records; backups and audit logs are the control |
 | Records are deleted to hide history | Admission refuses every delete of revisions and acceptances | Same storage-level limit |
 | A forged IP address or user agent | None at admission: webhooks never see the client's network address | Treat `context` as caller-reported; values from cloud-portal's backend are as trustworthy as the portal |
+| A customer-specific document leaks to every user | Restricted documents and revisions are hidden by Milo's `hidden-field` access rule, which the public read binding can't override | Customer read access isn't designed yet; see [Open Decisions](#open-decisions) |
 | A webhook outage lets records through unchecked | `failurePolicy: Fail` on every agreements webhook | An outage blocks sign-up; the webhook server runs two replicas, like Milo's other webhooks |
 
 Every create also lands in Milo's audit log with the authenticated identity,
@@ -200,6 +209,10 @@ spec:
   category: Legal
   jurisdiction: US
   requiresAcceptance: true       # counts toward the TermsAccepted condition
+  appliesTo:                     # reserved; omitted = every customer (v1 refuses a value)
+    organizations: []
+  supersedes: null               # reserved; the standard Document this one replaces
+  restricted: false              # set by the server: true when appliesTo is set
 status:
   latestRevisionRef:             # set by the controller
     name: terms-of-service-v2-0-0
@@ -236,6 +249,7 @@ spec:
   expectedAccepterKinds:         # who may accept
     - apiGroup: iam.miloapis.com
       kind: User
+  restricted: false              # copied from the Document by the server at create
 status:
   contentHash: sha256:9f2c...    # computed by the controller from content.data
 ```
@@ -249,11 +263,12 @@ is checked against the rules frozen with the text the user saw.
 apiVersion: agreements.miloapis.com/v1alpha1
 kind: DocumentAcceptance
 metadata:
-  name: tos-v2-0-0-7c41d0        # deterministic: hash of revision, subject, and accepter
+  name: terms-of-service-v2-0-0-7c41d0a9e3  # enforced by the server; see below
 spec:
   documentRevisionRef:
     name: terms-of-service-v2-0-0
     version: v2.0.0
+    contentHash: sha256:9f2c...  # the hash of the text the user saw; checked by the server
   subjectRef:                    # on whose behalf
     apiGroup: iam.miloapis.com
     kind: User
@@ -279,6 +294,44 @@ then limit users to their own acceptances in the user and organization
 contexts, with no agreements-specific filter. `acceptedAt` sits in `spec`
 rather than `status` so it is part of the frozen record; a mutating webhook
 overwrites any value the client sends.
+
+The acceptance name is the revision name, a dash, and the first 10 hexadecimal
+characters of SHA-256 over `<subject apiGroup>/<subject kind>/<subject name>/<accepter name>`.
+The validating webhook refuses any other name, so a second acceptance for the
+same revision, subject, and accepter always fails with `AlreadyExists`,
+whichever client sends it.
+
+`documentRevisionRef.contentHash` ties the record to the exact text. The portal
+sends the hash of the text it displayed; the webhook computes SHA-256 from the
+revision's `content.data` and refuses a mismatch. When the client omits the
+hash, the webhook fills it in. The webhook computes the hash itself rather than
+reading `status.contentHash`, which the controller may not have written yet.
+
+#### Customer-Specific Agreements
+
+Some customers will negotiate their own agreements, such as an enterprise MSA
+or a custom DPA. v1 doesn't build this, but it fixes the parts that would be
+breaking to change later:
+
+- **Fields.** `Document.spec.appliesTo.organizations` lists the organizations a
+  document applies to; omitted means every customer. `Document.spec.supersedes`
+  names the standard `Document` it replaces for those organizations. Both are
+  unchangeable after create. In v1 the webhook refuses a non-empty value, so
+  enabling the feature later only relaxes a check.
+- **Visibility.** The server sets `spec.restricted: true` on a `Document` whose
+  `appliesTo` is set, and copies it onto each of its revisions. Both CRDs
+  declare it with Milo's `iam.miloapis.com/hidden-field` access rule and as a
+  `selectableField`, so
+  restricted objects drop out of lists and named reads unless the caller has
+  `get` on the `hidden` subresource. The public read binding in
+  [Access Control](#access-control) therefore can't expose them.
+- **`TermsAccepted`.** The definition already counts only documents that apply
+  to the subject, minus any document superseded for it. See
+  [Controllers and Status](#controllers-and-status).
+
+How a customer's own members read their restricted document, and how an
+acceptance signed outside the platform is recorded, are open; see
+[Open Decisions](#open-decisions).
 
 ### Lifecycle Flows
 
@@ -313,7 +366,7 @@ sequenceDiagram
     user ->> portal: Agree and continue
     portal ->> api: Create DocumentAcceptance<br/>(user context)
     api ->> hooks: Mutate: fill accepterRef, set acceptedAt
-    api ->> hooks: Validate: revision, subject, duplicates
+    api ->> hooks: Validate: revision, hash, name, subject, duplicates
     api ->> api: Owner rule: accepterRef is the caller
     api -->> portal: Created
     api ->> ctrl: DocumentAcceptance event
@@ -324,11 +377,13 @@ sequenceDiagram
    the text of its `latestRevisionRef`.
 2. The user clicks **Agree and continue**.
 3. The portal creates one `DocumentAcceptance` per document in the user context
-   (`/apis/iam.miloapis.com/v1alpha1/users/{user}/control-plane`), passing the
-   IP address and user agent it saw.
+   (`/apis/iam.miloapis.com/v1alpha1/users/{user}/control-plane`). It names
+   each one by the server's rule and passes the hash of the text it displayed,
+   plus the IP address and user agent it saw.
 4. The mutating webhook fills `accepterRef` from the request when it is empty
    and sets `acceptedAt`.
-5. The validating webhook checks the revision, the subject, and duplicates.
+5. The validating webhook checks the revision, the content hash, the name, the
+   subject, and duplicates.
    Milo's owner rule then checks that `accepterRef` names the caller.
 6. The controller recomputes the user's `TermsAccepted` condition.
 
@@ -349,6 +404,9 @@ says otherwise.
 | Resource | Rule | Enforced by |
 | --- | --- | --- |
 | `Document` | Delete is refused while any `DocumentRevision` references it | Validating webhook |
+| `Document` | `appliesTo` and `supersedes` are empty (v1 only) and unchangeable | Validating webhook and CRD rule |
+| `Document` | `restricted` is `true` exactly when `appliesTo` is set | Mutating webhook and CRD rule |
+| `DocumentRevision` | `restricted` is copied from its `Document` | Mutating webhook |
 | `DocumentRevision` | `spec` is unchangeable | CRD rule `self == oldSelf` |
 | `DocumentRevision` | Delete is always refused | Validating webhook |
 | `DocumentRevision` | `documentRef` names an existing `Document` | Validating webhook |
@@ -357,19 +415,22 @@ says otherwise.
 | `DocumentAcceptance` | `accepterRef.name` equals the caller's user ID (user and organization contexts) | Milo owner rule (`AccessRuleOwnerEnforcement`) |
 | `DocumentAcceptance` | The revision exists, its `version` matches, and it is the current revision or a later scheduled one | Validating webhook |
 | `DocumentAcceptance` | `subjectRef` and `accepterRef` kinds appear in the revision's expected kinds, and both objects exist | Validating webhook |
+| `DocumentAcceptance` | `documentRevisionRef.contentHash` equals SHA-256 of the revision's `content.data`; filled in when omitted | Mutating and validating webhooks |
+| `DocumentAcceptance` | The name follows the server's rule (revision name plus a hash of subject and accepter) | Validating webhook |
 | `DocumentAcceptance` | For an `Organization` subject, the accepter is a member of that organization | Validating webhook |
 | `DocumentAcceptance` | No earlier acceptance exists for the same revision, subject, and accepter | Validating webhook, using a field index |
 | `DocumentAcceptance` | `spec` is unchangeable; delete is always refused | CRD rule and validating webhook |
 
 **Content hash.** The controller computes SHA-256 over `spec.content.data`
 exactly as stored, with no normalization, and writes it as `sha256:<hex>`.
-Because the `spec` can't change, the hash never needs recomputing. Anyone
-holding the text a user saw can recompute the hash and compare.
+Because the `spec` can't change, the hash never needs recomputing. Each
+acceptance carries the same hash, so the record proves which text was accepted
+even without reading the revision. Anyone holding the text a user saw can
+recompute the hash and compare.
 
-**Duplicate check.** The duplicate check reads a cache and can race when two
-requests arrive together. A deterministic name closes that race: the portal
-names each acceptance from a hash of revision, subject, and accepter, so a
-second create fails with `AlreadyExists`.
+**Duplicate check.** The field-index check reads a cache and can race when two
+requests arrive together. The server-enforced name closes that race: a second
+create for the same revision, subject, and accepter fails with `AlreadyExists`.
 
 ### Controllers and Status
 
@@ -385,7 +446,15 @@ valid.
 
 `TermsAccepted` is the single signal that the rest of the platform checks. It
 is `True` when the subject has an acceptance for the current revision of every
-`Document` with `requiresAcceptance: true`.
+`Document` that:
+
+- has `requiresAcceptance: true`,
+- applies to the subject (no `appliesTo`, or `appliesTo` lists the subject's
+  organization), and
+- isn't superseded for the subject by another document that applies to it.
+
+In v1 no document sets `appliesTo` or `supersedes`, so the last two conditions
+always hold; they're defined now so the meaning doesn't change later.
 
 ```yaml
 # on User.status.conditions (or Organization.status.conditions)
@@ -482,6 +551,13 @@ Revisions have no draft state and can't be deleted, so staff must not create a
 revision until its text is final. Signed-out visitors can't read documents
 through Milo; datum.net remains the public copy.
 
+The public read binding covers every object of each kind, so restricted
+documents rely on the `hidden-field` rule described in
+[Customer-Specific Agreements](#customer-specific-agreements). Both protected
+resources declare a `hidden` subresource with `get` permission. Only
+`agreements-admin` and `agreements-viewer` grant it, so staff see restricted
+documents and every other user doesn't.
+
 No role grants `update`, `patch`, or `delete` on revisions or acceptances. Even
 with such a grant, admission refuses those requests, so a misconfigured role
 can't erase history.
@@ -528,6 +604,8 @@ the sections each item names.
 | Can a minor revision skip re-acceptance? | Not in v1 | Every revision is a legal change until legal says otherwise | Resource model |
 | Can organization admins see members' acceptances for the organization? | Staff only in v1 | The owner rule shows each user only their own records | Access control |
 | Who owns milo#699? | Fold it into milo#707 and close it | Same work; one tracking issue | Delivery plan |
+| How do a customer's own members read their restricted document? | Design in the phase that builds customer-specific agreements; likely a `PolicyBinding` on each restricted `Document` granting read to that organization's members | Milo has no ready way to grant a kind's `hidden` subresource to one organization; v1 has no restricted documents | Access control |
+| How is an agreement signed outside the platform recorded? | Staff record it in the platform context, with new values such as `method: Offline` and a signature type for an external contract | Negotiated contracts are usually signed outside the portal; adding enum values in `v1alpha1` is non-breaking | Resource model, admission |
 
 <<[/UNRESOLVED]>>
 
@@ -558,8 +636,9 @@ to port from, not a base to rebase.
 5. **Tests** (`milo-os/milo`). Unit tests for every admission rule, and a
    Chainsaw end-to-end test: publish, read the revision as a non-staff user in
    the user context, accept, refuse a duplicate, refuse an outdated revision,
-   refuse acceptance for another user, and flip `TermsAccepted` when a new
-   revision takes effect. The user-context read confirms that the
+   refuse acceptance for another user, refuse a wrong name or content hash,
+   refuse a `Document` with `appliesTo` set, and flip `TermsAccepted` when a
+   new revision takes effect. The user-context read confirms that the
    `system:authenticated` bindings apply where the portal calls from.
 6. **Consumers** (other repositories, separate issues).
    - Load the real Terms of Service and Privacy Policy revisions in Datum's
@@ -577,4 +656,5 @@ to port from, not a base to rebase.
   [milo-os/milo#337](https://github.com/milo-os/milo/pull/337); never merged.
 - 2026-11-02: milo-os/milo#337 closed as stale.
 - 2026-11-20: Design revised to fix the gaps found in the 2025 code and to use
-  Milo's access rules.
+  Milo's access rules. Customer-specific agreements reserved and acceptance
+  integrity tightened after review.
