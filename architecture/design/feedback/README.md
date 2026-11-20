@@ -745,10 +745,14 @@ product decision accepts this.
    start with the website route's 5 per 10 minutes per user, counted from
    the operator's watch cache.
 3. **Triage.** The operator creates the `SubmissionReview` and fills its
-   `status.triage`: similar posts from the search service, suggested kind
-   and categories, a draft public title and body with private details
-   stripped (via the AI gateway), and a fraud score from the fraud service.
-   Advisory only.
+   `status.triage`. First, a check inside the operator, with no outside
+   call, sets `likelySecurityIssue` for submissions that look like
+   vulnerability reports. A flagged submission goes no further: its text
+   and attachments are never sent to the AI gateway or any other outside
+   service, and staff move it to the security track. Otherwise triage adds
+   similar posts from the search service, suggested kind and categories, a
+   draft public title and body with private details stripped (via the AI
+   gateway), and a fraud score from the fraud service. Advisory only.
 4. **Review.** Staff work the queue in the staff portal and set
    `spec.decision` on the `SubmissionReview`, which only staff can write.
    Patch, the operator and users can't approve.
@@ -816,8 +820,32 @@ staff set the decision `MoveToSecurity` on its `SubmissionReview`. The
 operator creates a `SecurityReport` owned by the submitter, named after
 the submission so a retry finds it, copies the attachments to the security
 prefix, then deletes the submission and its review, so it leaves the
-feedback queue. The submission triage prompt flags likely security issues
-for this.
+feedback queue. Triage's check inside the operator flags likely security
+issues for this (see [Submissions and Staff Review](#submissions-and-staff-review)).
+
+**What a moved report was already exposed to.** Moving a submission deletes
+it, its review and its copies of the attachments, but it can't recall
+anything that happened before. A vulnerability filed through the general
+form may already have reached:
+
+- **Similar-posts search.** While the user typed, the client sent the draft
+  title and body to Milo's search service as search queries, and triage
+  searched with them again. Milo audits search queries at metadata only,
+  the search engine doesn't keep queries, and the search service logs query
+  text only at debug verbosity, which isn't enabled. So the text was sent,
+  but not stored.
+- **Staff reviewers.** The submission and its attachments were readable by
+  the submitter and by every staff reviewer, a wider group than the
+  Security Team, until the move.
+- **The AI gateway.** Only if triage's check didn't flag it: the title and
+  body were sent to the internal AI gateway for a draft, and from there to
+  the model behind it. A flagged submission never is.
+- **The audit log and activity.** Submissions are audited at metadata only,
+  so the log and activity timelines show that a submission was created and
+  moved, by whom, but none of its text.
+
+It never reached GitHub, the search index, digests or email: those only
+happen after a staff decision other than `MoveToSecurity`.
 
 **Rewards.** The Security Team records the reward on `status.reward`.
 Credits are a billing `CreditGrant` (reason `Goodwill`) on the billing
@@ -1024,7 +1052,7 @@ The staff portal reads `Vote`, `Submission`, `SubmissionReview` and
 | Approval bypass | `SubmissionReview` is writable only by staff in the Platform context. |
 | Staff-only detail reaching submitters or reporters | Triage, reviewer and internal notes live on `SubmissionReview` and `SecurityReportTriage`, which submitters and reporters can't read at all. |
 | Vulnerability details leaking before a fix | Separate `SecurityReport` resource and role. Never synced, sent to the AI gateway or indexed; audited at metadata only; notification emails carry links, not contents; attachments readable only by the reporter and the Security Team. |
-| Security issue filed as public feedback | Every client offers the security track; triage flags likely security submissions; staff move them with the `MoveToSecurity` decision before any review. |
+| Security issue filed as public feedback | Every client offers the security track. Triage's check inside the operator flags likely security submissions before anything leaves the operator, and flagged ones are never sent to the AI gateway. Draft text and similar-posts queries are audited at metadata only. Staff move them with the `MoveToSecurity` decision before any review. [What a moved report was already exposed to](#security-reports) is stated, since a move can't undo it. |
 | Synced content changed outside GitHub | Create, update and delete on `Post`, `Release` and `ChangelogEntry` granted only to the `feedback-sync` service account. Staff can only patch `spec.hidden`. Every write is audited. |
 | GitHub rate limits | Installation tokens per org, GraphQL batching, incremental reconcile, 👍 sweep limited to open tracked posts. |
 
@@ -1165,7 +1193,9 @@ can't tie demand to Datum users or organizations.
 - Feedback digest `EmailTemplate`.
 - `ResourceIndexPolicy` for `Post`, `Release` and `ChangelogEntry`.
 - A Milo audit policy rule logging `Submission`, `SubmissionReview`,
-  `SecurityReport` and `SecurityReportTriage` at `Metadata`.
+  `SecurityReport` and `SecurityReportTriage` at `Metadata`, and one
+  logging search's `ResourceSearchQuery` at `Metadata`, since similar-posts
+  queries carry draft text.
 - Service accounts for `feedback-sync`, `feedback-operator` and
   `feedback-uploads`, with roles scoped to the writes above.
 - A Security Team group and role for `SecurityReport` triage.
