@@ -205,7 +205,8 @@ own:
 - facility;
 - quantity, discount, billing timing and number of periods, as today;
 - amount, when the customer's price differs from the list price, as today;
-- **note** for the invoice line, such as the rack type or server type.
+- **note** for the invoice line, such as the rack type or server type. It's
+  free text, written by staff, and is not a fixed list per product.
 
 A price sold only at certain facilities can only be added at those. A price
 that's priced on the order form needs an amount at each facility it's added
@@ -340,8 +341,6 @@ facility.
   Stripe confirms each can take a performance location.
 - **Bare metal.** Is BM-B300 taxed at the customer's location even though the
   order names a facility, as the catalog says?
-- **Notes on lines.** Free text, or a short list per product, such as GPU,
-  CPU and Network for rack setup?
 - **Power overage metering.** Peak kW or kWh (the catalog says "Confirm
   unit"), and how the meter will report its facility.
 
