@@ -256,17 +256,16 @@ colocation, power, cross connects and setup work have to be ones that do. The
 facility's address must also be in a country where Stripe Tax covers all
 sales.
 
-This changes what [stripe-provider's invoicing design][stripe-provider-invoicing]
-says. That design says
-performance locations are for event tickets only, and leans towards an
-invoice per facility for lines taxed where their facility is. Stripe's guide
-says event tickets *require* a performance location, and that any line whose
-tax code lists it as optional can carry one, on invoices too, with lines in
-one order taxed at different locations ([Stripe: Tax in-person sales at a
-specific location][stripe-performance-location]). The design's planned `tax.location`
-(`Customer` or `Facility`) on `ServicePricing` is the same setting this
-proposal uses. Once this is accepted, stripe-provider's design is updated to
-match: performance locations per facility, and no invoice per facility.
+This differs from [stripe-provider's invoicing design][stripe-provider-invoicing],
+which says Stripe's performance locations can't be used for this and leans
+towards an invoice per facility instead. Stripe's guide says any line whose
+tax code allows a performance location can carry one, on invoices too, and
+lines on one invoice can be taxed at different locations ([Stripe: Tax
+in-person sales at a specific location][stripe-performance-location]). The
+`tax.location` (`Customer` or `Facility`) that design plans on
+`ServicePricing` is the same setting this proposal uses. Once this is
+accepted, stripe-provider's design is updated to match: a performance
+location per facility, and no invoice per facility.
 
 ### Usage at a Facility
 
@@ -412,8 +411,7 @@ facility.
   catalog can't hold a facility's price.
 - **An invoice per facility.** Would tax each at its facility through the
   invoice's address, without performance locations. stripe-provider's
-  invoicing design leaned this way while it took performance locations to be
-  for event tickets only. Customers would get several invoices a month, and
+  invoicing design leans this way today. Customers would get several invoices a month, and
   OpenMeter bills one per account.
 
 ## References
