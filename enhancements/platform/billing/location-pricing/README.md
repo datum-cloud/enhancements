@@ -22,6 +22,7 @@ latest-milestone: "v0.x"
   - [Tax by Facility](#tax-by-facility)
   - [Usage at a Facility](#usage-at-a-facility)
   - [What Customers See](#what-customers-see)
+  - [Existing Prices and Contracts](#existing-prices-and-contracts)
   - [Notes and Constraints](#notes-and-constraints)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Overview](#design-overview)
@@ -251,7 +252,21 @@ each line's tax at its facility before a contract is saved.
 
 The tax code must allow it. Stripe rejects a performance location on a tax
 code that doesn't take one, such as digital services. Finance's tax codes for
-colocation, power, cross connects and setup work have to be ones that do.
+colocation, power, cross connects and setup work have to be ones that do. The
+facility's address must also be in a country where Stripe Tax covers all
+sales.
+
+This changes what [stripe-provider's invoicing design][stripe-provider-invoicing]
+says. That design says
+performance locations are for event tickets only, and leans towards an
+invoice per facility for lines taxed where their facility is. Stripe's guide
+says event tickets *require* a performance location, and that any line whose
+tax code lists it as optional can carry one, on invoices too, with lines in
+one order taxed at different locations ([Stripe: Tax in-person sales at a
+specific location][stripe-performance-location]). The design's planned `tax.location`
+(`Customer` or `Facility`) on `ServicePricing` is the same setting this
+proposal uses. Once this is accepted, stripe-provider's design is updated to
+match: performance locations per facility, and no invoice per facility.
 
 ### Usage at a Facility
 
@@ -271,10 +286,32 @@ showing its facility on the line would match the order form.
   note, and its tax at that facility.
 - **Usage.** Usage by facility follows once a meter carries it.
 
+### Existing Prices and Contracts
+
+Nothing existing changes on its own. A price without facilities is sold
+everywhere at its one amount, and a contract fee without a facility is billed
+as today, taxed at the customer's address.
+
+**Prices.** Prices can't change once published, so giving a price facility
+amounts, limiting it to some facilities or taxing it by facility means
+publishing a new version with the same SKU, as any price change does today.
+The old version stays for the contracts that use it. The Q4 facility products
+get new versions anyway when finance sets their amounts and tax codes, so
+facilities can go into those versions, with no extra version for them.
+
+**Contracts.** A contract moves to lines by facility through an amendment,
+like any other change to it. Staff end the fee without a facility and add the
+same product at its facility, or at each facility, from the same date. Picking
+the next billing date keeps the customer's invoice the same apart from the
+facility on each line and, for a product taxed by facility, its tax. A
+contract on an old price version keeps it until it's amended onto the new
+one, as today.
+
+Staff don't have to move a contract. Its fees keep billing on their old
+price versions, taxed at the customer's address, until it's amended.
+
 ### Notes and Constraints
 
-- **Existing prices and contracts don't change.** A fee without a facility is
-  billed as today.
 - **OpenMeter.** A contract's fees become OpenMeter rate card items. Each line
   at a facility needs its own item, keyed by price and facility, so OpenMeter
   rates them separately and stripe-provider can tell them apart when it
@@ -310,6 +347,10 @@ docs once this is agreed.
 
 ## Rollout
 
+Before step 1, finance settles whether prices differ by facility. If they
+don't, step 1 only lets a price list the facilities it's sold at, and amounts
+by facility are left out until a price needs one.
+
 1. **Facilities and catalog prices by facility.** Add the facility list, and
    let fees name facilities and amounts. Put the Q4 facility products on
    staging at the facilities we sell from.
@@ -333,9 +374,9 @@ facility.
   address? See [Facilities](#facilities).
 - **Which facilities, and their addresses.** The list we sell from today, and
   which are separate tax jurisdictions.
-- **Do prices actually differ by facility?** The catalog doesn't say. If they
-  never do, facilities could be a contract line setting only, with the catalog
-  saying where a product is sold.
+- **Do prices actually differ by facility?** The catalog doesn't say. This
+  is settled before [step 1](#rollout). If they never do, the catalog only
+  says where a product is sold, and amounts stay on the contract line.
 - **Stripe tax codes and performance locations.** Which tax codes finance
   picks for rack space, power, cross connects and setup work, and whether
   Stripe confirms each can take a performance location.
@@ -347,6 +388,8 @@ facility.
 ## Implementation History
 
 - 2026-11-21: Proposed, from the Q4 2026 service catalog.
+- 2026-11-22: Line notes made free text. Reconciled with stripe-provider's
+  invoicing design, and added how existing prices and contracts move.
 
 ## Drawbacks
 
@@ -368,12 +411,15 @@ facility.
   Questions](#open-questions)). It can't say where a product is sold, and the
   catalog can't hold a facility's price.
 - **An invoice per facility.** Would tax each at its facility through the
-  invoice's address, without performance locations. Customers would get
-  several invoices a month, and OpenMeter bills one per account.
+  invoice's address, without performance locations. stripe-provider's
+  invoicing design leaned this way while it took performance locations to be
+  for event tickets only. Customers would get several invoices a month, and
+  OpenMeter bills one per account.
 
 ## References
 
 - [Writing Our Own Stripe Invoices][stripe-invoicing]
+- [stripe-provider: Invoicing][stripe-provider-invoicing]
 - [Service Pricing, Offers, and Billing Entitlements](../pricing-and-offers/)
 - [Stripe: Tax in-person sales at a specific location][stripe-performance-location]
 - [Stripe: Tax location-based sales][stripe-location-sales]
@@ -381,3 +427,4 @@ facility.
 [stripe-invoicing]: ../stripe-invoicing/
 [stripe-performance-location]: https://docs.stripe.com/tax/optional-tax-location/integration-guide
 [stripe-location-sales]: https://docs.stripe.com/tax/location-sales
+[stripe-provider-invoicing]: https://github.com/milo-os/stripe-provider/blob/main/docs/architecture/invoicing.md
