@@ -227,7 +227,7 @@ spec:
     "Backlog": backlog
     "Planning": planning
     "On Deck": on-deck
-    "In Progress": in-progress
+    "In progress": in-progress
     "Done": shipped
   categoryMapping:
     "Build": build
@@ -685,7 +685,7 @@ as a fallback when an issue isn't on the project:
 | Backlog | open | `backlog` |
 | Planning | open | `planning` |
 | On Deck | open | `on-deck` |
-| In Progress | open | `in-progress` |
+| In progress | open | `in-progress` |
 | Done | any | `shipped` |
 | any | closed as completed | `shipped` |
 | any | closed as not planned | `closed` |
@@ -884,7 +884,7 @@ holds:
 | --- | --- |
 | `requested` | The post exists (Status not set, or Backlog). |
 | `planned` | Status is Planning or On Deck. |
-| `picked-up` | Status is In Progress, **or** any work item is in progress: a sub-issue is In Progress on the Enhancements project, has an open pull request that closes it, or is already closed as completed. |
+| `picked-up` | Status is In progress, **or** any work item is in progress: a sub-issue is In progress on the Enhancements project, has an open pull request that closes it, or is already closed as completed. |
 | `released` | Status is Done or the issue is closed as completed, **or** the post's release milestone is closed, **or** a `ChangelogEntry` links the post. |
 | `closed` | The issue is closed as not planned. |
 
