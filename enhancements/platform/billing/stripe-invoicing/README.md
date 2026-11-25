@@ -71,9 +71,9 @@ how OpenMeter bills.
 - **Quantities exist only as text.** A line for four cross-connects is one
   amount, with "4 × $300.00" in its name. Stripe can't total units, and
   reports can't group by product.
-- **SKUs exist only in the line's name.** We put "[SKU] name" on lines as a
-  stopgap. Stripe has no product to report on, and Revenue Recognition can't
-  split revenue by product.
+- **SKUs can't reach Stripe.** OpenMeter's Stripe app writes only a line's
+  name and amount. Stripe has no product to report on, and Revenue
+  Recognition can't split revenue by product.
 - **Tax codes are one per invoice.** Stripe Tax treats every line the same
   way. Colocation space, power, setup work and cloud usage can be taxed
   differently, and the product catalog already gives each SKU its own tax
@@ -133,7 +133,7 @@ enhancement. This work keeps them and builds on them.
 | Change | Status | What it becomes here |
 |---|---|---|
 | A SKU on `ServicePricing` and on a contract's fees ([milo-os/billing#256](https://github.com/milo-os/billing/pull/256)) | Released in billing v0.10.0 | The SKU of each Stripe Product. A customer's price has its list price's SKU, so it shares the list price's Product. |
-| "[SKU] name" on invoice lines ([milo-os/openmeter-provider#118](https://github.com/milo-os/openmeter-provider/pull/118)) | Merged, not released | The stopgap until the writer. Retired in the last [Rollout](#rollout) step. |
+| "[SKU] name" on invoice lines ([milo-os/openmeter-provider#118](https://github.com/milo-os/openmeter-provider/pull/118)) | Merged, then withdrawn before release | Withdrawn: SKUs are internal, so they never go in a line's name. |
 | SKUs on contract fees in the staff portal ([datum-cloud/staff-portal#853](https://github.com/datum-cloud/staff-portal/pull/853)) | Draft | The catalog picker for [charges staff add](#charges-staff-add) reuses it. |
 | Contracts that bill on the account's invoice day, with a prorated first period ([milo-os/billing#257](https://github.com/milo-os/billing/pull/257), [milo-os/openmeter-provider#119](https://github.com/milo-os/openmeter-provider/pull/119), [datum-cloud/staff-portal#854](https://github.com/datum-cloud/staff-portal/pull/854)) | Billing merged, not released; provider and portal drafts | The prorated first period is a line with its own part-period [service period](#service-periods). The contract summary's first-invoice estimate is replaced by [Stripe's preview](#previewing-a-contracts-invoices). |
 | Colocation and bare metal fees on staging's price list ([datum-cloud/infra#9445](https://github.com/datum-cloud/infra/pull/9445), [datum-cloud/fleet#73](https://github.com/datum-cloud/fleet/pull/73)) | Open | The first catalog items to get Stripe Products and tax codes. |
@@ -192,7 +192,7 @@ finalized.
 
 | Field | Where it comes from | Why |
 |---|---|---|
-| Product and SKU | The `ServicePricing`'s SKU, or the catalog item staff picked | Reports, revenue by product, matching to the catalog |
+| Product and SKU | The `ServicePricing`'s SKU, or the catalog item staff picked | Reports, revenue by product, matching to the catalog. The SKU is internal: it's in the line's and Product's metadata, never printed on the invoice. |
 | Description | The price's display name, as on invoices today | What the customer reads |
 | Quantity | The contract's quantity for a fee, the rated quantity for usage, or what staff entered | Units the customer can check |
 | Unit price | The price, after any customer pricing | Price the customer can check |
@@ -478,8 +478,6 @@ as a staff-created invoice.
 5. **Production, account by account.** Internal accounts first, then contract
    customers, then everyone else. Each account moves at its own billing
    boundary.
-6. **Retire the stopgap.** Once every account is on the writer, stop putting
-   the SKU in line names.
 
 Rolling back an account is the same switch the other way, at its next
 billing boundary.
@@ -518,6 +516,8 @@ contract previews.
   invoices from Stripe, with safeguards for preview drafts.
 - 2026-11-18: Added the work this builds on, and tax settings on every line.
 - 2026-11-18: Added price overrides, and the rules for Stripe Products.
+- 2026-11-19: SKUs are internal, for tracking and reporting, and never
+  printed on an invoice. The "[SKU] name" stopgap is withdrawn.
 
 ## Drawbacks
 
