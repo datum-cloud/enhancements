@@ -211,6 +211,9 @@ The billing platform aims to support the following scenarios:
 
 ### Planned
 
+- **[Pricing by Location](./location-pricing/)**: facilities in the catalog,
+  contract lines at a facility, and tax at the facility's address, for
+  colocation, power, cross connects and bare metal
 - **Budget Management & Alerts**
 - **Hierarchical Billing**: sub-accounts for resellers and channel partners
 - **Multi-Currency**
